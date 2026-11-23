@@ -35,7 +35,7 @@
   <Target Name="BuildAudioLib" BeforeTargets="BeforeBuild" Condition="!Exists('$(AudioLibPath)') And !$([MSBuild]::IsOSPlatform('Windows'))">
     <Exec Command="sh &quot;$(MSBuildThisFileDirectory)../../native/audio/build.sh&quot;" />
   </Target>
-  <!-- The digital voice library (P25 Phase 1 and DMR from RadioFoundry, native/digital), the same way. -->
+  <!-- The digital voice library (P25 Phase 1, DMR and NXDN from RadioFoundry, native/digital), the same way. -->
   <PropertyGroup>
     <DigitalLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libss_digital.dylib</DigitalLibName>
     <DigitalLibName Condition="$([MSBuild]::IsOSPlatform('Linux'))">libss_digital.so</DigitalLibName>
@@ -48,8 +48,8 @@
   <ItemGroup>
     <None Include="$(DigitalLibPath)" Link="$(DigitalLibName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(DigitalLibPath)') Or !$([MSBuild]::IsOSPlatform('Windows'))" />
   </ItemGroup>
-  <!-- The AMBE+2 speech decoder for DMR (mbelib, native/ambe). Optional: the codec is patented until
-       2028, so a build can leave it out with -p:IncludeAmbe=false; DMR calls are then shown, not heard. -->
+  <!-- The AMBE+2 speech decoder for DMR and NXDN (mbelib, native/ambe). Optional: the codec is patented until
+       2028, so a build can leave it out with -p:IncludeAmbe=false; DMR and NXDN calls are then shown, not heard. -->
   <PropertyGroup>
     <IncludeAmbe Condition="'$(IncludeAmbe)' == ''">true</IncludeAmbe>
     <AmbeLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libss_ambe.dylib</AmbeLibName>

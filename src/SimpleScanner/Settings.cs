@@ -25,6 +25,8 @@ public sealed class Settings
     public double LevelOffsetDb { get; set; }
     /// <summary>The memory group shown, which is also the one scanned.</summary>
     public string? Group { get; set; }
+    /// <summary>The memory groups shown and scanned; empty or null is all of them. Replaces <see cref="Group"/>.</summary>
+    public List<string>? Groups { get; set; }
     /// <summary>Sound output device by name; null is the system's default.</summary>
     public string? AudioDevice { get; set; }
     public double SearchFromMHz { get; set; } = 144;

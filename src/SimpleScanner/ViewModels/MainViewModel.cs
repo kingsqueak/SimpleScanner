@@ -32,6 +32,24 @@ public sealed partial class MemoryRow(MemoryChannel channel, Action changed) : O
     }
 }
 
+/// <summary>A memory group as a tick box in the group selector.</summary>
+public sealed partial class GroupRow(string name, bool selected, Action changed) : ObservableObject
+{
+    public string Name { get; } = name;
+
+    public bool Selected
+    {
+        get => selected;
+        set
+        {
+            if (selected == value) return;
+            selected = value;
+            OnPropertyChanged();
+            changed();
+        }
+    }
+}
+
 /// <summary>The scanner's front panel: what the display shows and what the controls do.</summary>
 public sealed partial class MainViewModel : ObservableObject
 {
@@ -90,8 +108,8 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private IReadOnlyList<string> _antennas;
     [ObservableProperty] private string _selectedAntenna;
     [ObservableProperty] private bool _isScanning;
-    [ObservableProperty] private IReadOnlyList<string> _groups = [AllGroups];
-    [ObservableProperty] private string _selectedGroup = AllGroups;
+    /// <summary>What the group selector's button says: the groups ticked, or that all are shown.</summary>
+    [ObservableProperty] private string _groupsText = AllGroups;
     [ObservableProperty] private MemoryRow? _selectedMemory;
     [ObservableProperty] private string _newName = "";
     [ObservableProperty] private IReadOnlyList<string> _audioDevices = [DefaultDevice];
@@ -102,6 +120,8 @@ public sealed partial class MainViewModel : ObservableObject
     public string SearchText => IsSearching ? "Stop search" : "Search";
 
     public System.Collections.ObjectModel.ObservableCollection<MemoryRow> Memories { get; } = [];
+    /// <summary>Every memory group with its tick. None ticked means all groups are shown and scanned.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<GroupRow> GroupRows { get; } = [];
     public string ScanText => IsScanning ? "Stop scan" : "Scan";
 
     public bool IsAm => !AutoMode && Mode == Mode.Am;
@@ -137,7 +157,7 @@ public sealed partial class MainViewModel : ObservableObject
         _rx.SquelchEnabled = SquelchOn;
         _rx.LevelOffsetDb = settings.LevelOffsetDb;
         ApplyFrequency(settings.BandwidthHz);
-        RefreshMemories(settings.Group);
+        RefreshMemories(settings.Groups ?? (settings.Group is { } g && g != AllGroups ? [g] : []));
         _loading = true;
         SearchFrom = settings.SearchFromMHz.ToString("0.####", CultureInfo.InvariantCulture);
         SearchTo = settings.SearchToMHz.ToString("0.####", CultureInfo.InvariantCulture);
@@ -243,23 +263,45 @@ public sealed partial class MainViewModel : ObservableObject
 
     // ---- memories and scanning --------------------------------------------------------------
 
-    private void RefreshMemories(string? group = null)
+    /// <summary>The groups ticked in the selector; empty means all.</summary>
+    private List<string> SelectedGroups => GroupRows.Where(g => g.Selected).Select(g => g.Name).ToList();
+
+    private void RefreshMemories(IReadOnlyCollection<string>? select = null)
     {
         _loading = true;
-        Groups = [AllGroups, .. _memories.Channels.Select(c => c.Group).Distinct().Order()];
-        SelectedGroup = Groups.Contains(group ?? SelectedGroup) ? group ?? SelectedGroup : AllGroups;
+        // The group rows are rebuilt only when the set of groups has changed, so an open selector keeps its rows.
+        var wanted = select ?? SelectedGroups;
+        string[] names = [.. _memories.Channels.Select(c => c.Group).Distinct().Order()];
+        if (select is not null || !names.SequenceEqual(GroupRows.Select(g => g.Name)))
+        {
+            GroupRows.Clear();
+            foreach (string n in names) GroupRows.Add(new GroupRow(n, wanted.Contains(n), OnGroupsChanged));
+        }
+        var shown = SelectedGroups;
+        GroupsText = shown.Count == 0 ? AllGroups : shown.Count == 1 ? shown[0] : $"{shown.Count} groups";
         Memories.Clear();
-        foreach (var c in _memories.Channels.Where(c => SelectedGroup == AllGroups || c.Group == SelectedGroup)
+        foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || shown.Contains(c.Group))
                      .OrderBy(c => c.Group).ThenBy(c => c.FrequencyHz))
             Memories.Add(new MemoryRow(c, _memories.Save));
         _loading = false;
     }
 
-    partial void OnSelectedGroupChanged(string value)
+    // A group was ticked or unticked in the selector.
+    private void OnGroupsChanged()
     {
-        if (_loading || value is null) return;
+        if (_loading) return;
         if (IsScanning) StopScan();
         RefreshMemories();
+        _dirty = true;
+    }
+
+    /// <summary>Untick every group: all of them are shown and scanned.</summary>
+    [RelayCommand]
+    private void ShowAllGroups()
+    {
+        if (SelectedGroups.Count == 0) return;
+        if (IsScanning) StopScan();
+        RefreshMemories([]);
         _dirty = true;
     }
 
@@ -370,7 +412,7 @@ public sealed partial class MainViewModel : ObservableObject
         return ok && hz is >= MinHz and <= MaxHz;
     }
 
-    /// <summary>Scan the ticked channels of the group shown, or stop scanning.</summary>
+    /// <summary>Scan the ticked channels of the groups shown, or stop scanning.</summary>
     [RelayCommand]
     private void ToggleScan()
     {
@@ -382,7 +424,7 @@ public sealed partial class MainViewModel : ObservableObject
         var list = Memories.Where(m => m.Scan).Select(m => ToScan(m.Channel)).OrderBy(c => c.FrequencyHz).ToList();
         if (list.Count == 0)
         {
-            Status = "No channels are ticked for scanning in this group";
+            Status = "No channels are ticked for scanning in the groups shown";
             return;
         }
         if (!IsOn)
@@ -441,7 +483,7 @@ public sealed partial class MainViewModel : ObservableObject
         {
             Name = name,
             FrequencyHz = FrequencyHz,
-            Group = SelectedGroup == AllGroups ? existing?.Group ?? "My channels" : SelectedGroup,
+            Group = SelectedGroups is [var only] ? only : existing?.Group ?? "My channels",       // one group shown: it goes there
             Mode = AutoMode ? null : Mode,
             BandwidthHz = AutoMode ? null : SelectedWidth?.Value,
         });
@@ -661,7 +703,8 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.AutoGain = AutoGain;
         _settings.GainStep = (int)Math.Round(GainStep);
         _settings.Antenna = SelectedAntenna;
-        _settings.Group = SelectedGroup;
+        _settings.Groups = SelectedGroups;
+        _settings.Group = null;
         _settings.AudioDevice = SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice;
         _settings.Save();
     }

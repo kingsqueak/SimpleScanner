@@ -24,8 +24,8 @@ public sealed record ScanChannel(string Name, double FrequencyHz, Mode Mode, dou
 /// squelch opens, the scan stays until the signal has been gone for the hang time. Then the
 /// next window.
 ///
-/// Digital voice: in narrow FM the discriminator output also goes to a P25 decoder and a DMR
-/// decoder. When one finds its kind of signal on the channel, the analogue audio (which would be a rasp) gives way to
+/// Digital voice: in narrow FM the discriminator output also goes to P25, DMR and NXDN
+/// decoders. When one finds its kind of signal on the channel, the analogue audio (which would be a rasp) gives way to
 /// the decoded speech, and <see cref="Digital"/> says what the signal is. Encrypted calls are
 /// reported and stay silent.
 /// </summary>
@@ -63,6 +63,7 @@ public sealed class Receiver : IDisposable
     private const int VoicePrime = ChannelReceiver.AudioRate * 220 / 1000;      // one voice superframe and a little
     private readonly P25Decoder? _p25 = P25Decoder.TryCreate();
     private readonly DmrDecoder? _dmr = DmrDecoder.TryCreate();
+    private readonly NxdnDecoder? _nxdn = NxdnDecoder.TryCreate();
     private readonly Upsampler _voiceUp = new(8000, 6);
     private readonly FloatFifo _voice = new(ChannelReceiver.AudioRate * 3);
     private readonly float[] _voice8k = new float[2048], _voice48k = new float[2048 * 6];
@@ -101,6 +102,7 @@ public sealed class Receiver : IDisposable
         {
             _p25?.Feed(d, _channel.DiscriminatorHzPerUnit);
             _dmr?.Feed(d, _channel.DiscriminatorHzPerUnit);
+            _nxdn?.Feed(d, _channel.DiscriminatorHzPerUnit);
         };
 
         // FFT bins about 2 kHz wide: a few to each narrow channel.
@@ -187,10 +189,10 @@ public sealed class Receiver : IDisposable
     public Mode Mode => _channel.Mode;
     public double BandwidthHz => _channel.BandwidthHz;
 
-    /// <summary>The digital signal on the channel now (P25 or DMR), or null for none.</summary>
+    /// <summary>The digital signal on the channel now (P25, DMR or NXDN), or null for none.</summary>
     public IDigitalStatus? Digital => _digital;
     /// <summary>False when the digital voice library could not be loaded.</summary>
-    public bool DigitalAvailable => _p25 is not null && _dmr is not null;
+    public bool DigitalAvailable => _p25 is not null && _dmr is not null && _nxdn is not null;
     /// <summary>False when the AMBE+2 speech decoder is not installed: DMR calls are shown, not heard.</summary>
     public bool DmrVoiceAvailable => _dmr is { VoiceAvailable: true };
 
@@ -199,6 +201,7 @@ public sealed class Receiver : IDisposable
     {
         _p25?.SignalLost();
         _dmr?.SignalLost();
+        _nxdn?.SignalLost();
         _voiceUp.Reset();
         _voice.Clear();
         _voicePlaying = false;
@@ -558,7 +561,7 @@ public sealed class Receiver : IDisposable
         }
     }
 
-    // After the channel has been demodulated: is there P25 or DMR on it, and if so put its decoded
+    // After the channel has been demodulated: is there P25, DMR or NXDN on it, and if so put its decoded
     // speech in place of the analogue audio.
     private void DigitalLocked(bool open, int count)
     {
@@ -571,7 +574,9 @@ public sealed class Receiver : IDisposable
             _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
         while (_dmr is not null && (n = _dmr.ReadVoice(_voice8k)) > 0)
             _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
-        _digital = _p25 is { Active: true } ? _p25.Status : _dmr is { Active: true } ? _dmr.Status : null;
+        while (_nxdn is not null && (n = _nxdn.ReadVoice(_voice8k)) > 0)
+            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
+        _digital = _p25 is { Active: true } ? _p25.Status : _dmr is { Active: true } ? _dmr.Status : _nxdn is { Active: true } ? _nxdn.Status : null;
         bool active = _digital is not null;
         if (!active && !_voicePlaying)
         {
@@ -625,7 +630,7 @@ public sealed class Receiver : IDisposable
             open = _squelch.Update(level, seconds) && !_blocked;
             if (_scan != ScanState.Off) open = ScanStepLocked(level, open, seconds);
             _squelchOpen = open;
-            if ((_p25 is not null || _dmr is not null) && count > 0) DigitalLocked(open, count);
+            if ((_p25 is not null || _dmr is not null || _nxdn is not null) && count > 0) DigitalLocked(open, count);
         }
         if (count == 0) return;
 

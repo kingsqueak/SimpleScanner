@@ -27,3 +27,15 @@ sample format as the P25 files.
 - `dmr_voice_reference_8k.raw`: RadioFoundry's reference decode of the same AMBE+2 frames
   (`test_transmission_decoded.wav` without its header), 8 kHz signed 16-bit. Our decoder is a
   different one (mbelib), so the tests compare loudness frame by frame, not samples.
+
+## NXDN
+
+Made with RadioFoundry's `tools/bench/nxdn/nxdntool` (MIT) from the same synthesized test
+speech (`test_transmission.ambe`: NXDN carries the same AMBE+2 frames as DMR, so
+`dmr_voice_reference_8k.raw` is the reference for these too). Same sample format.
+
+- `nxdn_4800_24k.raw`: 4800 bit/s (6.25 kHz channel). RAN 5, group 200, radio 1001.
+  (`nxdntool gen ... --ran 5 --group 200 --src 1001 --voice-frames 104 --voice-file ... --lead 200 --tail 200;
+  nxdntool mod ... --rate 24000 --full 5000`)
+- `nxdn_9600_24k.raw`: 9600 bit/s (12.5 kHz channel). RAN 12, a call to radio 77 from radio
+  4321, emergency. (the same with `--9600 --ran 12 --unit 77 --src 4321 --emergency`)

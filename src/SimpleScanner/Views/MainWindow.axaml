@@ -16,15 +16,37 @@
                   IsEnabled="{Binding IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
           <Button DockPanel.Dock="Right" Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
                   Command="{Binding ToggleScanCommand}" MinWidth="82" Margin="6,0,0,0"
-                  ToolTip.Tip="Scan the ticked channels of the group shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
-          <ComboBox ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}" HorizontalAlignment="Stretch"
-                    ToolTip.Tip="Which group of stored channels to show and scan" />
+                  ToolTip.Tip="Scan the ticked channels of the groups shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
+          <Button Classes="seg" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                  ToolTip.Tip="Which groups of stored channels to show and scan. Tick one or several; with none ticked, all are shown.">
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Right" Text="▾" Margin="6,0,0,0" />
+              <TextBlock Text="{Binding GroupsText}" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+            <Button.Flyout>
+              <Flyout Placement="BottomEdgeAlignedLeft">
+                <StackPanel Spacing="4" MinWidth="220">
+                  <Button Classes="seg" Content="All groups" Command="{Binding ShowAllGroupsCommand}" HorizontalAlignment="Stretch"
+                          ToolTip.Tip="Untick every group: all of them are shown and scanned" />
+                  <ScrollViewer MaxHeight="360">
+                    <ItemsControl ItemsSource="{Binding GroupRows}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:GroupRow">
+                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Name}" MinHeight="0" Padding="6,3" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </StackPanel>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
         </DockPanel>
         <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
           <Button DockPanel.Dock="Right" Classes="seg" Content="Delete" Command="{Binding DeleteChannelCommand}" Margin="6,0,0,0"
                   ToolTip.Tip="Remove the selected channel" />
           <Button DockPanel.Dock="Right" Classes="seg" Content="Store" Command="{Binding StoreChannelCommand}" Margin="6,0,0,0"
-                  ToolTip.Tip="Store the frequency on the display under this name, in the group shown" />
+                  ToolTip.Tip="Store the frequency on the display under this name. With one group shown it goes in that group; otherwise in &quot;My channels&quot;, or where it already was" />
           <TextBox Text="{Binding NewName}" PlaceholderText="Name for this frequency" />
         </DockPanel>
         <ListBox ItemsSource="{Binding Memories}" SelectedItem="{Binding SelectedMemory}" Background="Transparent">

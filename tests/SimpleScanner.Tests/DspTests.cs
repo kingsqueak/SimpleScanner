@@ -214,6 +214,25 @@ public class DspTests
     }
 
     [Fact]
+    public void FftPutsAToneInItsBinAndKeepsTheEnergy()
+    {
+        var fft = new Fft(1024);
+        var re = new float[1024];
+        var im = new float[1024];
+        for (int i = 0; i < 1024; i++)
+        {
+            re[i] = (float)(0.5 * Math.Cos(2 * Math.PI * -37 * i / 1024.0));
+            im[i] = (float)(0.5 * Math.Sin(2 * Math.PI * -37 * i / 1024.0));
+        }
+        fft.Transform(re, im);
+        double total = 0;
+        for (int k = 0; k < 1024; k++) total += re[k] * re[k] + im[k] * im[k];
+        double bin = re[1024 - 37] * re[1024 - 37] + im[1024 - 37] * im[1024 - 37];
+        Assert.Equal(1024.0 * 1024 * 0.25, bin, 0);                 // (N A)^2, all of it in bin -37
+        Assert.InRange(bin / total, 0.9999, 1.0001);
+    }
+
+    [Fact]
     public void SquelchOpensAndClosesWithoutChatter()
     {
         var sq = new Squelch { ThresholdDb = -90 };

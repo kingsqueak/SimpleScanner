@@ -39,6 +39,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
     public double SampleRate { get; private set; }
     public double CenterHz { get; private set; }
     public bool IsRunning => _running;
+    public double UsableBandwidthHz => BandwidthFor(SampleRate) * 1000.0 * 0.92;
     public event IqHandler? Samples;
     public event Action<string>? Failed;
 

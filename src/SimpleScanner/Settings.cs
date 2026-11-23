@@ -25,6 +25,10 @@ public sealed class Settings
     public double LevelOffsetDb { get; set; }
     /// <summary>The memory group shown, which is also the one scanned.</summary>
     public string? Group { get; set; }
+    /// <summary>Sound output device by name; null is the system's default.</summary>
+    public string? AudioDevice { get; set; }
+    public double SearchFromMHz { get; set; } = 144;
+    public double SearchToMHz { get; set; } = 148;
 
     private static string Folder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SimpleScanner");

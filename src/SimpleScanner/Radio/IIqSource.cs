@@ -16,6 +16,8 @@ public interface IIqSource : IDisposable
     string Description { get; }
     double SampleRate { get; }
     double CenterHz { get; }
+    /// <summary>The width round the centre over which the radio's response is flat, at the present sample rate.</summary>
+    double UsableBandwidthHz { get; }
     bool IsRunning { get; }
 
     /// <summary>Raised on the radio's own thread. Samples sent while a retune is in flight are dropped.</summary>

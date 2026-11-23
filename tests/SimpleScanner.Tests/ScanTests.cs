@@ -16,6 +16,7 @@ internal sealed class FakeSource : IIqSource
     public double SampleRate { get; private set; }
     public double CenterHz => Volatile.Read(ref _center);
     public bool IsRunning => _run;
+    public double UsableBandwidthHz => SampleRate * 0.8;
     public event IqHandler? Samples;
 #pragma warning disable CS0067
     public event Action<string>? Failed;
@@ -56,7 +57,7 @@ internal sealed class FakeSource : IIqSource
 
     private void Run()
     {
-        const int n = 2400;                  // a millisecond at 2.4 MS/s
+        int n = (int)(SampleRate / 1000);    // a millisecond
         var re = new float[n];
         var im = new float[n];
         var rng = new Random(3);
@@ -97,7 +98,7 @@ public class ScanTests
     public void TheScanStopsOnTheActiveChannelAndMovesOnWhenItGoesQuiet()
     {
         var source = new FakeSource();
-        using var rx = new Receiver(source, playAudio: false) { SquelchDb = -60, ScanHangSeconds = 0.2 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60, ScanHangSeconds = 0.2 };
         ScanChannel[] list =
         [
             new("one", 120.0e6, Mode.Am, BandPlan.AmAir), new("two", 120.1e6, Mode.Am, BandPlan.AmAir),
@@ -136,7 +137,7 @@ public class ScanTests
     public void ChannelsCloseTogetherShareOneTuningOfTheRadio()
     {
         var source = new FakeSource();
-        using var rx = new Receiver(source, playAudio: false) { SquelchDb = -60 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60 };
         rx.Start();
         rx.StartScan([
             new("a", 121.65e6, Mode.Am, BandPlan.AmAir), new("b", 121.75e6, Mode.Am, BandPlan.AmAir),
@@ -145,6 +146,56 @@ public class ScanTests
         Thread.Sleep(500);
         rx.Stop();
         Assert.True(source.Tunes <= 2, $"{source.Tunes} retunes for three channels 250 kHz apart");
+        Assert.True(rx.ScanPasses > 20, $"only {rx.ScanPasses} passes in half a second");
+    }
+
+    [Fact]
+    public void OfTwoActiveChannelsInAWindowSkipMovesToTheOther()
+    {
+        var source = new FakeSource { CarrierHz = 121.75e6 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60 };
+        rx.Start();
+        rx.StartScan([
+            new("a", 121.65e6, Mode.Am, BandPlan.AmAir), new("b", 121.75e6, Mode.Am, BandPlan.AmAir),
+            new("c", 121.9e6, Mode.Am, BandPlan.AmAir),
+        ]);
+        Assert.True(Wait(() => rx.ScanListening, 2));
+        Assert.Equal("b", rx.ScanChannel?.Name);
+        // Skipped, it is passed by although still active.
+        rx.SkipChannel();
+        Thread.Sleep(300);
+        Assert.False(rx.ScanListening);
+        Assert.True(rx.Scanning);
+        rx.Stop();
+    }
+
+    private static readonly double[] Airband =
+    [
+        118.25, 120.6, 121.3, 121.65, 121.75, 121.9, 124.725, 124.9, 127.2, 128.8, 132.225, 133.0, 134.75, 135.9,
+    ];
+
+    [Theory]
+    [InlineData(6.44e6, 3)]
+    [InlineData(1.41e6, 11)]
+    public void ThePlanCoversEveryChannelInFewWindows(double usableHz, int mostWindows)
+    {
+        var list = Airband.Select(f => new ScanChannel($"{f}", f * 1e6, Mode.Am, BandPlan.AmAir)).ToList();
+        var plan = ScanPlan.Build(list, usableHz);
+        Assert.True(plan.Count <= mostWindows, $"{plan.Count} windows");
+        Assert.Equal(Enumerable.Range(0, list.Count), plan.SelectMany(w => w.Channels));
+        foreach (var w in plan)
+            foreach (int c in w.Channels)
+                Assert.True(ScanPlan.Fits(list[c].FrequencyHz - w.CenterHz, list[c].BandwidthHz, usableHz),
+                    $"{list[c].Name} does not fit a window centred on {w.CenterHz / 1e6}");
+    }
+
+    [Fact]
+    public void AChannelInTheMiddleOfAGroupDoesNotLandOnTheCentreSpur()
+    {
+        ScanChannel[] list = [new("lo", 120.0e6, Mode.Am, 10000), new("mid", 121.0e6, Mode.Am, 10000), new("hi", 122.0e6, Mode.Am, 10000)];
+        var plan = ScanPlan.Build(list, 6.44e6);
+        Assert.Single(plan);
+        Assert.True(Math.Abs(plan[0].CenterHz - 121.0e6) >= 45000);
     }
 
     [Fact]

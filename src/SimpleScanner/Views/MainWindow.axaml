@@ -4,7 +4,7 @@
         xmlns:c="using:SimpleScanner.Controls"
         x:Class="SimpleScanner.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="SimpleScanner" Width="1130" Height="500" MinWidth="1060" MinHeight="470"
+        Title="SimpleScanner" Width="1130" Height="590" MinWidth="1060" MinHeight="560"
         WindowStartupLocation="CenterScreen">
   <DockPanel Margin="12">
 
@@ -97,7 +97,7 @@
     <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
                TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" />
 
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*" Margin="2,14,0,0" RowSpacing="12" ColumnSpacing="12">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*" Margin="2,14,0,0" RowSpacing="12" ColumnSpacing="12">
 
       <!-- Tuning -->
       <TextBlock Grid.Row="0" Grid.Column="0" Text="Tune" Classes="label" />
@@ -118,9 +118,24 @@
                   ToolTip.Tip="Tuning step for the arrow buttons. Auto uses the usual channel spacing of the band." />
       </StackPanel>
 
-      <!-- Mode -->
-      <TextBlock Grid.Row="1" Grid.Column="0" Text="Mode" Classes="label" />
+ 
+      <!-- Search a range -->
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Search" Classes="label" />
       <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+        <TextBox Text="{Binding SearchFrom}" Width="90" ToolTip.Tip="Lowest frequency to search, in MHz" />
+        <TextBlock Text="to" Classes="label" />
+        <TextBox Text="{Binding SearchTo}" Width="90" ToolTip.Tip="Highest frequency to search, in MHz" />
+        <TextBlock Text="MHz" Classes="label" />
+        <Button Classes="seg" Classes.lit="{Binding IsSearching}" Content="{Binding SearchText}" Command="{Binding ToggleSearchCommand}"
+                MinWidth="96" Margin="6,0,0,0"
+                ToolTip.Tip="Look through this range for anything above the squelch mark and stop on it. Uses the band's usual channel spacing unless a step is chosen. Skip leaves a frequency out for ten minutes; Store keeps it." />
+        <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
+                ToolTip.Tip="Leave the frequency the search has stopped on and carry on" />
+      </StackPanel>
+
+      <!-- Mode -->
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="Mode" Classes="label" />
+      <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="8">
         <Button Classes="seg" Classes.lit="{Binding AutoMode}" Content="Auto" Command="{Binding SetAutoModeCommand}"
                 ToolTip.Tip="Choose the mode and filter from the band: AM on airband, FM elsewhere" />
         <Button Classes="seg" Classes.lit="{Binding IsAm}" Content="AM" Command="{Binding SetModeCommand}" CommandParameter="AM" />
@@ -134,8 +149,8 @@
       </StackPanel>
 
       <!-- Audio -->
-      <TextBlock Grid.Row="2" Grid.Column="0" Text="Audio" Classes="label" />
-      <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+      <TextBlock Grid.Row="3" Grid.Column="0" Text="Audio" Classes="label" />
+      <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="8">
         <TextBlock Text="Volume" Classes="label" />
         <Slider Minimum="0" Maximum="100" Value="{Binding Volume}" Width="170" />
         <CheckBox Content="Squelch" IsChecked="{Binding SquelchOn}" FontSize="12" Margin="14,0,0,0"
@@ -147,8 +162,16 @@
       </StackPanel>
 
       <!-- Radio -->
-      <TextBlock Grid.Row="3" Grid.Column="0" Text="Radio" Classes="label" />
-      <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+      <TextBlock Grid.Row="4" Grid.Column="0" Text="Output" Classes="label" />
+      <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+        <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" Width="330"
+                  ToolTip.Tip="Which sound device the scanner's audio goes to. It can be changed while receiving." />
+        <Button Classes="seg" Content="Refresh" Command="{Binding RescanAudioDevicesCommand}"
+                ToolTip.Tip="Look again for sound devices, after plugging one in" />
+      </StackPanel>
+
+      <TextBlock Grid.Row="5" Grid.Column="0" Text="Radio" Classes="label" />
+      <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="8">
         <CheckBox Content="Auto gain" IsChecked="{Binding AutoGain}" FontSize="12"
                   ToolTip.Tip="Let the scanner step the radio's front-end attenuation: up on overload, back down when it clears" />
         <TextBlock Text="LNA step" Classes="label" Margin="6,0,0,0" />

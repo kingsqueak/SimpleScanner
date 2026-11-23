@@ -23,12 +23,50 @@ if (args.Length >= 2 && args[0] == "listen")
     if (capture is not null)
         rx.AudioOutput += a => capture.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(a));
     rx.Start();
+    Console.WriteLine($"sound devices: {string.Join(" | ", SimpleScanner.Audio.AudioOut.Devices())}");
     Console.WriteLine($"{rx.Source.Description}: {mhz} MHz, {band.Name}, {band.Mode} {band.BandwidthHz / 1000} kHz");
     for (int s = 0; s < seconds; s++)
     {
         Thread.Sleep(1000);
         var src = rx.Source;
         Console.WriteLine($"  level {rx.LevelDb,7:F1} dB  squelch {(rx.SquelchOpen ? "open  " : "closed")}  LNA {src.ActiveGainStep}/{src.MaxGainStep}  gain {src.GainDb:F1} dB  overload {src.Overloaded}  underruns {rx.AudioUnderruns}{(rx.Stereo ? "  STEREO" : "")}");
+    }
+    rx.Stop();
+    return;
+}
+
+if (args.Length >= 1 && args[0] == "scan")
+{
+    // rsp-bench scan [seconds] [squelch dB]: scan the ticked stored channels and report.
+    int seconds = args.Length > 1 ? int.Parse(args[1]) : 10;
+    using var rx = new Receiver(new SdrPlaySource(), playAudio: false);
+    rx.SquelchDb = args.Length > 2 ? double.Parse(args[2]) : -95;
+    var list = MemoryStore.Load().Channels.Where(c => c.Scan).Select(c =>
+    {
+        var band = BandPlan.Find(c.FrequencyHz);
+        return new ScanChannel(c.Name, c.FrequencyHz, c.Mode ?? band.Mode, c.BandwidthHz ?? band.BandwidthHz);
+    }).ToList();
+    rx.Start();
+    Thread.Sleep(1500);                      // let the gain settle
+    rx.StartScan(list);
+    Console.WriteLine($"{rx.Source.Description} at {rx.SampleRate / 1e6} MS/s: {list.Count} channels in {rx.ScanWindows} windows, squelch {rx.SquelchDb} dB");
+    var sw = Stopwatch.StartNew();
+    string last = "";
+    long lastPasses = 0;
+    double nextReport = 1;
+    while (sw.Elapsed.TotalSeconds < seconds)
+    {
+        Thread.Sleep(20);
+        string now = rx.ScanListening ? rx.ScanChannel?.Name ?? "" : "";
+        if (now != last && now.Length > 0) Console.WriteLine($"  {sw.Elapsed.TotalSeconds,5:F1} s  stopped on {now} ({rx.FrequencyHz / 1e6:F4} MHz) at {rx.LevelDb:F0} dB");
+        last = now;
+        if (sw.Elapsed.TotalSeconds >= nextReport)
+        {
+            long p = rx.ScanPasses;
+            Console.WriteLine($"  {sw.Elapsed.TotalSeconds,5:F1} s  {p - lastPasses} passes/s  LNA {rx.Source.ActiveGainStep}  gain {rx.Source.GainDb:F0} dB  retune {rx.Source.LastRetuneMs:F0} ms  best level {rx.LevelDb:F0} dB");
+            lastPasses = p;
+            nextReport += 1;
+        }
     }
     rx.Stop();
     return;
@@ -43,7 +81,7 @@ source.Samples += (i, q, retuned) =>
     if (retuned) Interlocked.Increment(ref retunes);
 };
 
-foreach (double rate in new[] { 2.4e6, 6.0e6, 9.6e6 })
+foreach (double rate in new[] { 2.4e6, 6.0e6, 7.68e6 })
 {
     Interlocked.Exchange(ref samples, 0);
     source.Start(rate, 155e6);
@@ -53,7 +91,7 @@ foreach (double rate in new[] { 2.4e6, 6.0e6, 9.6e6 })
     Thread.Sleep(3000);
     double got = (Interlocked.Read(ref samples) - before) / sw.Elapsed.TotalSeconds;
     Console.WriteLine($"{source.Description}: asked {rate / 1e6:F1} MS/s, received {got / 1e6:F3} MS/s");
-    if (rate != 9.6e6) source.Stop();
+    if (rate != 7.68e6) source.Stop();
 }
 
 // Retunes at the last rate. Each waits for the radio to confirm before the next.
@@ -76,9 +114,9 @@ void Series(string name, double a, double b, int count)
     Console.WriteLine($"{name,-34} median {times[count / 2],6:F1} ms  max {times[^1],6:F1} ms  {count / total,6:F1} hops/s");
 }
 
-foreach (double rate in new[] { 9.6e6, 2.4e6 })
+foreach (double rate in new[] { 7.68e6 })
 {
-    if (rate != 9.6e6)
+    if (rate != 7.68e6)
     {
         source.Stop();
         source.Start(rate, 155e6);
@@ -86,10 +124,8 @@ foreach (double rate in new[] { 9.6e6, 2.4e6 })
     }
     Console.WriteLine($"-- retune at {rate / 1e6:F1} MS/s");
     Series("155 <-> 156 MHz (same band)", 155e6, 156e6, 40);
-    Series("152 <-> 172 MHz (same band)", 152e6, 172e6, 40);
     Series("121 <-> 155 MHz (airband/VHF)", 121e6, 155e6, 40);
     Series("155 <-> 460 MHz (VHF/UHF)", 155e6, 460e6, 40);
     Series("460 <-> 855 MHz (UHF/800)", 460e6, 855e6, 40);
-    Series("46 <-> 855 MHz (low band/800)", 46e6, 855e6, 40);
 }
 source.Stop();

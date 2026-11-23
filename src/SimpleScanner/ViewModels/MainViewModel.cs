@@ -40,7 +40,10 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly Settings _settings;
     private readonly Receiver _rx;
     private readonly MemoryStore _memories;
-    private const string AllGroups = "All groups";
+    private const string AllGroups = "All groups", DefaultDevice = "System default";
+    private long _lastPasses;
+    private double _passRate;
+    private bool _searching;
     private readonly DispatcherTimer _timer;
     private bool _loading, _dirty;
     private int _ticks;
@@ -89,6 +92,12 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _selectedGroup = AllGroups;
     [ObservableProperty] private MemoryRow? _selectedMemory;
     [ObservableProperty] private string _newName = "";
+    [ObservableProperty] private IReadOnlyList<string> _audioDevices = [DefaultDevice];
+    [ObservableProperty] private string _selectedAudioDevice = DefaultDevice;
+    [ObservableProperty] private string _searchFrom = "144";
+    [ObservableProperty] private string _searchTo = "148";
+    [ObservableProperty] private bool _isSearching;
+    public string SearchText => IsSearching ? "Stop search" : "Search";
 
     public System.Collections.ObjectModel.ObservableCollection<MemoryRow> Memories { get; } = [];
     public string ScanText => IsScanning ? "Stop scan" : "Scan";
@@ -127,6 +136,12 @@ public sealed partial class MainViewModel : ObservableObject
         _rx.LevelOffsetDb = settings.LevelOffsetDb;
         ApplyFrequency(settings.BandwidthHz);
         RefreshMemories(settings.Group);
+        _loading = true;
+        SearchFrom = settings.SearchFromMHz.ToString("0.####", CultureInfo.InvariantCulture);
+        SearchTo = settings.SearchToMHz.ToString("0.####", CultureInfo.InvariantCulture);
+        RefreshAudioDevices(settings.AudioDevice);
+        _loading = false;
+        _rx.AudioDevice = SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice;
         _rx.Failed += why => Dispatcher.UIThread.Post(() =>
         {
             IsOn = false;
@@ -274,6 +289,80 @@ public sealed partial class MainViewModel : ObservableObject
         return new ScanChannel(c.Name, c.FrequencyHz, mode, width);
     }
 
+    /// <summary>The output devices present now, keeping the choice if it is still there.</summary>
+    private void RefreshAudioDevices(string? wanted)
+    {
+        var names = Audio.AudioOut.Devices();
+        AudioDevices = [DefaultDevice, .. names];
+        SelectedAudioDevice = wanted is not null && names.Contains(wanted) ? wanted : DefaultDevice;
+    }
+
+    partial void OnSelectedAudioDeviceChanged(string value)
+    {
+        if (_loading || value is null) return;
+        _rx.AudioDevice = value == DefaultDevice ? null : value;
+        _dirty = true;
+    }
+
+    /// <summary>Look again for output devices (one plugged in since the list was made).</summary>
+    [RelayCommand]
+    private void RescanAudioDevices()
+    {
+        _loading = true;
+        RefreshAudioDevices(SelectedAudioDevice);
+        _loading = false;
+    }
+
+    /// <summary>
+    /// Search a range of frequencies for anything active, on the band plan's channel raster (or
+    /// the step chosen), or stop searching. A frequency skipped is left out for ten minutes.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleSearch()
+    {
+        if (IsScanning)
+        {
+            StopScan();
+            return;
+        }
+        if (!TryMHz(SearchFrom, out double lo) || !TryMHz(SearchTo, out double hi) || hi <= lo)
+        {
+            Status = "Enter the search range in MHz, such as 144 to 148";
+            return;
+        }
+        if (!IsOn)
+        {
+            Status = "Start the radio first";
+            return;
+        }
+        var list = new List<ScanChannel>();
+        for (double f = lo; f <= hi + 1 && list.Count < 40000;)
+        {
+            var band = BandPlan.Find(f);
+            double step = SelectedStep.Value > 0 ? SelectedStep.Value : band.StepHz;
+            if (!band.Blocked) list.Add(new ScanChannel("", Math.Round(f / 10) * 10, band.Mode, band.BandwidthHz));
+            f += step;
+        }
+        if (list.Count == 0) return;
+        Status = "";
+        _settings.SearchFromMHz = lo / 1e6;
+        _settings.SearchToMHz = hi / 1e6;
+        _dirty = true;
+        SquelchOn = true;
+        _searching = true;
+        _rx.ScanSkipSeconds = 600;
+        _rx.StartScan(list);
+        IsScanning = _rx.Scanning;
+        IsSearching = IsScanning;
+    }
+
+    private static bool TryMHz(string text, out double hz)
+    {
+        bool ok = double.TryParse(text.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double v);
+        hz = v * 1e6;
+        return ok && hz is >= MinHz and <= MaxHz;
+    }
+
     /// <summary>Scan the ticked channels of the group shown, or stop scanning.</summary>
     [RelayCommand]
     private void ToggleScan()
@@ -296,6 +385,8 @@ public sealed partial class MainViewModel : ObservableObject
         }
         Status = "";
         SquelchOn = true;
+        _searching = false;
+        _rx.ScanSkipSeconds = 10;
         _rx.StartScan(list);
         IsScanning = _rx.Scanning;
     }
@@ -364,7 +455,13 @@ public sealed partial class MainViewModel : ObservableObject
         RefreshMemories();
     }
 
-    partial void OnIsScanningChanged(bool value) => OnPropertyChanged(nameof(ScanText));
+    partial void OnIsScanningChanged(bool value)
+    {
+        if (!value) IsSearching = false;
+        OnPropertyChanged(nameof(ScanText));
+    }
+
+    partial void OnIsSearchingChanged(bool value) => OnPropertyChanged(nameof(SearchText));
 
     private double StepHz => SelectedStep.Value > 0 ? SelectedStep.Value : BandPlan.Find(FrequencyHz).StepHz;
 
@@ -504,7 +601,21 @@ public sealed partial class MainViewModel : ObservableObject
             SquelchOpen = _rx.SquelchOpen;
             // The scan ends by itself when something else tunes the receiver.
             if (IsScanning && !_rx.Scanning) IsScanning = false;
-            if (IsScanning && (_rx.ScanListening || _ticks % 4 == 0) && _rx.FrequencyHz != FrequencyHz) ShowTuned();
+            if (IsScanning)
+            {
+                // Between channels there is nothing to show but that it is scanning, and how fast.
+                if (_ticks % 20 == 0)
+                {
+                    long passes = _rx.ScanPasses;
+                    _passRate = Math.Max(0, passes - _lastPasses);
+                    _lastPasses = passes;
+                }
+                if (_rx.ScanChannel is not null)
+                {
+                    if (_rx.FrequencyHz != FrequencyHz || BandName.StartsWith("Scanning") || BandName.StartsWith("Searching")) ShowTuned();
+                }
+                else BandName = $"{(_searching ? "Searching" : "Scanning")} · {_passRate:F0} passes/s";
+            }
             Overloaded = src.Overloaded;
             IsStereo = _rx.Stereo;
             MaxGainStep = src.MaxGainStep;
@@ -539,6 +650,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.GainStep = (int)Math.Round(GainStep);
         _settings.Antenna = SelectedAntenna;
         _settings.Group = SelectedGroup;
+        _settings.AudioDevice = SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice;
         _settings.Save();
     }
 

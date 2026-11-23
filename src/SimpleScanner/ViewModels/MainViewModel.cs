@@ -308,6 +308,10 @@ public sealed partial class MainViewModel : ObservableObject
         if (!IsScanning) ShowLabel();
     }
 
+    /// <summary>The channel editor has renamed a group: if it was ticked here, the new name is.</summary>
+    public void GroupRenamed(string old, string name) =>
+        RefreshMemories(SelectedGroups.Select(g => g == old ? name : g).Distinct().ToList());
+
     /// <summary>Tune to a stored channel (and end a scan), as picking it in the list does.</summary>
     public void Tune(MemoryChannel c)
     {

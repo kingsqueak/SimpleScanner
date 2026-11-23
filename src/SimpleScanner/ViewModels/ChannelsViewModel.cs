@@ -124,6 +124,14 @@ public sealed class GroupTick(string name, bool? member, Action<string, bool> se
     }
 }
 
+/// <summary>A column heading of the channel list: clicking it sorts by that column, and it shows which way.</summary>
+public sealed partial class ColumnHead(string key, string title) : ObservableObject
+{
+    public string Key { get; } = key;
+    public string Title { get; } = title;
+    [ObservableProperty] private string _text = title;
+}
+
 /// <summary>A file that has been read and waits for the user to name the group its channels go in.</summary>
 public sealed record PendingImport(string FileName, List<MemoryChannel> Channels)
 {
@@ -152,6 +160,17 @@ public sealed partial class ChannelsViewModel : ObservableObject
 
     /// <summary>The channels have been changed and saved: other windows should show them again.</summary>
     public event Action? Edited;
+    /// <summary>A group has a new name (old, new): a window that had it ticked should tick the new one.</summary>
+    public event Action<string, string>? GroupRenamed;
+
+    /// <summary>The list's column headings, in the order of the columns.</summary>
+    public IReadOnlyList<ColumnHead> Heads { get; } =
+    [
+        new("Scan", "Scan"), new("MHz", "MHz"), new("Name", "Name"), new("Agency", "Agency"), new("Description", "Description"),
+        new("Tag", "Tag"), new("Type", "Type"), new("Tone", "Tone / code"), new("Groups", "Groups"),
+    ];
+    private string _sortKey = "MHz";
+    private bool _sortDown;
 
     public ObservableCollection<ChannelRow> Rows { get; } = [];
     public ObservableCollection<GroupTick> GroupTicks { get; } = [];
@@ -169,11 +188,15 @@ public sealed partial class ChannelsViewModel : ObservableObject
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private PendingImport? _pending;
     [ObservableProperty] private string _importGroup = "";
+    /// <summary>A real group is chosen in the filter, so it can be renamed or deleted.</summary>
+    [ObservableProperty] private bool _isGroupChosen;
+    [ObservableProperty] private string _groupNewName = "";
 
     public ChannelsViewModel(MemoryStore store)
     {
         _store = store;
         _seen = store.Version;
+        ShowSort();
         Reload();
     }
 
@@ -210,7 +233,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
 
         string[] words = Filter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         Rows.Clear();
-        foreach (var c in _store.Channels.OrderBy(c => c.FrequencyHz).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase))
+        foreach (var c in Sorted())
         {
             if (GroupFilter == NoGroup ? c.Groups.Count > 0 : GroupFilter != AllGroups && !c.Groups.Contains(GroupFilter)) continue;
             var row = new ChannelRow(c, Touch);
@@ -224,7 +247,58 @@ public sealed partial class ChannelsViewModel : ObservableObject
 
     partial void OnGroupFilterChanged(string value)
     {
-        if (!_loading && value is not null) Reload();
+        if (value is null) return;
+        IsGroupChosen = value != AllGroups && value != NoGroup;
+        GroupNewName = IsGroupChosen ? value : "";
+        if (!_loading) Reload();
+    }
+
+    // ---- sorting ----------------------------------------------------------------------------
+
+    /// <summary>Sort by a column; the same column again turns the order round.</summary>
+    [RelayCommand]
+    private void SortBy(string key)
+    {
+        _sortDown = key == _sortKey && !_sortDown;
+        _sortKey = key;
+        ShowSort();
+        Reload();
+    }
+
+    private void ShowSort()
+    {
+        foreach (var head in Heads) head.Text = head.Key == _sortKey ? $"{head.Title} {(_sortDown ? "▼" : "▲")}" : head.Title;
+    }
+
+    // The channels in the order chosen. Text columns go alphabetically with the empty ones last
+    // either way; channels alike in the column stay in frequency order.
+    private IEnumerable<MemoryChannel> Sorted()
+    {
+        var text = StringComparer.CurrentCultureIgnoreCase;
+        Func<MemoryChannel, string?>? field = _sortKey switch
+        {
+            "Name" => c => c.Name,
+            "Agency" => c => c.Agency,
+            "Description" => c => c.Description,
+            "Tag" => c => c.Tag,
+            "Type" => c => c.Format,
+            "Tone" => c => c.Tone,
+            "Groups" => c => string.Join(", ", c.Groups),
+            _ => null,
+        };
+        IOrderedEnumerable<MemoryChannel> sorted;
+        if (field is not null)
+        {
+            var filled = _store.Channels.OrderBy(c => string.IsNullOrEmpty(field(c)));
+            sorted = _sortDown ? filled.ThenByDescending(field, text) : filled.ThenBy(field, text);
+        }
+        else if (_sortKey == "Scan")       // ticked first, then the other way
+            sorted = _sortDown ? _store.Channels.OrderBy(c => c.Scan) : _store.Channels.OrderByDescending(c => c.Scan);
+        else
+            return _sortDown
+                ? _store.Channels.OrderByDescending(c => c.FrequencyHz).ThenBy(c => c.Name, text)
+                : _store.Channels.OrderBy(c => c.FrequencyHz).ThenBy(c => c.Name, text);
+        return sorted.ThenBy(c => c.FrequencyHz).ThenBy(c => c.Name, text);
     }
 
     /// <summary>The rows selected in the list.</summary>
@@ -294,6 +368,66 @@ public sealed partial class ChannelsViewModel : ObservableObject
         NewGroup = "";
         Status = $"{_selection.Count} channel{(_selection.Count == 1 ? "" : "s")} in \"{name}\"";
         RefreshTicks();
+    }
+
+    /// <summary>
+    /// Give the group chosen in the filter the name typed. If another group already has that
+    /// name the two become one.
+    /// </summary>
+    [RelayCommand]
+    private void RenameGroup()
+    {
+        string old = GroupFilter, name = GroupNewName.Trim();
+        if (!IsGroupChosen || name.Length == 0 || name == old)
+        {
+            if (IsGroupChosen && name.Length == 0) Status = "Type the group's new name first";
+            return;
+        }
+        if (name is AllGroups or NoGroup)
+        {
+            Status = $"A group cannot be called \"{name}\"";
+            return;
+        }
+        bool merged = _store.GroupNames().Contains(name);
+        int n = 0;
+        foreach (var c in _store.Channels)
+        {
+            int at = c.Groups.IndexOf(old);
+            if (at < 0) continue;
+            if (c.Groups.Contains(name)) c.Groups.RemoveAt(at);
+            else c.Groups[at] = name;
+            n++;
+        }
+        _dirty = true;
+        _store.Save();
+        _seen = _store.Version;
+        _dirty = false;
+        GroupRenamed?.Invoke(old, name);
+        Edited?.Invoke();
+        Status = merged
+            ? $"\"{old}\" joined to \"{name}\": {n} channel{(n == 1 ? "" : "s")} moved"
+            : $"\"{old}\" is now \"{name}\" ({n} channel{(n == 1 ? "" : "s")})";
+        _loading = true;
+        GroupChoices = [AllGroups, .. _store.GroupNames(), NoGroup];
+        GroupFilter = name;
+        _loading = false;
+        Reload();
+    }
+
+    /// <summary>
+    /// Do away with the group chosen in the filter. Its channels stay stored, in whatever other
+    /// groups they are in; to remove the channels themselves, select them and use Delete.
+    /// </summary>
+    [RelayCommand]
+    private void DeleteGroup()
+    {
+        if (!IsGroupChosen) return;
+        string old = GroupFilter;
+        int n = _store.Channels.Count(c => c.Groups.Remove(old));
+        _dirty = true;
+        Flush();
+        Status = $"Group \"{old}\" deleted; its {n} channel{(n == 1 ? " is" : "s are")} still stored";
+        GroupFilter = AllGroups;       // which shows the channels again
     }
 
     [RelayCommand]

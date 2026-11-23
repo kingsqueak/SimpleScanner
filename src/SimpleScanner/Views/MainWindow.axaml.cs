@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         }
         var vm = new ChannelsViewModel(main.Store);
         vm.Edited += main.MemoriesEdited;
+        vm.GroupRenamed += main.GroupRenamed;
         _channels = new ChannelsWindow { DataContext = vm };
         _channels.TuneRequested += main.Tune;
         _channels.Closed += (_, _) => _channels = null;

@@ -125,6 +125,75 @@ public class ImportTests
     }
 
     [Fact]
+    public void The_editor_sorts_by_any_column_and_renames_and_deletes_groups()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ss-sort-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new MemoryStore(path);
+            RadioReferenceCsv.Import(store, RadioReferenceCsv.Parse(Csv), "County");
+            store.Channels.Add(new MemoryChannel { Name = "Bare", FrequencyHz = 146.52e6, Groups = ["Mine"] });
+            var vm = new ChannelsViewModel(store);
+            string[] Names() => [.. vm.Rows.Select(r => r.Channel.Name)];
+
+            // Frequency order to begin with, marked in the heading; the heading again turns it round.
+            Assert.Equal("MHz ▲", vm.Heads[1].Text);
+            Assert.Equal(33.74e6, vm.Rows[0].Channel.FrequencyHz);
+            vm.SortByCommand.Execute("MHz");
+            Assert.Equal("MHz ▼", vm.Heads[1].Text);
+            Assert.Equal("Site 002 Nashua Simulcast", Names()[0]);
+
+            // Alphabetical, whatever the case; alike in the column stay in frequency order.
+            vm.SortByCommand.Execute("Name");
+            Assert.Equal("MHz", vm.Heads[1].Text);
+            Assert.Equal("Name ▲", vm.Heads[2].Text);
+            Assert.Equal(["Bare", "GFDDISP", "GFW Aero", "Hooksett PD", "Mason FD/EMS", "Site 002 Nashua Simulcast", "StPaul Scrty"], Names());
+            vm.SortByCommand.Execute("Tag");
+            Assert.Equal(["GFW Aero", "GFDDISP", "Mason FD/EMS", "Hooksett PD", "StPaul Scrty", "Site 002 Nashua Simulcast", "Bare"], Names());
+            // The other way round, a channel with nothing in the column is still last.
+            vm.SortByCommand.Execute("Tag");
+            Assert.Equal("Tag ▼", vm.Heads[5].Text);
+            Assert.Equal("Site 002 Nashua Simulcast", Names()[0]);
+            Assert.Equal("Bare", Names()[^1]);
+            vm.SortByCommand.Execute("Scan");
+            Assert.Equal("Site 002 Nashua Simulcast", Names()[^1]);         // the one not ticked
+
+            // Rename a group: every channel in it follows, and a window with it ticked is told.
+            (string, string)? renamed = null;
+            vm.GroupRenamed += (old, name) => renamed = (old, name);
+            Assert.False(vm.IsGroupChosen);
+            vm.GroupFilter = "County";
+            Assert.True(vm.IsGroupChosen);
+            Assert.Equal("County", vm.GroupNewName);
+            vm.GroupNewName = "Hillsborough";
+            vm.RenameGroupCommand.Execute(null);
+            Assert.Equal(("County", "Hillsborough"), renamed);
+            Assert.Equal("Hillsborough", vm.GroupFilter);
+            Assert.Equal(6, vm.Rows.Count);
+            Assert.Equal(["Hillsborough", "Mine"], MemoryStore.Load(path).GroupNames());
+
+            // Renaming to a name already in use joins the two groups.
+            vm.GroupFilter = "Mine";
+            vm.GroupNewName = "Hillsborough";
+            vm.RenameGroupCommand.Execute(null);
+            Assert.Equal(["Hillsborough"], store.GroupNames());
+            Assert.Equal(7, vm.Rows.Count);
+            Assert.All(store.Channels, c => Assert.Equal(["Hillsborough"], c.Groups));
+
+            // Delete the group: the channels stay, in no group.
+            vm.DeleteGroupCommand.Execute(null);
+            Assert.Empty(store.GroupNames());
+            Assert.Equal(7, store.Channels.Count);
+            Assert.Equal(ChannelsViewModel.AllGroups, vm.GroupFilter);
+            Assert.False(vm.IsGroupChosen);
+            Assert.Equal(7, MemoryStore.Load(path).Channels.Count);
+            vm.GroupFilter = ChannelsViewModel.NoGroup;
+            Assert.Equal(7, vm.Rows.Count);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void The_editor_filters_edits_and_puts_channels_in_several_groups()
     {
         string path = Path.Combine(Path.GetTempPath(), $"ss-editor-{Guid.NewGuid():N}.json");

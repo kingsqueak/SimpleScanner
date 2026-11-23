@@ -53,3 +53,24 @@ voice frames reach the vocoder without bit errors, not what speech sounds like.
 - `dstar_late_inverted_24k.raw`: the same kind of transmission without its bit sync, frame sync
   and header, with the deviation turned over. From W1AW, message "late and inverted".
   (`dstargen OUT --my W1AW --late --invert --text "late and inverted"`)
+
+## System Fusion (C4FM)
+
+Made with `native/digital/tools/ysfgen.c` (this repository, written from Yaesu's published air
+interface, with RadioFoundry's encoders) from RadioFoundry's synthesized test speech. Same
+sample format.
+
+- `ysf_dn_24k.raw`: a whole transmission in DN mode (voice and data type 2): header, 21 traffic
+  frames (105 voice frames of `test_transmission.ambe`), end frame. From KC2RGW to all, through
+  W1XYZ-RPT, group ID 12. `dmr_voice_reference_8k.raw` is the reference for the speech.
+  (`ysfgen OUT test_transmission.ambe --src KC2RGW --down W1XYZ-RPT --up KC2RGW --group 12`)
+- `ysf_vd1_late_inverted_24k.raw`: voice and data type 1, without its header frame and with the
+  deviation turned over. From W1AW to K1ABC.
+  (`ysfgen OUT test_transmission.ambe --mode vd1 --src W1AW --dest K1ABC --late --invert`)
+- `ysf_vw_24k.raw`: full-rate voice (VW), 102 voice frames of `test_transmission.imbe`, the
+  frames the P25 call carries, so `p25_call_voice_8k.raw` is the reference for its first 54.
+  (`ysfgen OUT test_transmission.imbe --mode vw --src KC2RGW --frames 21`)
+
+The receiver was also run against three public recordings of real transmissions (not kept
+here: they are other people's voices): two discriminator recordings of an FTM-400D in DN and VW
+from qsl.net/kb9mwr/projects/dv/yaesu, and DSDcc's `samples/ysf_f5zoo.dis`.

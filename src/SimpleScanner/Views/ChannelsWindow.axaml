@@ -11,6 +11,28 @@
       <Button DockPanel.Dock="Right" Classes="seg" Content="Import RadioReference CSV…" Click="OnImportClick" Margin="12,0,0,0"
               ToolTip.Tip="Load one or more frequency downloads from radioreference.com (a county's or an agency's CSV file)" />
       <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" Classes="label" Margin="12,0,0,0" />
+      <Button DockPanel.Dock="Right" Classes="seg" Content="Rename or delete group ▾" IsEnabled="{Binding IsGroupChosen}" Margin="6,0,0,0"
+              ToolTip.Tip="Rename or delete the group chosen in the box beside this. Choose a group there first.">
+        <Button.Flyout>
+          <Flyout Placement="BottomEdgeAlignedRight">
+            <StackPanel Spacing="8" Width="320">
+              <TextBlock Text="{Binding GroupFilter}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Classes="seg" Content="Rename" Command="{Binding RenameGroupCommand}" Margin="6,0,0,0"
+                        ToolTip.Tip="Give the group this name. If another group already has the name, the two become one." />
+                <TextBox Text="{Binding GroupNewName}" PlaceholderText="New name">
+                  <TextBox.KeyBindings>
+                    <KeyBinding Gesture="Enter" Command="{Binding RenameGroupCommand}" />
+                  </TextBox.KeyBindings>
+                </TextBox>
+              </DockPanel>
+              <Button Classes="seg" Content="Delete this group" Command="{Binding DeleteGroupCommand}" HorizontalAlignment="Left" />
+              <TextBlock Classes="label" TextWrapping="Wrap"
+                         Text="Deleting a group leaves its channels stored, in any other groups they are in. To remove the channels too, select them in the list first and use Delete." />
+            </StackPanel>
+          </Flyout>
+        </Button.Flyout>
+      </Button>
       <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding GroupChoices}" SelectedItem="{Binding GroupFilter}" Width="230" Margin="8,0,0,0"
                 ToolTip.Tip="Show only the channels of one group, or those in no group yet" />
       <TextBox Text="{Binding Filter}" PlaceholderText="Filter: any words from the name, agency, description, tag, tone, callsign or frequency"
@@ -74,7 +96,7 @@
             <TextBlock Grid.Row="10" Text="Receive as" Classes="label" />
             <ComboBox Grid.Row="10" Grid.Column="1" ItemsSource="{x:Static vm:ChannelRow.ReceiveChoices}" SelectedItem="{Binding Receive}"
                       HorizontalAlignment="Stretch"
-                      ToolTip.Tip="The mode and channel filter used when this channel is tuned or scanned. Digital voice (P25, DMR, NXDN, D-STAR) is received as NFM 12.5 kHz." />
+                      ToolTip.Tip="The mode and channel filter used when this channel is tuned or scanned. Digital voice (P25, DMR, NXDN, D-STAR, C4FM) is received as NFM 12.5 kHz." />
           </Grid>
 
           <StackPanel Spacing="8" IsVisible="{Binding HasSelection}">
@@ -111,16 +133,35 @@
     </Border>
 
     <!-- The channels -->
-    <Grid DockPanel.Dock="Top" ColumnDefinitions="34,80,130,150,*,104,58,92,150" Margin="8,0,24,4">
-      <TextBlock Grid.Column="0" Text="Scan" Classes="label" />
-      <TextBlock Grid.Column="1" Text="MHz" Classes="label" />
-      <TextBlock Grid.Column="2" Text="Name" Classes="label" />
-      <TextBlock Grid.Column="3" Text="Agency" Classes="label" />
-      <TextBlock Grid.Column="4" Text="Description" Classes="label" />
-      <TextBlock Grid.Column="5" Text="Tag" Classes="label" />
-      <TextBlock Grid.Column="6" Text="Type" Classes="label" />
-      <TextBlock Grid.Column="7" Text="Tone / code" Classes="label" />
-      <TextBlock Grid.Column="8" Text="Groups" Classes="label" />
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="46,80,130,150,*,104,58,92,150" Margin="8,0,24,2">
+      <Grid.Styles>
+        <!-- A column heading: plain text that can be clicked to sort -->
+        <Style Selector="Button.head">
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+          <Setter Property="BorderThickness" Value="0" />
+          <Setter Property="Padding" Value="0,2" />
+          <Setter Property="MinWidth" Value="0" />
+          <Setter Property="FontSize" Value="11" />
+          <Setter Property="HorizontalAlignment" Value="Stretch" />
+          <Setter Property="HorizontalContentAlignment" Value="Left" />
+          <Setter Property="Command" Value="{Binding SortByCommand}" />
+          <Setter Property="ToolTip.Tip" Value="Click to sort by this column; click again for the other way round" />
+        </Style>
+        <Style Selector="Button.head:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="Foreground" Value="{DynamicResource TextMain}" />
+        </Style>
+      </Grid.Styles>
+      <Button Grid.Column="0" Classes="head" Content="{Binding Heads[0].Text}" CommandParameter="Scan" />
+      <Button Grid.Column="1" Classes="head" Content="{Binding Heads[1].Text}" CommandParameter="MHz" />
+      <Button Grid.Column="2" Classes="head" Content="{Binding Heads[2].Text}" CommandParameter="Name" />
+      <Button Grid.Column="3" Classes="head" Content="{Binding Heads[3].Text}" CommandParameter="Agency" />
+      <Button Grid.Column="4" Classes="head" Content="{Binding Heads[4].Text}" CommandParameter="Description" />
+      <Button Grid.Column="5" Classes="head" Content="{Binding Heads[5].Text}" CommandParameter="Tag" />
+      <Button Grid.Column="6" Classes="head" Content="{Binding Heads[6].Text}" CommandParameter="Type" />
+      <Button Grid.Column="7" Classes="head" Content="{Binding Heads[7].Text}" CommandParameter="Tone" />
+      <Button Grid.Column="8" Classes="head" Content="{Binding Heads[8].Text}" CommandParameter="Groups" />
     </Grid>
     <ListBox x:Name="List" ItemsSource="{Binding Rows}" SelectionMode="Multiple" Background="{DynamicResource PanelBg}" CornerRadius="8"
              SelectionChanged="OnSelectionChanged" DoubleTapped="OnRowDoubleTapped"
@@ -139,7 +180,7 @@
       </ListBox.Styles>
       <ListBox.ItemTemplate>
         <DataTemplate x:DataType="vm:ChannelRow">
-          <Grid ColumnDefinitions="34,80,130,150,*,104,58,92,150">
+          <Grid ColumnDefinitions="46,80,130,150,*,104,58,92,150">
             <CheckBox Grid.Column="0" IsChecked="{Binding Scan}" MinWidth="0" MinHeight="0" ToolTip.Tip="Include this channel when scanning" />
             <TextBlock Grid.Column="1" Text="{Binding Frequency}" />
             <TextBlock Grid.Column="2" Text="{Binding Name}" />

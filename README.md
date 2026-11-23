@@ -1,7 +1,7 @@
 # SimpleScanner
 
 A desktop communications scanner for the SDRplay RSPdx, for Windows, macOS and Linux
-(.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, and the first four
+(.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, and the first five
 digital voice modes.
 
 ## What works now
@@ -27,16 +27,19 @@ digital voice modes.
 - D-STAR digital voice: decoded speech, with the callsigns (who is sending, who is called, which
   repeater) and the transmission's short text message. A transmission joined after its start
   is picked up at the next sync pattern, within half a second
+- C4FM (Yaesu System Fusion): decoded speech in the usual DN mode, in full-rate voice (VW) and
+  in the other voice and data mode, with the callsigns (who is sending, who is called, which
+  repeater) and the digital group ID. A transmission can be joined at any frame
 - Encrypted calls are shown and stay silent
 - Cellular telephone bands are blocked
 
-Not yet: trunk following, P25 Phase 2, C4FM (System Fusion), fetching from RadioReference's web
+Not yet: trunk following, P25 Phase 2, fetching from RadioReference's web
 service. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
 the scan stops on. Trunked-system frequencies in a download are stored unticked.
 
 ### The AMBE speech codecs
 
-DMR and NXDN speech is coded with AMBE+2, which is covered by a patent (US 8,359,197, listed as in force
+DMR, NXDN and System Fusion (DN mode) speech is coded with AMBE+2, which is covered by a patent (US 8,359,197, listed as in force
 until May 2028). The decoder (mbelib) is therefore a library of its own, `native/ambe`, and a
 build can leave it out:
 

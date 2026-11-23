@@ -35,7 +35,7 @@
   <Target Name="BuildAudioLib" BeforeTargets="BeforeBuild" Condition="!Exists('$(AudioLibPath)') And !$([MSBuild]::IsOSPlatform('Windows'))">
     <Exec Command="sh &quot;$(MSBuildThisFileDirectory)../../native/audio/build.sh&quot;" />
   </Target>
-  <!-- The digital voice library (P25 Phase 1 from RadioFoundry, native/digital), the same way. -->
+  <!-- The digital voice library (P25 Phase 1 and DMR from RadioFoundry, native/digital), the same way. -->
   <PropertyGroup>
     <DigitalLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libss_digital.dylib</DigitalLibName>
     <DigitalLibName Condition="$([MSBuild]::IsOSPlatform('Linux'))">libss_digital.so</DigitalLibName>
@@ -47,6 +47,21 @@
   </Target>
   <ItemGroup>
     <None Include="$(DigitalLibPath)" Link="$(DigitalLibName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(DigitalLibPath)') Or !$([MSBuild]::IsOSPlatform('Windows'))" />
+  </ItemGroup>
+  <!-- The AMBE+2 speech decoder for DMR (mbelib, native/ambe). Optional: the codec is patented until
+       2028, so a build can leave it out with -p:IncludeAmbe=false; DMR calls are then shown, not heard. -->
+  <PropertyGroup>
+    <IncludeAmbe Condition="'$(IncludeAmbe)' == ''">true</IncludeAmbe>
+    <AmbeLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libss_ambe.dylib</AmbeLibName>
+    <AmbeLibName Condition="$([MSBuild]::IsOSPlatform('Linux'))">libss_ambe.so</AmbeLibName>
+    <AmbeLibName Condition="$([MSBuild]::IsOSPlatform('Windows'))">ss_ambe.dll</AmbeLibName>
+    <AmbeLibPath>$(MSBuildThisFileDirectory)../../native/ambe/out/$(AmbeLibName)</AmbeLibPath>
+  </PropertyGroup>
+  <Target Name="BuildAmbeLib" BeforeTargets="BeforeBuild" Condition="'$(IncludeAmbe)' == 'true' And !Exists('$(AmbeLibPath)') And !$([MSBuild]::IsOSPlatform('Windows'))">
+    <Exec Command="sh &quot;$(MSBuildThisFileDirectory)../../native/ambe/build.sh&quot;" />
+  </Target>
+  <ItemGroup Condition="'$(IncludeAmbe)' == 'true'">
+    <None Include="$(AmbeLibPath)" Link="$(AmbeLibName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(AmbeLibPath)') Or !$([MSBuild]::IsOSPlatform('Windows'))" />
   </ItemGroup>
   <ItemGroup>
     <None Include="$(AudioLibPath)" Link="$(AudioLibName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(AudioLibPath)') Or !$([MSBuild]::IsOSPlatform('Windows'))" />

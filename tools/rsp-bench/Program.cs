@@ -57,7 +57,7 @@ if (args.Length >= 3 && args[0] == "hunt")
     rx.Start();
     Thread.Sleep(1500);
     rx.StartScan(list);
-    Console.WriteLine($"hunting {lo / 1e6}-{hi / 1e6} MHz: {list.Count} channels in {rx.ScanWindows} windows, squelch {rx.SquelchDb} dB, P25 {(rx.DigitalAvailable ? "available" : "MISSING")}");
+    Console.WriteLine($"hunting {lo / 1e6}-{hi / 1e6} MHz: {list.Count} channels in {rx.ScanWindows} windows, squelch {rx.SquelchDb} dB, digital {(rx.DigitalAvailable ? "available" : "MISSING")}");
     var sw = Stopwatch.StartNew();
     var seen = new Dictionary<double, string>();
     while (sw.Elapsed.TotalSeconds < seconds)
@@ -72,17 +72,17 @@ if (args.Length >= 3 && args[0] == "hunt")
             Thread.Sleep(20);
             level = Math.Max(level, rx.LevelDb);
             if (rx.Digital is { } d) what = d.ToString();
-            if (what.Contains("system") || what.Contains("TG")) break;
+            if (what.Contains("system") || what.Contains("TG") || what.Contains(" · to ")) break;
         }
         if (rx.FrequencyHz == f)
         {
             if (!seen.ContainsKey(f) || (what.Length > 0 && seen[f].Length == 0))
-                Console.WriteLine($"  {sw.Elapsed.TotalSeconds,5:F1} s  {f / 1e6,9:F4} MHz  {level,5:F0} dB  {(what.Length > 0 ? what : "no P25")}");
+                Console.WriteLine($"  {sw.Elapsed.TotalSeconds,5:F1} s  {f / 1e6,9:F4} MHz  {level,5:F0} dB  {(what.Length > 0 ? what : "analogue or unknown")}");
             seen[f] = what;
             rx.SkipChannel();
         }
     }
-    Console.WriteLine($"{seen.Count} active frequencies, {seen.Values.Count(v => v.Length > 0)} with P25; {rx.ScanPasses} passes");
+    Console.WriteLine($"{seen.Count} active frequencies, {seen.Values.Count(v => v.Length > 0)} digital; {rx.ScanPasses} passes");
     rx.Stop();
     return;
 }

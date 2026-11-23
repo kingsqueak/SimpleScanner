@@ -8,3 +8,4 @@ publish/
 artifacts/
 native/audio/out/
 native/digital/out/
+native/ambe/out/

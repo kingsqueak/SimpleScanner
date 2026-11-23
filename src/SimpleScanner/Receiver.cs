@@ -24,8 +24,8 @@ public sealed record ScanChannel(string Name, double FrequencyHz, Mode Mode, dou
 /// squelch opens, the scan stays until the signal has been gone for the hang time. Then the
 /// next window.
 ///
-/// Digital voice: in narrow FM the discriminator output also goes to a P25 decoder. When it
-/// finds P25 data units on the channel, the analogue audio (which would be a rasp) gives way to
+/// Digital voice: in narrow FM the discriminator output also goes to a P25 decoder and a DMR
+/// decoder. When one finds its kind of signal on the channel, the analogue audio (which would be a rasp) gives way to
 /// the decoded speech, and <see cref="Digital"/> says what the signal is. Encrypted calls are
 /// reported and stay silent.
 /// </summary>
@@ -62,11 +62,12 @@ public sealed class Receiver : IDisposable
     // Digital voice, all on the DSP thread under _cfg.
     private const int VoicePrime = ChannelReceiver.AudioRate * 220 / 1000;      // one voice superframe and a little
     private readonly P25Decoder? _p25 = P25Decoder.TryCreate();
+    private readonly DmrDecoder? _dmr = DmrDecoder.TryCreate();
     private readonly Upsampler _voiceUp = new(8000, 6);
     private readonly FloatFifo _voice = new(ChannelReceiver.AudioRate * 3);
     private readonly float[] _voice8k = new float[2048], _voice48k = new float[2048 * 6];
     private bool _voicePlaying, _wasOpen;
-    private volatile P25Status? _digital;
+    private volatile IDigitalStatus? _digital;
 
     // Scan state, all under _cfg.
     private IReadOnlyList<ScanChannel> _scanList = [];
@@ -76,7 +77,7 @@ public sealed class Receiver : IDisposable
     private ScanState _scan;
     private int _window, _scanIndex = -1, _surveySkip, _fftFill, _surveyCount;
     private double _scanTimer, _scanClock;
-    private bool _scanSawSignal;
+    private bool _scanSawSignal, _scanHeardVoice;
     private long _passes;
     private readonly Fft _fft;
     private readonly float[] _fftWindow, _fftRe, _fftIm, _workRe, _workIm;
@@ -96,7 +97,11 @@ public sealed class Receiver : IDisposable
             Failed?.Invoke(why);
         };
         _channel.SetOffset(_offsetHz);
-        _channel.DiscriminatorTap = d => _p25?.Feed(d, _channel.DiscriminatorHzPerUnit);
+        _channel.DiscriminatorTap = d =>
+        {
+            _p25?.Feed(d, _channel.DiscriminatorHzPerUnit);
+            _dmr?.Feed(d, _channel.DiscriminatorHzPerUnit);
+        };
 
         // FFT bins about 2 kHz wide: a few to each narrow channel.
         int size = 256;
@@ -182,15 +187,18 @@ public sealed class Receiver : IDisposable
     public Mode Mode => _channel.Mode;
     public double BandwidthHz => _channel.BandwidthHz;
 
-    /// <summary>The digital signal on the channel now (P25), or null for none.</summary>
-    public P25Status? Digital => _digital;
+    /// <summary>The digital signal on the channel now (P25 or DMR), or null for none.</summary>
+    public IDigitalStatus? Digital => _digital;
     /// <summary>False when the digital voice library could not be loaded.</summary>
-    public bool DigitalAvailable => _p25 is not null;
+    public bool DigitalAvailable => _p25 is not null && _dmr is not null;
+    /// <summary>False when the AMBE+2 speech decoder is not installed: DMR calls are shown, not heard.</summary>
+    public bool DmrVoiceAvailable => _dmr is { VoiceAvailable: true };
 
     // The channel changed or its signal went: whatever the decoder was following is over.
     private void ResetDigitalLocked()
     {
         _p25?.SignalLost();
+        _dmr?.SignalLost();
         _voiceUp.Reset();
         _voice.Clear();
         _voicePlaying = false;
@@ -258,6 +266,12 @@ public sealed class Receiver : IDisposable
 
     /// <summary>How long a channel must stay quiet before the scan moves on from it.</summary>
     public double ScanHangSeconds { get; set; } = 2;
+    /// <summary>How long a scan passes by a digital channel it left because there was nothing to hear on it.</summary>
+    public double SilentDigitalSkipSeconds { get; set; } = 60;
+    /// <summary>The same after a digital call was heard there and ended: short, so the rest of the conversation is caught.</summary>
+    public double AfterCallSkipSeconds { get; set; } = 5;
+    /// <summary>How long a scan stays on a digital signal that has had nothing to hear since it stopped there.</summary>
+    public double SilentDigitalLookSeconds { get; set; } = 0.4;
     /// <summary>How long a skipped channel is passed by.</summary>
     public double ScanSkipSeconds { get; set; } = 10;
     public bool Scanning => _scan != ScanState.Off;
@@ -442,14 +456,26 @@ public sealed class Receiver : IDisposable
                 {
                     _scan = ScanState.Listen;
                     _scanTimer = 0;
+                    _scanHeardVoice = false;
                     return true;
                 }
                 // Nothing there after all: move on. Something there: give the squelch time to make up its mind.
                 if (_scanTimer >= (_scanSawSignal ? LookLongestSeconds : LookSeconds)) NextCandidateLocked();
                 return false;
             case ScanState.Listen:
-                if (open) _scanTimer = 0;
-                else if (_scanTimer >= ScanHangSeconds) NextWindowLocked();
+                // A digital signal with nothing to listen to (a control channel, a repeater sending idle bursts,
+                // an encrypted call) keeps the squelch open for as long as it likes. If a call was heard on this
+                // stop, give it the hang time for a reply and come back soon; if not, leave as soon as it is clear
+                // what the signal is, and pass it by for longer.
+                bool silent = open && _digital is { NothingToHear: true };
+                if (open && _digital is { NothingToHear: false }) _scanHeardVoice = true;
+                if (open && !silent) _scanTimer = 0;
+                else if (_scanTimer >= (silent && !_scanHeardVoice ? SilentDigitalLookSeconds : ScanHangSeconds))
+                {
+                    if (silent && _scanIndex >= 0)
+                        _skipUntil[_scanIndex] = _scanClock + (_scanHeardVoice ? AfterCallSkipSeconds : SilentDigitalSkipSeconds);
+                    NextWindowLocked();
+                }
                 return open;
             default:
                 return open;
@@ -532,7 +558,7 @@ public sealed class Receiver : IDisposable
         }
     }
 
-    // After the channel has been demodulated: is there P25 on it, and if so put its decoded
+    // After the channel has been demodulated: is there P25 or DMR on it, and if so put its decoded
     // speech in place of the analogue audio.
     private void DigitalLocked(bool open, int count)
     {
@@ -541,16 +567,18 @@ public sealed class Receiver : IDisposable
         if (_channel.Mode != Mode.Nfm) return;
 
         int n;
-        while ((n = _p25!.ReadVoice(_voice8k)) > 0)
+        while (_p25 is not null && (n = _p25.ReadVoice(_voice8k)) > 0)
             _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
-        bool active = _p25.Active;
-        _digital = active ? _p25.Status : null;
+        while (_dmr is not null && (n = _dmr.ReadVoice(_voice8k)) > 0)
+            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
+        _digital = _p25 is { Active: true } ? _p25.Status : _dmr is { Active: true } ? _dmr.Status : null;
+        bool active = _digital is not null;
         if (!active && !_voicePlaying)
         {
             _voice.Clear();
             return;
         }
-        // Speech arrives nine frames at a time, every 180 ms: hold some before starting to play.
+        // P25 speech arrives nine frames at a time, every 180 ms (DMR's three at a time): hold some before starting to play.
         if (!_voicePlaying && _voice.Count >= VoicePrime) _voicePlaying = true;
         var left = _left.AsSpan(0, count);
         left.Clear();
@@ -597,7 +625,7 @@ public sealed class Receiver : IDisposable
             open = _squelch.Update(level, seconds) && !_blocked;
             if (_scan != ScanState.Off) open = ScanStepLocked(level, open, seconds);
             _squelchOpen = open;
-            if (_p25 is not null && count > 0) DigitalLocked(open, count);
+            if ((_p25 is not null || _dmr is not null) && count > 0) DigitalLocked(open, count);
         }
         if (count == 0) return;
 

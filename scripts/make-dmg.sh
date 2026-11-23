@@ -7,6 +7,8 @@
 # included: it comes from SDRplay's own installer (sdrplay.com/api). Ad-hoc signed, not
 # notarized: the first time, open it with right-click > Open, or allow it in
 # System Settings > Privacy & Security.
+#
+# NO_AMBE=1 leaves the AMBE+2 speech decoder out (see the README): DMR calls are then shown, not heard.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Homebrew's dotnet bundles its own runtime, linked to Homebrew's libraries, which
@@ -24,7 +26,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$stage"
 
 echo "== app ($rid)"
 dotnet publish src/SimpleScanner/SimpleScanner.csproj -c Release -r "$rid" --self-contained true \
-  -p:UseAppHost=true -o "$app/Contents/MacOS"
+  -p:UseAppHost=true -p:IncludeAmbe="$([ -n "${NO_AMBE:-}" ] && echo false || echo true)" -o "$app/Contents/MacOS"
 find "$app/Contents" -name '*.pdb' -delete
 
 cp LICENSE "$app/Contents/Resources/"

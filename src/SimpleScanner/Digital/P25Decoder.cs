@@ -4,7 +4,7 @@ using SimpleScanner.Dsp;
 namespace SimpleScanner.Digital;
 
 /// <summary>What a P25 signal has told us so far.</summary>
-public sealed record P25Status
+public sealed record P25Status : IDigitalStatus
 {
     /// <summary>Network access code: which system or repeater this is.</summary>
     public int Nac { get; init; }
@@ -17,6 +17,7 @@ public sealed record P25Status
     public bool Emergency { get; init; }
     /// <summary>Encrypted calls are shown and never played.</summary>
     public bool Encrypted { get; init; }
+    public bool NothingToHear => ControlChannel || (InCall && Encrypted);
     public int SystemId { get; init; }
     public int Wacn { get; init; }
     public int Site { get; init; }

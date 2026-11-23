@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/SimpleScanner/SimpleScanner.csproj" />
+  <Project Path="tests/SimpleScanner.Tests/SimpleScanner.Tests.csproj" />
+  <Project Path="tools/rsp-bench/rsp-bench.csproj" />
+</Solution>

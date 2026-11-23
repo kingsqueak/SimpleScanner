@@ -1,0 +1,46 @@
+namespace SimpleScanner.Radio;
+
+/// <summary>
+/// A block of IQ samples, full scale at +-1. <paramref name="retuned"/> is true on the first
+/// block after a change of centre frequency has taken effect.
+/// </summary>
+public delegate void IqHandler(ReadOnlySpan<float> i, ReadOnlySpan<float> q, bool retuned);
+
+/// <summary>
+/// A radio as the scanner sees it: a stream of IQ samples round a centre frequency, with a
+/// gain control and a choice of antenna. Each kind of hardware is one implementation.
+/// </summary>
+public interface IIqSource : IDisposable
+{
+    /// <summary>Model and serial number, once started.</summary>
+    string Description { get; }
+    double SampleRate { get; }
+    double CenterHz { get; }
+    bool IsRunning { get; }
+
+    /// <summary>Raised on the radio's own thread. Samples sent while a retune is in flight are dropped.</summary>
+    event IqHandler? Samples;
+    /// <summary>The radio stopped by itself (unplugged, driver failure).</summary>
+    event Action<string>? Failed;
+
+    void Start(double sampleRate, double centerHz);
+    void Stop();
+    void Tune(double centerHz);
+
+    IReadOnlyList<string> Antennas { get; }
+    string Antenna { get; set; }
+
+    /// <summary>Let the radio choose its front-end gain. <see cref="GainStep"/> is then the most gain it may use.</summary>
+    bool AutoGain { get; set; }
+    /// <summary>Front-end attenuation step: 0 is the most gain.</summary>
+    int GainStep { get; set; }
+    /// <summary>The highest step at the present frequency.</summary>
+    int MaxGainStep { get; }
+    /// <summary>The step in use now (differs from <see cref="GainStep"/> under automatic gain).</summary>
+    int ActiveGainStep { get; }
+    /// <summary>Total gain ahead of the samples, in dB, for turning sample levels into signal levels.</summary>
+    double GainDb { get; }
+    bool Overloaded { get; }
+    /// <summary>How long the last retune took, in milliseconds (0 before the first).</summary>
+    double LastRetuneMs { get; }
+}

@@ -1,0 +1,157 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SimpleScanner.ViewModels"
+        x:Class="SimpleScanner.Views.ChannelsWindow"
+        x:DataType="vm:ChannelsViewModel"
+        Title="SimpleScanner channels" Width="1400" Height="740" MinWidth="1180" MinHeight="520"
+        WindowStartupLocation="CenterOwner">
+  <DockPanel Margin="12">
+    <!-- Filter, and the import button -->
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+      <Button DockPanel.Dock="Right" Classes="seg" Content="Import RadioReference CSV…" Click="OnImportClick" Margin="12,0,0,0"
+              ToolTip.Tip="Load one or more frequency downloads from radioreference.com (a county's or an agency's CSV file)" />
+      <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" Classes="label" Margin="12,0,0,0" />
+      <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding GroupChoices}" SelectedItem="{Binding GroupFilter}" Width="230" Margin="8,0,0,0"
+                ToolTip.Tip="Show only the channels of one group, or those in no group yet" />
+      <TextBox Text="{Binding Filter}" PlaceholderText="Filter: any words from the name, agency, description, tag, tone, callsign or frequency"
+               ToolTip.Tip="Type words to narrow the list, such as: fire dispatch, or 154." />
+    </DockPanel>
+
+    <!-- A file that has been read and waits for its group name -->
+    <Border DockPanel.Dock="Top" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10" Margin="0,0,0,8"
+            IsVisible="{Binding Pending, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <DockPanel>
+        <Button DockPanel.Dock="Right" Classes="seg" Content="Leave out" Command="{Binding CancelImportCommand}" Margin="6,0,0,0" />
+        <Button DockPanel.Dock="Right" Classes="seg lit" Content="Import" Command="{Binding ConfirmImportCommand}" Margin="6,0,0,0" />
+        <TextBox DockPanel.Dock="Right" Text="{Binding ImportGroup}" Width="260" Margin="6,0,0,0"
+                 ToolTip.Tip="The group the file's channels go in: a county or town name is the usual choice. They can be put in more groups afterwards.">
+          <TextBox.KeyBindings>
+            <KeyBinding Gesture="Enter" Command="{Binding ConfirmImportCommand}" />
+          </TextBox.KeyBindings>
+        </TextBox>
+        <TextBlock DockPanel.Dock="Right" Text="into group" Classes="label" Margin="12,0,0,0" />
+        <TextBlock Text="{Binding Pending.Summary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+
+    <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
+               TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" />
+
+    <!-- The selected channel's fields, and the groups of the selected channels -->
+    <Border DockPanel.Dock="Right" Width="330" Margin="12,0,0,0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="12">
+      <ScrollViewer>
+        <StackPanel Spacing="10">
+          <TextBlock Text="{Binding SelectionText}" Classes="label" TextWrapping="Wrap"
+                     IsVisible="{Binding SelectionText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+          <Grid ColumnDefinitions="92,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="6"
+                DataContext="{Binding Selected}" x:DataType="vm:ChannelRow"
+                IsVisible="{Binding $parent[Window].((vm:ChannelsViewModel)DataContext).Selected, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <TextBlock Grid.Row="0" Text="Name" Classes="label" />
+            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Name}" ToolTip.Tip="The short name shown large on the display" />
+            <TextBlock Grid.Row="1" Text="Frequency" Classes="label" />
+            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Frequency, UpdateSourceTrigger=LostFocus}" ToolTip.Tip="In MHz" />
+            <TextBlock Grid.Row="2" Text="Agency" Classes="label" />
+            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Agency}" ToolTip.Tip="Who the channel belongs to: a town, an agency, a kind of business" />
+            <TextBlock Grid.Row="3" Text="Description" Classes="label" />
+            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="4" Text="Tag" Classes="label" />
+            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Tag}" ToolTip.Tip="The kind of traffic, such as Fire Dispatch or Law Tac" />
+            <TextBlock Grid.Row="5" Text="Signal type" Classes="label" />
+            <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Format}"
+                     ToolTip.Tip="What is sent, as a note for the display: FMN, P25, DMR, NXDN. Digital voice is recognised by itself whatever is written here." />
+            <TextBlock Grid.Row="6" Text="Tone / code" Classes="label" />
+            <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Tone}"
+                     ToolTip.Tip="CTCSS tone, DCS code, P25 NAC or DMR colour code, as a note for the display. The scanner does not yet use it to filter what it stops on." />
+            <TextBlock Grid.Row="7" Text="Callsign" Classes="label" />
+            <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Callsign}" ToolTip.Tip="The FCC licence's callsign" />
+            <TextBlock Grid.Row="8" Text="Input" Classes="label" />
+            <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Input, UpdateSourceTrigger=LostFocus}"
+                     ToolTip.Tip="The repeater's input frequency in MHz, if it has one; empty for none" />
+            <TextBlock Grid.Row="9" Text="Station class" Classes="label" />
+            <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding StationClass}"
+                     ToolTip.Tip="FCC station class: RM repeater, BM base and mobiles, M mobiles, B base, F fixed" />
+            <TextBlock Grid.Row="10" Text="Receive as" Classes="label" />
+            <ComboBox Grid.Row="10" Grid.Column="1" ItemsSource="{x:Static vm:ChannelRow.ReceiveChoices}" SelectedItem="{Binding Receive}"
+                      HorizontalAlignment="Stretch"
+                      ToolTip.Tip="The mode and channel filter used when this channel is tuned or scanned. Digital voice (P25, DMR, NXDN, D-STAR) is received as NFM 12.5 kHz." />
+          </Grid>
+
+          <StackPanel Spacing="8" IsVisible="{Binding HasSelection}">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Button Classes="seg" Content="Scan" Command="{Binding ScanSelectedCommand}" ToolTip.Tip="Tick the selected channels for scanning" />
+              <Button Classes="seg" Content="Don't scan" Command="{Binding UnscanSelectedCommand}"
+                      ToolTip.Tip="Untick the selected channels: they stay stored but the scan passes them by" />
+              <Button Classes="seg" Content="Delete" Command="{Binding DeleteSelectedCommand}" Margin="12,0,0,0"
+                      ToolTip.Tip="Remove the selected channels altogether" />
+            </StackPanel>
+
+            <TextBlock Text="Groups" FontWeight="SemiBold" Margin="0,6,0,0" />
+            <TextBlock Classes="label" TextWrapping="Wrap"
+                       Text="A channel can be in as many groups as you like. The main window scans the groups ticked there." />
+            <ItemsControl ItemsSource="{Binding GroupTicks}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:GroupTick">
+                  <CheckBox IsChecked="{Binding Member}" Content="{Binding Name}" MinHeight="0" Padding="6,3" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Classes="seg" Content="Add to group" Command="{Binding AddToNewGroupCommand}" Margin="6,0,0,0"
+                      ToolTip.Tip="Put the selected channels in the group named, making it if it is new" />
+              <TextBox Text="{Binding NewGroup}" PlaceholderText="New group name">
+                <TextBox.KeyBindings>
+                  <KeyBinding Gesture="Enter" Command="{Binding AddToNewGroupCommand}" />
+                </TextBox.KeyBindings>
+              </TextBox>
+            </DockPanel>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+
+    <!-- The channels -->
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="34,80,130,150,*,104,58,92,150" Margin="8,0,24,4">
+      <TextBlock Grid.Column="0" Text="Scan" Classes="label" />
+      <TextBlock Grid.Column="1" Text="MHz" Classes="label" />
+      <TextBlock Grid.Column="2" Text="Name" Classes="label" />
+      <TextBlock Grid.Column="3" Text="Agency" Classes="label" />
+      <TextBlock Grid.Column="4" Text="Description" Classes="label" />
+      <TextBlock Grid.Column="5" Text="Tag" Classes="label" />
+      <TextBlock Grid.Column="6" Text="Type" Classes="label" />
+      <TextBlock Grid.Column="7" Text="Tone / code" Classes="label" />
+      <TextBlock Grid.Column="8" Text="Groups" Classes="label" />
+    </Grid>
+    <ListBox x:Name="List" ItemsSource="{Binding Rows}" SelectionMode="Multiple" Background="{DynamicResource PanelBg}" CornerRadius="8"
+             SelectionChanged="OnSelectionChanged" DoubleTapped="OnRowDoubleTapped"
+             ToolTip.Tip="Double-click a channel to tune the radio to it">
+      <ListBox.Styles>
+        <Style Selector="ListBoxItem">
+          <Setter Property="Padding" Value="8,1" />
+          <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="TextBlock">
+          <Setter Property="FontSize" Value="12" />
+          <Setter Property="VerticalAlignment" Value="Center" />
+          <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+          <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+      </ListBox.Styles>
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:ChannelRow">
+          <Grid ColumnDefinitions="34,80,130,150,*,104,58,92,150">
+            <CheckBox Grid.Column="0" IsChecked="{Binding Scan}" MinWidth="0" MinHeight="0" ToolTip.Tip="Include this channel when scanning" />
+            <TextBlock Grid.Column="1" Text="{Binding Frequency}" />
+            <TextBlock Grid.Column="2" Text="{Binding Name}" />
+            <TextBlock Grid.Column="3" Text="{Binding Agency}" />
+            <TextBlock Grid.Column="4" Text="{Binding Description}" />
+            <TextBlock Grid.Column="5" Text="{Binding Tag}" />
+            <TextBlock Grid.Column="6" Text="{Binding Format}" />
+            <TextBlock Grid.Column="7" Text="{Binding Tone}" />
+            <TextBlock Grid.Column="8" Text="{Binding Groups}" Foreground="{DynamicResource TextMuted}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</Window>

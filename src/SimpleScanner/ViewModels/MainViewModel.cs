@@ -16,8 +16,11 @@ public sealed record Choice(string Label, double Value)
 public sealed partial class MemoryRow(MemoryChannel channel, Action changed) : ObservableObject
 {
     public MemoryChannel Channel { get; } = channel;
-    public string Name => Channel.Name;
-    public string Detail => $"{Channel.FrequencyHz / 1e6:0.0000}  {Channel.Group}";
+    public string Name => Channel.Name.Length > 0 ? Channel.Name : Channel.Description ?? Channel.Agency ?? "";
+    /// <summary>The frequency, then what the channel is for if that is known, otherwise its groups.</summary>
+    public string Detail => $"{Channel.FrequencyHz / 1e6:0.0000}  " + (Channel.Tag is { Length: > 0 } tag
+        ? string.Join(" · ", new[] { Channel.Agency, tag }.Where(t => !string.IsNullOrEmpty(t)))
+        : string.Join(", ", Channel.Groups));
 
     public bool Scan
     {
@@ -62,6 +65,10 @@ public sealed partial class MainViewModel : ObservableObject
     private long _lastPasses;
     private double _passRate;
     private bool _searching;
+    // The stored channels the scan in progress was made from, and the one last picked by hand:
+    // they decide whose details are shown where several channels share a frequency.
+    private List<MemoryChannel> _scanMembers = [];
+    private MemoryChannel? _picked;
     private readonly DispatcherTimer _timer;
     private bool _loading, _dirty;
     private int _ticks;
@@ -78,6 +85,10 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private double _frequencyHz;
     [ObservableProperty] private string _bandName = "";
+    /// <summary>Whose channel this is: the stored channel's agency and description.</summary>
+    [ObservableProperty] private string _detailText = "";
+    /// <summary>The stored channel's particulars: tag, signal type, tone, station class, input, callsign.</summary>
+    [ObservableProperty] private string _infoText = "";
     [ObservableProperty] private string _modeText = "";
     [ObservableProperty] private string _entryText = "";
     [ObservableProperty] private string _status = "";
@@ -194,8 +205,7 @@ public sealed partial class MainViewModel : ObservableObject
     private void ApplyFrequency(double? keepWidth = null)
     {
         var band = BandPlan.Find(FrequencyHz);
-        // A stored channel's own name comes before the band's.
-        BandName = _memories.Find(FrequencyHz)?.Name ?? (band.Name.Length > 0 ? band.Name : "—");
+        ShowLabel();
         if (AutoMode)
         {
             _loading = true;
@@ -271,7 +281,7 @@ public sealed partial class MainViewModel : ObservableObject
         _loading = true;
         // The group rows are rebuilt only when the set of groups has changed, so an open selector keeps its rows.
         var wanted = select ?? SelectedGroups;
-        string[] names = [.. _memories.Channels.Select(c => c.Group).Distinct().Order()];
+        string[] names = [.. _memories.GroupNames()];
         if (select is not null || !names.SequenceEqual(GroupRows.Select(g => g.Name)))
         {
             GroupRows.Clear();
@@ -280,10 +290,57 @@ public sealed partial class MainViewModel : ObservableObject
         var shown = SelectedGroups;
         GroupsText = shown.Count == 0 ? AllGroups : shown.Count == 1 ? shown[0] : $"{shown.Count} groups";
         Memories.Clear();
-        foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || shown.Contains(c.Group))
-                     .OrderBy(c => c.Group).ThenBy(c => c.FrequencyHz))
+        // A channel in several of the groups shown appears once, under the first of them.
+        string First(MemoryChannel c) => c.Groups.Where(g => shown.Count == 0 || shown.Contains(g)).Order().FirstOrDefault() ?? "";
+        foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || c.Groups.Any(shown.Contains))
+                     .OrderBy(First).ThenBy(c => c.FrequencyHz))
             Memories.Add(new MemoryRow(c, _memories.Save));
         _loading = false;
+    }
+
+    /// <summary>The stored channels, for the channel editor.</summary>
+    public MemoryStore Store => _memories;
+
+    /// <summary>The channel editor has changed the stored channels: show them again.</summary>
+    public void MemoriesEdited()
+    {
+        RefreshMemories();
+        if (!IsScanning) ShowLabel();
+    }
+
+    /// <summary>Tune to a stored channel (and end a scan), as picking it in the list does.</summary>
+    public void Tune(MemoryChannel c)
+    {
+        if (IsScanning) StopScan();
+        _picked = c;
+        if (c.Mode is Mode mode)
+        {
+            _loading = true;
+            AutoMode = false;
+            Mode = mode;
+            _loading = false;
+            SetWidths(mode, c.BandwidthHz ?? 0);
+        }
+        else if (!AutoMode) AutoMode = true;
+        if (FrequencyHz == c.FrequencyHz) ApplyFrequency();
+        else FrequencyHz = c.FrequencyHz;
+    }
+
+    /// <summary>
+    /// Put on the display what is stored about the frequency it shows: the name, whose it is
+    /// and the particulars. Where nothing is stored the band's name stands in.
+    /// </summary>
+    private void ShowLabel()
+    {
+        // In a scan only the channels being scanned speak for the frequency; otherwise all stored ones.
+        var here = (IsScanning && !_searching ? _scanMembers : _memories.Channels)
+            .Where(c => Math.Abs(c.FrequencyHz - FrequencyHz) < 100).ToList();
+        if (_picked is not null && here.Remove(_picked)) here.Insert(0, _picked);
+        var label = ChannelLabel.For(here);
+        var band = BandPlan.Find(FrequencyHz);
+        BandName = label.Title ?? (band.Name.Length > 0 ? band.Name : "—");
+        DetailText = label.Detail;
+        InfoText = label.Info;
     }
 
     // A group was ticked or unticked in the selector.
@@ -309,19 +366,7 @@ public sealed partial class MainViewModel : ObservableObject
     partial void OnSelectedMemoryChanged(MemoryRow? value)
     {
         if (_loading || value is null) return;
-        if (IsScanning) StopScan();
-        var c = value.Channel;
-        if (c.Mode is Mode mode)
-        {
-            _loading = true;
-            AutoMode = false;
-            Mode = mode;
-            _loading = false;
-            SetWidths(mode, c.BandwidthHz ?? 0);
-        }
-        else if (!AutoMode) AutoMode = true;
-        if (FrequencyHz == c.FrequencyHz) ApplyFrequency();
-        else FrequencyHz = c.FrequencyHz;
+        Tune(value.Channel);
     }
 
     private static ScanChannel ToScan(MemoryChannel c)
@@ -421,7 +466,10 @@ public sealed partial class MainViewModel : ObservableObject
             StopScan();
             return;
         }
-        var list = Memories.Where(m => m.Scan).Select(m => ToScan(m.Channel)).OrderBy(c => c.FrequencyHz).ToList();
+        // A frequency shared by several stored channels is visited once.
+        var members = Memories.Where(m => m.Scan).Select(m => m.Channel).ToList();
+        var list = members.GroupBy(c => Math.Round(c.FrequencyHz / 100)).Select(g => ToScan(g.First()))
+            .OrderBy(c => c.FrequencyHz).ToList();
         if (list.Count == 0)
         {
             Status = "No channels are ticked for scanning in the groups shown";
@@ -435,6 +483,8 @@ public sealed partial class MainViewModel : ObservableObject
         Status = "";
         SquelchOn = true;
         _searching = false;
+        _scanMembers = members;
+        _picked = null;
         _rx.ScanSkipSeconds = 10;
         _rx.StartScan(list);
         IsScanning = _rx.Scanning;
@@ -458,9 +508,7 @@ public sealed partial class MainViewModel : ObservableObject
         FrequencyHz = _rx.FrequencyHz;
         Mode = _rx.Mode;
         _loading = false;
-        var ch = _rx.ScanChannel;
-        var band = BandPlan.Find(FrequencyHz);
-        BandName = ch?.Name ?? _memories.Find(FrequencyHz)?.Name ?? (band.Name.Length > 0 ? band.Name : "—");
+        ShowLabel();
         bool narrow = _rx.BandwidthHz < 9000 || (_rx.Mode == Mode.Nfm && _rx.BandwidthHz < 13000);
         ModeText = _rx.Mode switch { Mode.Am => narrow ? "AM 8.33k" : "AM 25k", Mode.Wfm => "WFM", _ => narrow ? "NFM 12.5k" : "NFM 25k" };
         EntryText = (FrequencyHz / 1e6).ToString("0.#####", CultureInfo.InvariantCulture);
@@ -477,21 +525,26 @@ public sealed partial class MainViewModel : ObservableObject
             Status = "Type a name for the channel first";
             return;
         }
-        var existing = _memories.Find(FrequencyHz);
-        if (existing is not null) _memories.Channels.Remove(existing);
-        _memories.Channels.Add(new MemoryChannel
+        // A channel already stored here is renamed and keeps what else is known about it.
+        var all = _memories.FindAll(FrequencyHz);
+        var channel = _picked is not null && all.Contains(_picked) ? _picked : all.FirstOrDefault();
+        if (channel is null)
         {
-            Name = name,
-            FrequencyHz = FrequencyHz,
-            Group = SelectedGroups is [var only] ? only : existing?.Group ?? "My channels",       // one group shown: it goes there
-            Mode = AutoMode ? null : Mode,
-            BandwidthHz = AutoMode ? null : SelectedWidth?.Value,
-        });
+            channel = new MemoryChannel { FrequencyHz = FrequencyHz };
+            _memories.Channels.Add(channel);
+        }
+        channel.Name = name;
+        channel.Mode = AutoMode ? null : Mode;
+        channel.BandwidthHz = AutoMode ? null : SelectedWidth?.Value;
+        // One group shown: it goes there. Otherwise it stays where it was, or goes in "My channels".
+        string? group = SelectedGroups is [var only] ? only : channel.Groups.Count == 0 ? "My channels" : null;
+        if (group is not null && !channel.Groups.Contains(group)) channel.Groups.Add(group);
+        _picked = channel;
         _memories.Save();
         NewName = "";
         Status = "";
         RefreshMemories();
-        if (!IsScanning) BandName = name;
+        if (!IsScanning) ShowLabel();
     }
 
     [RelayCommand]
@@ -663,7 +716,11 @@ public sealed partial class MainViewModel : ObservableObject
                 {
                     if (_rx.FrequencyHz != FrequencyHz || BandName.StartsWith("Scanning") || BandName.StartsWith("Searching")) ShowTuned();
                 }
-                else BandName = $"{(_searching ? "Searching" : "Scanning")} · {_passRate:F0} passes/s";
+                else
+                {
+                    BandName = $"{(_searching ? "Searching" : "Scanning")} · {_passRate:F0} passes/s";
+                    DetailText = InfoText = "";
+                }
             }
             Overloaded = src.Overloaded;
             IsStereo = _rx.Stereo;

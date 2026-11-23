@@ -205,12 +205,12 @@ public class ScanTests
         try
         {
             var store = new MemoryStore(path);
-            store.Channels.Add(new MemoryChannel { Name = "Tower", FrequencyHz = 128.8e6, Group = "Logan" });
+            store.Channels.Add(new MemoryChannel { Name = "Tower", FrequencyHz = 128.8e6, Groups = ["Logan"] });
             store.Channels.Add(new MemoryChannel { Name = "Repeater", FrequencyHz = 146.94e6, Mode = Mode.Nfm, BandwidthHz = 16000, Scan = false });
             store.Save();
             var back = MemoryStore.Load(path);
             Assert.Equal(2, back.Channels.Count);
-            Assert.Equal("Logan", back.Find(128.8e6)?.Group);
+            Assert.Equal(["Logan"], back.Find(128.8e6)?.Groups);
             Assert.Null(back.Find(128.8e6)?.Mode);
             Assert.Equal(Mode.Nfm, back.Find(146.94e6 + 50)?.Mode);
             Assert.False(back.Channels[1].Scan);

@@ -1,0 +1,388 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Runtime.CompilerServices;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using SimpleScanner.Dsp;
+
+namespace SimpleScanner.ViewModels;
+
+/// <summary>A stored channel as a row of the channel editor: every field can be changed.</summary>
+public sealed class ChannelRow(MemoryChannel channel, Action touched) : ObservableObject
+{
+    public static IReadOnlyList<string> ReceiveChoices { get; } =
+        ["Auto (from the band)", "AM", "AM 8.33 kHz", "NFM 12.5 kHz", "NFM 25 kHz", "WFM broadcast"];
+
+    public MemoryChannel Channel { get; } = channel;
+
+    private void Set(Action apply, [CallerMemberName] string? property = null)
+    {
+        apply();
+        OnPropertyChanged(property);
+        touched();
+    }
+
+    private static string? Opt(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    public string Name { get => Channel.Name; set => Set(() => Channel.Name = value ?? ""); }
+    public string Agency { get => Channel.Agency ?? ""; set => Set(() => Channel.Agency = Opt(value)); }
+    public string Description { get => Channel.Description ?? ""; set => Set(() => Channel.Description = Opt(value)); }
+    public string Tag { get => Channel.Tag ?? ""; set => Set(() => Channel.Tag = Opt(value)); }
+    public string Format { get => Channel.Format ?? ""; set => Set(() => Channel.Format = Opt(value)); }
+    public string Tone { get => Channel.Tone ?? ""; set => Set(() => Channel.Tone = Opt(value)); }
+    public string Callsign { get => Channel.Callsign ?? ""; set => Set(() => Channel.Callsign = Opt(value)); }
+    public string StationClass { get => Channel.StationClass ?? ""; set => Set(() => Channel.StationClass = Opt(value)); }
+    public bool Scan { get => Channel.Scan; set => Set(() => Channel.Scan = value); }
+
+    /// <summary>The frequency in MHz. Something that is not a frequency the receiver covers is not taken.</summary>
+    public string Frequency
+    {
+        get => MHz(Channel.FrequencyHz);
+        set => Set(() =>
+        {
+            if (TryMHz(value, out double hz) && hz is >= MainViewModel.MinHz and <= MainViewModel.MaxHz) Channel.FrequencyHz = hz;
+        });
+    }
+
+    /// <summary>The repeater input in MHz; empty for none.</summary>
+    public string Input
+    {
+        get => Channel.InputHz is double hz ? MHz(hz) : "";
+        set => Set(() =>
+        {
+            if (string.IsNullOrWhiteSpace(value)) Channel.InputHz = null;
+            else if (TryMHz(value, out double hz) && hz > 0) Channel.InputHz = hz;
+        });
+    }
+
+    /// <summary>How the channel is received: left to the band plan, or a mode and filter width.</summary>
+    public string Receive
+    {
+        get => Channel.Mode switch
+        {
+            null => ReceiveChoices[0],
+            Mode.Am => Channel.BandwidthHz < 9000 ? ReceiveChoices[2] : ReceiveChoices[1],
+            Mode.Wfm => ReceiveChoices[5],
+            _ => Channel.BandwidthHz < 13000 ? ReceiveChoices[3] : ReceiveChoices[4],
+        };
+        set
+        {
+            int i = ReceiveChoices.ToList().IndexOf(value ?? "");
+            if (i < 0) return;                // a ComboBox says null while its row is being swapped
+            Set(() => (Channel.Mode, Channel.BandwidthHz) = i switch
+            {
+                1 => (Mode.Am, BandPlan.AmAir),
+                2 => (Mode.Am, BandPlan.AmAir833),
+                3 => (Mode.Nfm, BandPlan.NfmNarrow),
+                4 => (Mode.Nfm, BandPlan.NfmWide),
+                5 => (Mode.Wfm, BandPlan.Wfm),
+                _ => ((Mode?)null, (double?)null),
+            });
+        }
+    }
+
+    public string Groups => string.Join(", ", Channel.Groups);
+
+    public void GroupsChanged() => OnPropertyChanged(nameof(Groups));
+    public void ScanChanged() => OnPropertyChanged(nameof(Scan));
+
+    /// <summary>True when every word of the filter is somewhere in the channel's fields.</summary>
+    public bool Matches(string[] words)
+    {
+        if (words.Length == 0) return true;
+        string all = string.Join('\n', Frequency, Channel.Name, Channel.Agency, Channel.Description, Channel.Tag,
+            Channel.Format, Channel.Tone, Channel.Callsign, Groups);
+        return words.All(w => all.Contains(w, StringComparison.CurrentCultureIgnoreCase));
+    }
+
+    private static string MHz(double hz) => (hz / 1e6).ToString("0.0000##", CultureInfo.InvariantCulture);
+
+    private static bool TryMHz(string? text, out double hz)
+    {
+        bool ok = double.TryParse((text ?? "").Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double v);
+        hz = Math.Round(v * 1e6 / 10) * 10;
+        return ok;
+    }
+}
+
+/// <summary>A group as a tick box beside the selected channels: ticked when all are in it, half when some are.</summary>
+public sealed class GroupTick(string name, bool? member, Action<string, bool> set) : ObservableObject
+{
+    public string Name { get; } = name;
+    public bool? Member
+    {
+        get => member;
+        set
+        {
+            // Clicking a half-ticked box takes every selected channel out of the group.
+            bool on = value == true;
+            if (member == on) return;
+            member = on;
+            OnPropertyChanged();
+            set(Name, on);
+        }
+    }
+}
+
+/// <summary>A file that has been read and waits for the user to name the group its channels go in.</summary>
+public sealed record PendingImport(string FileName, List<MemoryChannel> Channels)
+{
+    public string Summary
+    {
+        get
+        {
+            int trunked = Channels.Count(RadioReferenceCsv.IsTrunked);
+            return $"{FileName}: {Channels.Count} channels" + (trunked > 0 ? $" ({trunked} of them trunked-system frequencies)" : "");
+        }
+    }
+}
+
+/// <summary>
+/// The channel editor: every stored channel in a list that can be filtered, the fields of the
+/// selected one, the groups the selected ones are in, and the import of RadioReference files.
+/// </summary>
+public sealed partial class ChannelsViewModel : ObservableObject
+{
+    public const string AllGroups = "All groups", NoGroup = "(in no group)";
+    private readonly MemoryStore _store;
+    private List<ChannelRow> _selection = [];
+    private readonly Queue<PendingImport> _queue = new();
+    private bool _dirty, _loading;
+    private int _seen;
+
+    /// <summary>The channels have been changed and saved: other windows should show them again.</summary>
+    public event Action? Edited;
+
+    public ObservableCollection<ChannelRow> Rows { get; } = [];
+    public ObservableCollection<GroupTick> GroupTicks { get; } = [];
+    public IReadOnlyList<string> ReceiveChoices => ChannelRow.ReceiveChoices;
+
+    [ObservableProperty] private string _filter = "";
+    [ObservableProperty] private IReadOnlyList<string> _groupChoices = [AllGroups];
+    [ObservableProperty] private string _groupFilter = AllGroups;
+    [ObservableProperty] private string _countText = "";
+    /// <summary>The one selected channel, whose fields are shown; null with none or several selected.</summary>
+    [ObservableProperty] private ChannelRow? _selected;
+    [ObservableProperty] private string _selectionText = "";
+    [ObservableProperty] private bool _hasSelection;
+    [ObservableProperty] private string _newGroup = "";
+    [ObservableProperty] private string _status = "";
+    [ObservableProperty] private PendingImport? _pending;
+    [ObservableProperty] private string _importGroup = "";
+
+    public ChannelsViewModel(MemoryStore store)
+    {
+        _store = store;
+        _seen = store.Version;
+        Reload();
+    }
+
+    // ---- the list ---------------------------------------------------------------------------
+
+    private void Touch() => _dirty = true;
+
+    /// <summary>Write the changes made since the last call, and tell the other windows.</summary>
+    public void Flush()
+    {
+        if (!_dirty) return;
+        _dirty = false;
+        _store.Save();
+        _seen = _store.Version;
+        Edited?.Invoke();
+    }
+
+    /// <summary>Show the channels again if something else (the main window) has changed them.</summary>
+    public void ReloadIfChanged()
+    {
+        if (_store.Version == _seen) return;
+        _seen = _store.Version;
+        Reload();
+    }
+
+    private void Reload()
+    {
+        _loading = true;
+        var names = _store.GroupNames();
+        string keep = GroupFilter;
+        GroupChoices = [AllGroups, .. names, NoGroup];
+        GroupFilter = GroupChoices.Contains(keep) ? keep : AllGroups;
+        _loading = false;
+
+        string[] words = Filter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        Rows.Clear();
+        foreach (var c in _store.Channels.OrderBy(c => c.FrequencyHz).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase))
+        {
+            if (GroupFilter == NoGroup ? c.Groups.Count > 0 : GroupFilter != AllGroups && !c.Groups.Contains(GroupFilter)) continue;
+            var row = new ChannelRow(c, Touch);
+            if (row.Matches(words)) Rows.Add(row);
+        }
+        CountText = Rows.Count == _store.Channels.Count ? $"{Rows.Count} channels" : $"{Rows.Count} of {_store.Channels.Count} channels";
+        SetSelection([]);
+    }
+
+    partial void OnFilterChanged(string value) => Reload();
+
+    partial void OnGroupFilterChanged(string value)
+    {
+        if (!_loading && value is not null) Reload();
+    }
+
+    /// <summary>The rows selected in the list.</summary>
+    public void SetSelection(IReadOnlyList<ChannelRow> rows)
+    {
+        _selection = [.. rows];
+        Selected = _selection.Count == 1 ? _selection[0] : null;
+        HasSelection = _selection.Count > 0;
+        SelectionText = _selection.Count switch
+        {
+            0 => "Select a channel to edit it. Select several (Shift or Cmd/Ctrl-click) to put them in groups together.",
+            1 => "",
+            _ => $"{_selection.Count} channels selected: the groups and buttons below apply to all of them.",
+        };
+        RefreshTicks();
+    }
+
+    // ---- groups -----------------------------------------------------------------------------
+
+    private void RefreshTicks()
+    {
+        GroupTicks.Clear();
+        if (_selection.Count == 0) return;
+        foreach (string name in _store.GroupNames())
+        {
+            int n = _selection.Count(r => r.Channel.Groups.Contains(name));
+            GroupTicks.Add(new GroupTick(name, n == 0 ? false : n == _selection.Count ? true : null, SetMembership));
+        }
+    }
+
+    private void SetMembership(string group, bool member)
+    {
+        foreach (var row in _selection)
+        {
+            bool had = row.Channel.Groups.Contains(group);
+            if (member && !had) row.Channel.Groups.Add(group);
+            else if (!member && had) row.Channel.Groups.Remove(group);
+            else continue;
+            row.GroupsChanged();
+        }
+        Touch();
+        RefreshGroupChoices();
+    }
+
+    // The filter's list of groups, kept in step without touching the rows: a channel taken out of
+    // the group being shown stays on screen until the filter is next changed.
+    private void RefreshGroupChoices()
+    {
+        _loading = true;
+        string keep = GroupFilter;
+        GroupChoices = [AllGroups, .. _store.GroupNames(), NoGroup];
+        GroupFilter = GroupChoices.Contains(keep) ? keep : AllGroups;
+        _loading = false;
+    }
+
+    /// <summary>Put the selected channels in a group with the name typed, making it if it is new.</summary>
+    [RelayCommand]
+    private void AddToNewGroup()
+    {
+        string name = NewGroup.Trim();
+        if (name.Length == 0 || _selection.Count == 0)
+        {
+            Status = name.Length == 0 ? "Type a name for the group first" : "Select the channels to put in the group first";
+            return;
+        }
+        SetMembership(name, true);
+        NewGroup = "";
+        Status = $"{_selection.Count} channel{(_selection.Count == 1 ? "" : "s")} in \"{name}\"";
+        RefreshTicks();
+    }
+
+    [RelayCommand]
+    private void ScanSelected() => SetScan(true);
+
+    [RelayCommand]
+    private void UnscanSelected() => SetScan(false);
+
+    private void SetScan(bool on)
+    {
+        foreach (var row in _selection)
+        {
+            row.Channel.Scan = on;
+            row.ScanChanged();
+        }
+        if (_selection.Count > 0) Touch();
+    }
+
+    [RelayCommand]
+    private void DeleteSelected()
+    {
+        if (_selection.Count == 0) return;
+        int n = _selection.Count;
+        foreach (var row in _selection.ToList())
+        {
+            _store.Channels.Remove(row.Channel);
+            Rows.Remove(row);
+        }
+        Touch();
+        Status = $"{n} channel{(n == 1 ? "" : "s")} deleted";
+        CountText = Rows.Count == _store.Channels.Count ? $"{Rows.Count} channels" : $"{Rows.Count} of {_store.Channels.Count} channels";
+        SetSelection([]);
+        RefreshGroupChoices();
+    }
+
+    // ---- import -----------------------------------------------------------------------------
+
+    /// <summary>A file the user chose. It is read at once and then waits for a group name.</summary>
+    public void OfferImport(string fileName, string text)
+    {
+        try
+        {
+            var channels = RadioReferenceCsv.Parse(text);
+            if (channels.Count == 0)
+            {
+                Status = $"{fileName}: no frequencies in it";
+                return;
+            }
+            _queue.Enqueue(new PendingImport(fileName, channels));
+            if (Pending is null) NextImport();
+        }
+        catch (FormatException e)
+        {
+            Status = $"{fileName}: {e.Message}";
+        }
+    }
+
+    private void NextImport()
+    {
+        Pending = _queue.Count > 0 ? _queue.Dequeue() : null;
+        if (Pending is not null) ImportGroup = DefaultGroup(Pending.FileName);
+    }
+
+    // RadioReference names a county's download ctid_<county number>_<time>.csv, and the file does
+    // not say which county that is.
+    private static string DefaultGroup(string fileName)
+    {
+        string[] parts = Path.GetFileNameWithoutExtension(fileName).Split('_');
+        return parts is ["ctid", var id, ..] ? $"RadioReference county {id}" : Path.GetFileNameWithoutExtension(fileName);
+    }
+
+    [RelayCommand]
+    private void ConfirmImport()
+    {
+        if (Pending is null) return;
+        string group = ImportGroup.Trim();
+        if (group.Length == 0)
+        {
+            Status = "Type a group name for the imported channels";
+            return;
+        }
+        var result = RadioReferenceCsv.Import(_store, Pending.Channels, group);
+        Status = $"{Pending.FileName} into \"{group}\": {result}";
+        _dirty = true;
+        Flush();
+        NextImport();
+        Reload();
+    }
+
+    [RelayCommand]
+    private void CancelImport() => NextImport();
+}

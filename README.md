@@ -11,8 +11,12 @@ digital voice modes.
 - Tuning by typing a frequency, by step buttons, or by rolling the mouse wheel over a digit
 - Mode, filter and step chosen from a United States band plan, or by hand
 - Squelch, a level bar, and automatic front-end gain
-- Stored channels in groups, a scan over them that looks at several megahertz at a time, and
-  a search between two frequencies
+- Stored channels in groups (a channel can be in several), a scan over the groups chosen that
+  looks at several megahertz at a time, and a search between two frequencies
+- Import of RadioReference frequency downloads (the CSV file of a county or an agency), and a
+  channel editor: filter the list, edit any field, put channels in groups
+- What is stored about a channel is on the display when the scanner is on it: its name, whose
+  it is, and its tag, tone or code, station class, repeater input and callsign
 - P25 Phase 1 (conventional): decoded speech, with the NAC, talkgroup and radio ID on the display
 - DMR (Tier II conventional: repeaters, and mobiles heard directly): decoded speech, with the
   color code, time slot, talkgroup, radio ID and talker alias. It follows one of the two time
@@ -26,7 +30,9 @@ digital voice modes.
 - Encrypted calls are shown and stay silent
 - Cellular telephone bands are blocked
 
-Not yet: trunk following, P25 Phase 2, C4FM (System Fusion), RadioReference import.
+Not yet: trunk following, P25 Phase 2, C4FM (System Fusion), fetching from RadioReference's web
+service. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
+the scan stops on. Trunked-system frequencies in a download are stored unticked.
 
 ### The AMBE speech codecs
 

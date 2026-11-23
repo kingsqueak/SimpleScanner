@@ -4,7 +4,7 @@
         xmlns:c="using:SimpleScanner.Controls"
         x:Class="SimpleScanner.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="SimpleScanner" Width="1130" Height="620" MinWidth="1060" MinHeight="590"
+        Title="SimpleScanner" Width="1130" Height="664" MinWidth="1060" MinHeight="634"
         WindowStartupLocation="CenterScreen">
   <DockPanel Margin="12">
 
@@ -42,6 +42,9 @@
             </Button.Flyout>
           </Button>
         </DockPanel>
+        <Button DockPanel.Dock="Bottom" Classes="seg" Content="Channels, groups and import…" Click="OnChannelsClick"
+                HorizontalAlignment="Stretch" Margin="0,8,0,0"
+                ToolTip.Tip="Open the channel editor: edit what is stored about each channel, put channels in groups, and load RadioReference CSV downloads" />
         <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
           <Button DockPanel.Dock="Right" Classes="seg" Content="Delete" Command="{Binding DeleteChannelCommand}" Margin="6,0,0,0"
                   ToolTip.Tip="Remove the selected channel" />
@@ -96,6 +99,11 @@
           <TextBlock Text="{Binding BandName}" Foreground="{DynamicResource LcdText}" FontSize="20"
                      TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
         </DockPanel>
+        <!-- What is stored about the channel: whose it is, then its particulars -->
+        <TextBlock Text="{Binding DetailText}" Foreground="{DynamicResource LcdText}" FontSize="14"
+                   TextTrimming="CharacterEllipsis" MinHeight="18" />
+        <TextBlock Text="{Binding InfoText}" Foreground="{DynamicResource LcdDim}" FontSize="13"
+                   TextTrimming="CharacterEllipsis" MinHeight="17" />
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
           <c:FrequencyReadout FrequencyHz="{Binding FrequencyHz}" FontSize="64"

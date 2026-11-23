@@ -7,3 +7,4 @@ obj/
 publish/
 artifacts/
 native/audio/out/
+native/digital/out/

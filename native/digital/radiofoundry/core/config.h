@@ -1,0 +1,582 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 The RadioFoundry Authors
+// Feature switches (config/features.mk sets them for firmware builds; everything defaults on here, e.g. for host
+// tests). Always defined to 0 or 1: test with #if CONFIG_X, never #ifdef. See docs/build-config.md.
+#ifndef RFOUNDRY_CONFIG_H
+#define RFOUNDRY_CONFIG_H
+
+#ifndef CONFIG_FM
+#define CONFIG_FM			1
+#endif
+#ifndef CONFIG_SUBTONE
+#define CONFIG_SUBTONE			1
+#endif
+#ifndef CONFIG_DMR
+#define CONFIG_DMR			1
+#endif
+#ifndef CONFIG_DMR_PRIVACY
+#define CONFIG_DMR_PRIVACY		1
+#endif
+#ifndef CONFIG_DMR_AES
+#define CONFIG_DMR_AES			CONFIG_DMR_PRIVACY
+#endif
+#ifndef CONFIG_DMR_TALKER_ALIAS
+#define CONFIG_DMR_TALKER_ALIAS		1
+#endif
+#ifndef CONFIG_DMR_GPS
+#define CONFIG_DMR_GPS			CONFIG_DMR
+#endif
+#ifndef CONFIG_DMR_SMS
+#define CONFIG_DMR_SMS			1
+#endif
+#ifndef CONFIG_DMR_TMS
+#define CONFIG_DMR_TMS			CONFIG_DMR_SMS
+#endif
+#ifndef CONFIG_DMR_ARS
+#define CONFIG_DMR_ARS			1
+#endif
+#ifndef CONFIG_DMR_LRRP
+#define CONFIG_DMR_LRRP			1
+#endif
+#ifndef CONFIG_DMR_SIGNALING
+#define CONFIG_DMR_SIGNALING		1
+#endif
+#ifndef CONFIG_DMR_EMERGENCY
+#define CONFIG_DMR_EMERGENCY		CONFIG_DMR
+#endif
+#ifndef CONFIG_DMR_ROAMING
+#define CONFIG_DMR_ROAMING		CONFIG_DMR
+#endif
+#ifndef CONFIG_DMR_TRUNK
+#define CONFIG_DMR_TRUNK		CONFIG_DMR
+#endif
+#ifndef CONFIG_DMR_TRUNK_TX
+#define CONFIG_DMR_TRUNK_TX		CONFIG_DMR_TRUNK
+#endif
+#ifndef CONFIG_DMR_TRUNK_SUPL
+#define CONFIG_DMR_TRUNK_SUPL		CONFIG_DMR_TRUNK_TX
+#endif
+#ifndef CONFIG_DMR_TRUNK_GW
+#define CONFIG_DMR_TRUNK_GW		CONFIG_DMR_TRUNK_TX
+#endif
+#ifndef CONFIG_DMR_IP_GATEWAY
+#define CONFIG_DMR_IP_GATEWAY		1
+#endif
+#ifndef CONFIG_VOICE_CAPTURE
+#define CONFIG_VOICE_CAPTURE		0
+#endif
+#ifndef CONFIG_ZONE_SHARE
+#define CONFIG_ZONE_SHARE		CONFIG_DMR
+#endif
+#ifndef CONFIG_DMR_UDP_COMPRESS
+#define CONFIG_DMR_UDP_COMPRESS		CONFIG_DMR
+#endif
+#ifndef CONFIG_NET_TCP
+#define CONFIG_NET_TCP			CONFIG_DMR_IP_GATEWAY
+#endif
+#ifndef CONFIG_NET_HTTP
+#define CONFIG_NET_HTTP			CONFIG_NET_TCP
+#endif
+#ifndef CONFIG_NET_HTTP_GZIP
+#define CONFIG_NET_HTTP_GZIP		CONFIG_NET_HTTP
+#endif
+#ifndef CONFIG_NET_WEBCTL
+#define CONFIG_NET_WEBCTL		CONFIG_NET_HTTP
+#endif
+#ifndef CONFIG_NET_RADIO_UDP
+#define CONFIG_NET_RADIO_UDP		CONFIG_DMR_IP_GATEWAY
+#endif
+#ifndef CONFIG_NET_RIGCTL
+#define CONFIG_NET_RIGCTL		CONFIG_NET_TCP
+#endif
+#ifndef CONFIG_NET_USRP
+#define CONFIG_NET_USRP			CONFIG_DMR_IP_GATEWAY
+#endif
+#ifndef CONFIG_MDNS
+#define CONFIG_MDNS			CONFIG_DMR_IP_GATEWAY
+#endif
+#ifndef CONFIG_TFTP
+#define CONFIG_TFTP			CONFIG_DMR_IP_GATEWAY
+#endif
+#ifndef CONFIG_TFTP_IDDB
+#define CONFIG_TFTP_IDDB		CONFIG_TFTP
+#endif
+#ifndef CONFIG_IDDB_COMPACT
+#define CONFIG_IDDB_COMPACT		CONFIG_DMR
+#endif
+#ifndef CONFIG_DMR_CONTROL_STATION
+#define CONFIG_DMR_CONTROL_STATION	CONFIG_DMR_IP_GATEWAY
+#endif
+#ifndef CONFIG_SFR
+#define CONFIG_SFR			1
+#endif
+#ifndef CONFIG_SFR_DUALPATH_RX
+#define CONFIG_SFR_DUALPATH_RX		CONFIG_SFR
+#endif
+#ifndef CONFIG_SFR_CWID
+#define CONFIG_SFR_CWID			CONFIG_SFR
+#endif
+#ifndef CONFIG_USB
+#define CONFIG_USB			1
+#endif
+#ifndef CONFIG_HOSTLINK
+#define CONFIG_HOSTLINK			CONFIG_USB
+#endif
+#ifndef CONFIG_SNMP
+#define CONFIG_SNMP			CONFIG_DMR_IP_GATEWAY
+#endif
+#ifndef CONFIG_USB_SERIAL_REQUEST
+#define CONFIG_USB_SERIAL_REQUEST	CONFIG_USB_NETWORK
+#endif
+#ifndef CONFIG_USB_NETWORK
+#define CONFIG_USB_NETWORK		1
+#endif
+#ifndef CONFIG_NET_PPP
+#define CONFIG_NET_PPP			0
+#endif
+#ifndef CONFIG_HOTSPOT
+#define CONFIG_HOTSPOT			1
+#endif
+// The one switch that defaults off here too: it adds members to hal_dmr_modem_t (the split duplex operations), so
+// every file of a program must see the same value; host tests that want it pass -DCONFIG_HOTSPOT_SPLIT=1 to all
+#ifndef CONFIG_HOTSPOT_SPLIT
+#define CONFIG_HOTSPOT_SPLIT		0
+#endif
+#ifndef CONFIG_DEBUGLINK
+#define CONFIG_DEBUGLINK		CONFIG_HOSTLINK
+#endif
+#ifndef CONFIG_SATELLITE_TLE
+#define CONFIG_SATELLITE_TLE		0
+#endif
+#ifndef CONFIG_TASK_STACKS
+#define CONFIG_TASK_STACKS		CONFIG_DEBUGLINK
+#endif
+#ifndef CONFIG_CPS_OPENFW
+#define CONFIG_CPS_OPENFW		CONFIG_HOSTLINK
+#endif
+#ifndef CONFIG_CPS_FAST
+#define CONFIG_CPS_FAST			(CONFIG_CPS_OPENFW && (CONFIG_DEBUGLINK || CONFIG_STUB_ENTRY))
+#endif
+#ifndef CONFIG_VFO
+#define CONFIG_VFO			1
+#endif
+#ifndef CONFIG_VFO_FM
+#define CONFIG_VFO_FM			(CONFIG_VFO && CONFIG_FM)
+#endif
+#ifndef CONFIG_VFO_DMR
+#define CONFIG_VFO_DMR			(CONFIG_VFO && CONFIG_DMR)
+#endif
+#ifndef CONFIG_DIAG
+#define CONFIG_DIAG			1
+#endif
+#ifndef CONFIG_BACKLIGHT_TEST
+#define CONFIG_BACKLIGHT_TEST		0
+#endif
+#ifndef CONFIG_FONT_XL
+#define CONFIG_FONT_XL			1
+#endif
+#ifndef CONFIG_FONT_AA
+#define CONFIG_FONT_AA			1
+#endif
+#ifndef CONFIG_FONT_BIG
+#define CONFIG_FONT_BIG			CONFIG_FONT_AA
+#endif
+// Languages the radio can show besides English (core/ui/lang/<code>.po, docs/dev/translating.md): one switch each.
+// CONFIG_LANG_ANY: at least one is built (the translation lookup, the Latin-1 glyphs); add each new switch to it
+#ifndef CONFIG_LANG_ES
+#define CONFIG_LANG_ES			1
+#endif
+#ifndef CONFIG_LANG_IT
+#define CONFIG_LANG_IT			0
+#endif
+#ifndef CONFIG_LANG_FR
+#define CONFIG_LANG_FR			0
+#endif
+// Chinese brings its own 16x16 glyphs (core/ui/cjk_font_data.c) and UTF-8 text the text layer decodes (core/ui/gfx.c)
+#ifndef CONFIG_LANG_ZH
+#define CONFIG_LANG_ZH			0
+#endif
+// The CJK glyph table (cjk_font_data.c) is a ~120 KB rodata cost. It can stay off while CONFIG_LANG_ZH's translated
+// menus stay on, for a board too small to show Chinese (docs/build-config.md). Defaults to LANG_ZH; a board sets it 0
+#ifndef CONFIG_CJK_GLYPHS
+#define CONFIG_CJK_GLYPHS		CONFIG_LANG_ZH
+#endif
+#define CONFIG_LANG_ANY			(CONFIG_LANG_ES || CONFIG_LANG_IT || CONFIG_LANG_FR || CONFIG_LANG_ZH)
+// The language the radio starts in until the user picks one (CONFIG_LANG_DEFAULT_<CODE>, needs its CONFIG_LANG_<CODE>):
+// all 0 = English
+#ifndef CONFIG_LANG_DEFAULT_ES
+#define CONFIG_LANG_DEFAULT_ES		0
+#endif
+#ifndef CONFIG_LANG_DEFAULT_IT
+#define CONFIG_LANG_DEFAULT_IT		0
+#endif
+#ifndef CONFIG_LANG_DEFAULT_FR
+#define CONFIG_LANG_DEFAULT_FR		0
+#endif
+#ifndef CONFIG_LANG_DEFAULT_ZH
+#define CONFIG_LANG_DEFAULT_ZH		0
+#endif
+#ifndef CONFIG_UI_COLOR
+#define CONFIG_UI_COLOR			1
+#endif
+#ifndef CONFIG_UI_SETTINGS
+#define CONFIG_UI_SETTINGS		1
+#endif
+#ifndef CONFIG_SCAN
+#define CONFIG_SCAN			1
+#endif
+#ifndef CONFIG_DUAL_WATCH
+#define CONFIG_DUAL_WATCH		CONFIG_SCAN
+#endif
+#ifndef CONFIG_KEY_ASSIGN
+#define CONFIG_KEY_ASSIGN		1
+#endif
+#ifndef CONFIG_CHANNEL_LIST
+#define CONFIG_CHANNEL_LIST		1
+#endif
+#ifndef CONFIG_CHANNEL_EDIT
+#define CONFIG_CHANNEL_EDIT		CONFIG_CHANNEL_LIST
+#endif
+#ifndef CONFIG_VOLUME_BAR
+#define CONFIG_VOLUME_BAR		1
+#endif
+#ifndef CONFIG_ZONE_EDIT
+#define CONFIG_ZONE_EDIT		CONFIG_CHANNEL_EDIT
+#endif
+#ifndef CONFIG_CONTACT_EDIT
+#define CONFIG_CONTACT_EDIT		(CONFIG_CHANNEL_EDIT && CONFIG_DMR)
+#endif
+// Zone writes that move zone indexes (core/codeplug/zone_edit.h): the zone editor's, and zone sharing's import of a
+// new zone. Whoever keeps a zone index (the radio core, dual watch, the open zone screens) follows them
+#define CONFIG_ZONE_WRITE		(CONFIG_ZONE_EDIT || CONFIG_ZONE_SHARE)
+#ifndef CONFIG_BEEP
+#define CONFIG_BEEP			1
+#endif
+#ifndef CONFIG_SIG_TONES
+#define CONFIG_SIG_TONES		CONFIG_BEEP
+#endif
+#if CONFIG_SIG_TONES && !CONFIG_BEEP
+#error "CONFIG_SIG_TONES needs CONFIG_BEEP"
+#endif
+#ifndef CONFIG_FM_TX_TONES
+#define CONFIG_FM_TX_TONES		CONFIG_FM
+#endif
+#ifndef CONFIG_DTMF
+#define CONFIG_DTMF			CONFIG_FM
+#endif
+#ifndef CONFIG_VOX
+#define CONFIG_VOX			CONFIG_FM
+#endif
+#ifndef CONFIG_REF_TRIM
+#define CONFIG_REF_TRIM			1
+#endif
+#ifndef CONFIG_BATTERY_SAVE
+#define CONFIG_BATTERY_SAVE		CONFIG_FM
+#endif
+#ifndef CONFIG_VIBRATE
+#define CONFIG_VIBRATE			1
+#endif
+#ifndef CONFIG_GPS
+#define CONFIG_GPS			1
+#endif
+#ifndef CONFIG_AUDIO_PROBE
+#define CONFIG_AUDIO_PROBE		(CONFIG_DEBUGLINK && CONFIG_DMR)
+#endif
+#ifndef CONFIG_STUB_ENTRY
+#define CONFIG_STUB_ENTRY		CONFIG_HOSTLINK
+#endif
+#ifndef CONFIG_CRASH_LOG
+#define CONFIG_CRASH_LOG		1
+#endif
+#ifndef CONFIG_CRASH_SCREEN
+#define CONFIG_CRASH_SCREEN		CONFIG_CRASH_LOG
+#endif
+#ifndef CONFIG_CRASH_REPORT
+#define CONFIG_CRASH_REPORT		(CONFIG_CRASH_SCREEN && CONFIG_DMR)
+#endif
+#ifndef CONFIG_WATCHDOG
+#define CONFIG_WATCHDOG			1
+#endif
+#ifndef CONFIG_SUPPORT_INFO
+#define CONFIG_SUPPORT_INFO		1
+#endif
+#ifndef CONFIG_FAULT_TRACE
+#define CONFIG_FAULT_TRACE		1
+#endif
+#ifndef CONFIG_NAND_STORAGE
+#define CONFIG_NAND_STORAGE		0
+#endif
+#ifndef CONFIG_AM_RX
+#define CONFIG_AM_RX			CONFIG_FM
+#endif
+#ifndef CONFIG_BCAST_FM
+#define CONFIG_BCAST_FM			1
+#endif
+#ifndef CONFIG_RX_EXT
+#define CONFIG_RX_EXT			1
+#endif
+#ifndef CONFIG_APRS
+#define CONFIG_APRS			CONFIG_FM
+#endif
+// APRS's two ways out (docs/spec/aprs.md 1): AX.25 / AFSK on FM with everything packet (KISS, messages, receive), and
+// position reports over DMR. CONFIG_APRS alone is the engine: the beacon triggers, the settings, the page
+#ifndef CONFIG_APRS_AFSK
+#define CONFIG_APRS_AFSK		(CONFIG_APRS && CONFIG_FM)
+#endif
+#ifndef CONFIG_APRS_DMR
+#define CONFIG_APRS_DMR			(CONFIG_APRS && CONFIG_DMR)
+#endif
+#ifndef CONFIG_APRS_RX
+#define CONFIG_APRS_RX			CONFIG_APRS_AFSK
+#endif
+#ifndef CONFIG_APRS_IGATE
+#define CONFIG_APRS_IGATE		(CONFIG_APRS_RX && CONFIG_HOSTLINK)
+#endif
+// P25 Phase 1 conventional (core/p25): the one switch. Derived from it (config/features.mk, never set by hand): AIR the
+// air interface (core/air, docs/spec/air-interface.md: the framer for digital modes the core frames itself and the
+// board's provider behind board.air), IMBE the full-rate voice decoder, MBE the MBE core it sits on (core/mbe).
+// AIR_RAW: bench access to raw symbols over the debug link
+#ifndef CONFIG_P25
+#define CONFIG_P25			0
+#endif
+// NXDN conventional voice (core/nxdn, docs/spec/nxdn.md). AIR is on with any air-framed mode
+#ifndef CONFIG_NXDN
+#define CONFIG_NXDN			0
+#endif
+#ifndef CONFIG_NXDN_SCRAMBLER
+#define CONFIG_NXDN_SCRAMBLER		0
+#endif
+#ifndef CONFIG_AIR
+#define CONFIG_AIR			(CONFIG_P25 || CONFIG_NXDN)
+#endif
+// P25 trunked: the codec of its systems and channels (docs/spec/p25-codeplug.md 3), the control channel decoded, voice
+// channel grants followed and, where the system allows it, registration and transmit on a grant (core/p25/p25_follow.c)
+#ifndef CONFIG_P25_TRUNK
+#define CONFIG_P25_TRUNK		0
+#endif
+#ifndef CONFIG_AIR_RAW
+#define CONFIG_AIR_RAW			0
+#endif
+#ifndef CONFIG_IMBE
+#define CONFIG_IMBE			CONFIG_P25
+#endif
+#ifndef CONFIG_MBE
+#define CONFIG_MBE			CONFIG_IMBE
+#endif
+// Derived: zone sharing carries channels of a kind and their systems (docs/spec/zone-share.md 4.2) in a build with a
+// mode's codec. Without it a share leaves channels of a kind out and refuses a record that has them
+#ifndef CONFIG_ZONE_SHARE_MODES
+#define CONFIG_ZONE_SHARE_MODES		(CONFIG_ZONE_SHARE && (CONFIG_P25 || CONFIG_NXDN || CONFIG_DMR_TRUNK))
+#endif
+// The GPS status screen: the satellites (NMEA GSV / GSA) on a sky plot and signal bars, the fix's quality, the grid
+// locator (core/position/nmea_sky.c, core/ui/ui_gps.c). Needs GPS
+#ifndef CONFIG_GPS_SKY
+#define CONFIG_GPS_SKY			CONFIG_GPS
+#endif
+#ifndef CONFIG_NET_KISS
+#define CONFIG_NET_KISS			(CONFIG_NET_TCP && CONFIG_APRS_AFSK)
+#endif
+#ifndef CONFIG_NET_APRSIS
+#define CONFIG_NET_APRSIS		(CONFIG_NET_TCP && CONFIG_APRS_AFSK)
+#endif
+
+// Large state that only the CPU touches (never a DMA buffer) can go in RAM the board keeps for that, the STM32F4's
+// CCM: faster, and off the bus the DMA uses. RFOUNDRY_CPU_RAM is zeroed at start-up like .bss; RFOUNDRY_CPU_RAM_NOINIT isn't
+// (for state written before it's read). Without the board's sections both are ordinary RAM
+#ifdef RFOUNDRY_CPU_RAM_SECTION
+#define RFOUNDRY_CPU_RAM		__attribute__((section(RFOUNDRY_CPU_RAM_SECTION)))
+#else
+#define RFOUNDRY_CPU_RAM
+#endif
+#ifdef RFOUNDRY_CPU_RAM_NOINIT_SECTION
+#define RFOUNDRY_CPU_RAM_NOINIT	__attribute__((section(RFOUNDRY_CPU_RAM_NOINIT_SECTION)))
+#else
+#define RFOUNDRY_CPU_RAM_NOINIT
+#endif
+// Hot constant tables: copied to CPU-only RAM before main where the platform has one (RFOUNDRY_CPU_DATA_SECTION),
+// else left in flash. Only for tables a hot loop indexes at random; the copy costs RAM as well as flash
+#ifdef RFOUNDRY_CPU_DATA_SECTION
+#define RFOUNDRY_CPU_DATA		__attribute__((section(RFOUNDRY_CPU_DATA_SECTION)))
+#else
+#define RFOUNDRY_CPU_DATA
+#endif
+// Large, cold state can go in RAM the board sets apart that is slower or shared with another bus master, so it costs
+// no main RAM: zeroed at start-up like .bss. Only for buffers task code uses now and then (a flash sector, a request
+// being assembled): never one an interrupt, the audio or the modem touches, a stack, or one on a per-sample path.
+// Without the board's section it is ordinary RAM
+#ifdef RFOUNDRY_COLD_RAM_SECTION
+#define RFOUNDRY_COLD_RAM		__attribute__((section(RFOUNDRY_COLD_RAM_SECTION)))
+#else
+#define RFOUNDRY_COLD_RAM
+#endif
+
+// Derived: the shared packet data / CSBK code
+// Any of the radio's own services on the USB network link (core/net/net.c starts and polls them)
+#define CONFIG_NET_LOCAL		(CONFIG_NET_TCP || CONFIG_MDNS || CONFIG_TFTP || CONFIG_NET_USRP || CONFIG_NET_RADIO_UDP)
+#ifndef CONFIG_DMR_DATA_CORE
+#define CONFIG_DMR_DATA_CORE		(CONFIG_DMR_SMS || CONFIG_DMR_ARS || CONFIG_DMR_LRRP || CONFIG_DMR_SIGNALING || \
+					 CONFIG_DMR_EMERGENCY || CONFIG_DMR_IP_GATEWAY || CONFIG_ZONE_SHARE || CONFIG_CRASH_REPORT || \
+					 CONFIG_APRS_DMR)
+#endif
+// The position service (core/position): the board GPS, a host's NMEA, the fixed position. Built for the GPS and for
+// everything that reports our position (DMR GPS Info, LRRP, APRS), so each works without the others
+#ifndef CONFIG_POSITION
+#define CONFIG_POSITION			(CONFIG_GPS || CONFIG_APRS || CONFIG_DMR_LRRP || CONFIG_DMR_GPS)
+#endif
+// ... and its host source: NMEA from a computer comes in through APRS's host link and debug link command only
+#define CONFIG_POSITION_HOST		CONFIG_APRS
+// The air queue (core/dmr/dmrAirQueue.c): what the IP gateway and zone sharing send, in order with the guard
+#define CONFIG_DMR_AIR_QUEUE		(CONFIG_DMR_IP_GATEWAY || CONFIG_ZONE_SHARE)
+
+// Numeric build values
+#ifndef CONFIG_DMR_AIR_QUEUE_BYTES
+#define CONFIG_DMR_AIR_QUEUE_BYTES	2048
+#endif
+#ifndef CONFIG_DMR_DATA_TX_GUARD_MS
+#define CONFIG_DMR_DATA_TX_GUARD_MS	250
+#endif
+#ifndef CONFIG_DISPLAY_INSET_TOP
+#define CONFIG_DISPLAY_INSET_TOP	0
+#endif
+#ifndef CONFIG_DISPLAY_INSET_BOTTOM
+#define CONFIG_DISPLAY_INSET_BOTTOM	0
+#endif
+#ifndef CONFIG_DISPLAY_INSET_LEFT
+#define CONFIG_DISPLAY_INSET_LEFT	0
+#endif
+#ifndef CONFIG_DISPLAY_INSET_RIGHT
+#define CONFIG_DISPLAY_INSET_RIGHT	0
+#endif
+
+#if CONFIG_SUBTONE && !CONFIG_FM
+#error "CONFIG_SUBTONE needs CONFIG_FM"
+#endif
+#if (CONFIG_DMR_PRIVACY || CONFIG_DMR_TALKER_ALIAS || CONFIG_DMR_GPS || CONFIG_DMR_DATA_CORE || CONFIG_DMR_ROAMING || CONFIG_DMR_TRUNK || CONFIG_SFR || \
+     CONFIG_HOTSPOT || CONFIG_DMR_UDP_COMPRESS || CONFIG_ZONE_SHARE) && !CONFIG_DMR
+#error "a DMR feature is on without CONFIG_DMR"
+#endif
+#if CONFIG_DMR_TRUNK_TX && !CONFIG_DMR_TRUNK
+#error "CONFIG_DMR_TRUNK_TX needs CONFIG_DMR_TRUNK"
+#endif
+#if CONFIG_DMR_TRUNK_SUPL && !CONFIG_DMR_TRUNK_TX
+#error "CONFIG_DMR_TRUNK_SUPL needs CONFIG_DMR_TRUNK_TX"
+#endif
+#if CONFIG_DMR_TRUNK_GW && !CONFIG_DMR_TRUNK_TX
+#error "CONFIG_DMR_TRUNK_GW needs CONFIG_DMR_TRUNK_TX"
+#endif
+#if CONFIG_VOICE_CAPTURE && !CONFIG_DMR
+#error "CONFIG_VOICE_CAPTURE needs CONFIG_DMR"
+#endif
+#if CONFIG_HOTSPOT && !CONFIG_HOSTLINK
+#error "CONFIG_HOTSPOT needs CONFIG_HOSTLINK"
+#endif
+#if (CONFIG_SFR_DUALPATH_RX || CONFIG_SFR_CWID) && !CONFIG_SFR
+#error "CONFIG_SFR_DUALPATH_RX and CONFIG_SFR_CWID need CONFIG_SFR"
+#endif
+#if CONFIG_HOTSPOT_SPLIT && !CONFIG_HOTSPOT
+#error "CONFIG_HOTSPOT_SPLIT needs CONFIG_HOTSPOT"
+#endif
+#if CONFIG_DEBUGLINK && !CONFIG_HOSTLINK
+#error "CONFIG_DEBUGLINK needs CONFIG_HOSTLINK"
+#endif
+#if CONFIG_SATELLITE_TLE && !CONFIG_DEBUGLINK
+#error "CONFIG_SATELLITE_TLE needs CONFIG_DEBUGLINK"
+#endif
+#if CONFIG_TASK_STACKS && !CONFIG_DEBUGLINK
+#error "CONFIG_TASK_STACKS needs CONFIG_DEBUGLINK"
+#endif
+#if CONFIG_CPS_OPENFW && !CONFIG_HOSTLINK
+#error "CONFIG_CPS_OPENFW needs CONFIG_HOSTLINK"
+#endif
+#if CONFIG_CPS_FAST && !(CONFIG_CPS_OPENFW && (CONFIG_DEBUGLINK || CONFIG_STUB_ENTRY))
+#error "CONFIG_CPS_FAST needs CONFIG_CPS_OPENFW, and CONFIG_DEBUGLINK or CONFIG_STUB_ENTRY"
+#endif
+#if CONFIG_DMR_EMERGENCY && !CONFIG_DMR_DATA_CORE
+#error "CONFIG_DMR_EMERGENCY needs CONFIG_DMR_DATA_CORE (the alarm is a CSBK)"
+#endif
+#if CONFIG_DMR_IP_GATEWAY && !(CONFIG_USB_NETWORK || CONFIG_NET_PPP)
+#error "CONFIG_DMR_IP_GATEWAY needs CONFIG_USB_NETWORK or CONFIG_NET_PPP (a link to the host)"
+#endif
+#if CONFIG_NET_PPP && !(CONFIG_HOSTLINK && CONFIG_DMR_IP_GATEWAY)
+#error "CONFIG_NET_PPP needs CONFIG_HOSTLINK and CONFIG_DMR_IP_GATEWAY"
+#endif
+#if CONFIG_AIR_RAW && !CONFIG_AIR
+#error "CONFIG_AIR_RAW needs CONFIG_P25 or CONFIG_NXDN (an air-framed mode)"
+#endif
+#if CONFIG_AIR_RAW && !CONFIG_DEBUGLINK
+#error "CONFIG_AIR_RAW needs CONFIG_DEBUGLINK"
+#endif
+#if CONFIG_NET_TCP && !CONFIG_DMR_IP_GATEWAY
+#error "CONFIG_NET_TCP needs CONFIG_DMR_IP_GATEWAY"
+#endif
+#if (CONFIG_NET_HTTP || CONFIG_NET_RIGCTL) && !CONFIG_NET_TCP
+#error "CONFIG_NET_HTTP and CONFIG_NET_RIGCTL need CONFIG_NET_TCP"
+#endif
+#if (CONFIG_NET_KISS || CONFIG_NET_APRSIS) && !(CONFIG_NET_TCP && CONFIG_APRS_AFSK)
+#error "CONFIG_NET_KISS and CONFIG_NET_APRSIS need CONFIG_NET_TCP and CONFIG_APRS_AFSK"
+#endif
+#if (CONFIG_MDNS || CONFIG_TFTP || CONFIG_NET_RADIO_UDP) && !CONFIG_DMR_IP_GATEWAY
+#error "CONFIG_MDNS, CONFIG_TFTP and CONFIG_NET_RADIO_UDP need CONFIG_DMR_IP_GATEWAY (the IP stack they run on)"
+#endif
+#if CONFIG_IDDB_COMPACT && !CONFIG_DMR
+#error "CONFIG_IDDB_COMPACT needs CONFIG_DMR"
+#endif
+#if CONFIG_TFTP_IDDB && !CONFIG_TFTP
+#error "CONFIG_TFTP_IDDB needs CONFIG_TFTP"
+#endif
+#if CONFIG_DMR_TMS && !CONFIG_DMR_SMS
+#error "CONFIG_DMR_TMS needs CONFIG_DMR_SMS"
+#endif
+#if CONFIG_DMR_CONTROL_STATION && !CONFIG_DMR_IP_GATEWAY
+#error "CONFIG_DMR_CONTROL_STATION needs CONFIG_DMR_IP_GATEWAY"
+#endif
+#if CONFIG_SNMP && !CONFIG_DMR_IP_GATEWAY
+#error "CONFIG_SNMP needs CONFIG_DMR_IP_GATEWAY"
+#endif
+#if CONFIG_USB_SERIAL_REQUEST && !CONFIG_USB_NETWORK
+#error "CONFIG_USB_SERIAL_REQUEST needs CONFIG_USB_NETWORK"
+#endif
+#if CONFIG_USB_NETWORK && !CONFIG_USB
+#error "CONFIG_USB_NETWORK needs CONFIG_USB"
+#endif
+#if (CONFIG_VFO_FM && !(CONFIG_VFO && CONFIG_FM)) || (CONFIG_VFO_DMR && !(CONFIG_VFO && CONFIG_DMR))
+#error "a VFO kind is on without CONFIG_VFO or its mode"
+#endif
+#if (CONFIG_FM_TX_TONES || CONFIG_DTMF || CONFIG_VOX || CONFIG_BATTERY_SAVE || CONFIG_AM_RX) && !CONFIG_FM
+#error "an FM feature is on without CONFIG_FM"
+#endif
+#if CONFIG_AUDIO_PROBE && !(CONFIG_DEBUGLINK && CONFIG_DMR)
+#error "CONFIG_AUDIO_PROBE needs CONFIG_DEBUGLINK and CONFIG_DMR"
+#endif
+#if CONFIG_CRASH_SCREEN && !CONFIG_CRASH_LOG
+#error "CONFIG_CRASH_SCREEN needs CONFIG_CRASH_LOG"
+#endif
+#if CONFIG_CRASH_REPORT && !(CONFIG_CRASH_SCREEN && CONFIG_DMR)
+#error "CONFIG_CRASH_REPORT needs CONFIG_CRASH_SCREEN and CONFIG_DMR"
+#endif
+#if CONFIG_STUB_ENTRY && !CONFIG_HOSTLINK
+#error "CONFIG_STUB_ENTRY needs CONFIG_HOSTLINK"
+#endif
+#if (CONFIG_APRS_AFSK && !(CONFIG_APRS && CONFIG_FM)) || (CONFIG_APRS_DMR && !(CONFIG_APRS && CONFIG_DMR))
+#error "an APRS backend is on without its parents (APRS_AFSK needs APRS and FM; APRS_DMR needs APRS and DMR)"
+#endif
+#if CONFIG_APRS && !CONFIG_APRS_AFSK && !CONFIG_APRS_DMR
+#error "CONFIG_APRS needs a backend: CONFIG_APRS_AFSK or CONFIG_APRS_DMR"
+#endif
+#if CONFIG_GPS_SKY && !CONFIG_GPS
+#error "CONFIG_GPS_SKY needs CONFIG_GPS"
+#endif
+#if CONFIG_P25_TRUNK && !CONFIG_P25
+#error "CONFIG_P25_TRUNK needs CONFIG_P25"
+#endif
+#if CONFIG_NXDN && !CONFIG_DMR
+#error "CONFIG_NXDN needs CONFIG_DMR (its voice is the DMR vocoder's)"
+#endif
+#if (CONFIG_APRS_RX && !CONFIG_APRS_AFSK) || (CONFIG_APRS_IGATE && !(CONFIG_APRS_RX && CONFIG_HOSTLINK))
+#error "an APRS sub-feature is on without its parent (APRS_RX needs APRS_AFSK; APRS_IGATE needs APRS_RX and HOSTLINK)"
+#endif
+#if !CONFIG_FM && !CONFIG_DMR
+#error "at least one of CONFIG_FM and CONFIG_DMR"
+#endif
+
+#endif

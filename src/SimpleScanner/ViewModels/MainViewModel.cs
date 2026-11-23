@@ -70,6 +70,8 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _squelchOpen;
     [ObservableProperty] private bool _overloaded;
     [ObservableProperty] private bool _isStereo;
+    [ObservableProperty] private string _digitalText = "";
+    [ObservableProperty] private bool _isEncrypted;
     [ObservableProperty] private bool _stereoOn;
     [ObservableProperty] private bool _blocked;
     [ObservableProperty] private bool _isOn;
@@ -338,10 +340,15 @@ public sealed partial class MainViewModel : ObservableObject
         var list = new List<ScanChannel>();
         for (double f = lo; f <= hi + 1 && list.Count < 40000;)
         {
+            // Channels sit on whole multiples of the step (154.935 MHz is 20658 x 7.5 kHz), so the
+            // raster is counted from zero, not from where the search happens to start.
             var band = BandPlan.Find(f);
             double step = SelectedStep.Value > 0 ? SelectedStep.Value : band.StepHz;
-            if (!band.Blocked) list.Add(new ScanChannel("", Math.Round(f / 10) * 10, band.Mode, band.BandwidthHz));
-            f += step;
+            double channel = Math.Ceiling(f / step - 1e-6) * step;
+            if (channel > hi + 1) break;
+            band = BandPlan.Find(channel);
+            if (!band.Blocked) list.Add(new ScanChannel("", Math.Round(channel / 10) * 10, band.Mode, band.BandwidthHz));
+            f = channel + step;
         }
         if (list.Count == 0) return;
         Status = "";
@@ -618,6 +625,9 @@ public sealed partial class MainViewModel : ObservableObject
             }
             Overloaded = src.Overloaded;
             IsStereo = _rx.Stereo;
+            var digital = _rx.Digital;
+            DigitalText = digital?.ToString() ?? "";
+            IsEncrypted = digital is { Encrypted: true };
             MaxGainStep = src.MaxGainStep;
             LevelText = Blocked ? "" : $"{Level:F0} dB";
             GainText = $"LNA {src.ActiveGainStep}/{src.MaxGainStep} · gain {src.GainDb:F0} dB · retune {src.LastRetuneMs:F0} ms";
@@ -628,6 +638,8 @@ public sealed partial class MainViewModel : ObservableObject
             SquelchOpen = false;
             Overloaded = false;
             IsStereo = false;
+            DigitalText = "";
+            IsEncrypted = false;
             LevelText = "";
             GainText = "";
         }

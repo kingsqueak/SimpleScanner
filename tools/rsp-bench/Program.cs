@@ -6,6 +6,7 @@
 //                                      the file takes the audio as raw 48 kHz 32-bit float, stereo
 using System.Diagnostics;
 using SimpleScanner;
+using SimpleScanner.Dsp;
 using SimpleScanner.Radio.SdrPlay;
 
 if (args.Length >= 2 && args[0] == "listen")
@@ -31,6 +32,57 @@ if (args.Length >= 2 && args[0] == "listen")
         var src = rx.Source;
         Console.WriteLine($"  level {rx.LevelDb,7:F1} dB  squelch {(rx.SquelchOpen ? "open  " : "closed")}  LNA {src.ActiveGainStep}/{src.MaxGainStep}  gain {src.GainDb:F1} dB  overload {src.Overloaded}  underruns {rx.AudioUnderruns}{(rx.Stereo ? "  STEREO" : "")}");
     }
+    rx.Stop();
+    return;
+}
+
+if (args.Length >= 3 && args[0] == "hunt")
+{
+    // rsp-bench hunt <from MHz> <to MHz> [seconds] [squelch dB]: search a range on the band plan's
+    // raster; on each signal found wait a moment for it to identify itself, report, and move on.
+    double lo = double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) * 1e6;
+    double hi = double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) * 1e6;
+    int seconds = args.Length > 3 ? int.Parse(args[3]) : 30;
+    using var rx = new Receiver(new SdrPlaySource(), playAudio: false) { ScanSkipSeconds = 3600, ScanHangSeconds = 0.3 };
+    rx.SquelchDb = args.Length > 4 ? double.Parse(args[4]) : -100;
+    var list = new List<ScanChannel>();
+    for (double f = lo; f <= hi + 1;)
+    {
+        var band = BandPlan.Find(f);
+        double channel = Math.Ceiling(f / band.StepHz - 1e-6) * band.StepHz;     // the raster counts from zero
+        if (channel > hi + 1) break;
+        if (!BandPlan.Find(channel).Blocked) list.Add(new ScanChannel("", Math.Round(channel / 10) * 10, Mode.Nfm, BandPlan.NfmNarrow));
+        f = channel + band.StepHz;
+    }
+    rx.Start();
+    Thread.Sleep(1500);
+    rx.StartScan(list);
+    Console.WriteLine($"hunting {lo / 1e6}-{hi / 1e6} MHz: {list.Count} channels in {rx.ScanWindows} windows, squelch {rx.SquelchDb} dB, P25 {(rx.DigitalAvailable ? "available" : "MISSING")}");
+    var sw = Stopwatch.StartNew();
+    var seen = new Dictionary<double, string>();
+    while (sw.Elapsed.TotalSeconds < seconds)
+    {
+        Thread.Sleep(10);
+        if (!rx.ScanListening) continue;
+        double f = rx.FrequencyHz, level = rx.LevelDb;
+        string what = "";
+        var wait = Stopwatch.StartNew();
+        while (wait.ElapsedMilliseconds < 1500 && rx.ScanListening && rx.FrequencyHz == f)
+        {
+            Thread.Sleep(20);
+            level = Math.Max(level, rx.LevelDb);
+            if (rx.Digital is { } d) what = d.ToString();
+            if (what.Contains("system") || what.Contains("TG")) break;
+        }
+        if (rx.FrequencyHz == f)
+        {
+            if (!seen.ContainsKey(f) || (what.Length > 0 && seen[f].Length == 0))
+                Console.WriteLine($"  {sw.Elapsed.TotalSeconds,5:F1} s  {f / 1e6,9:F4} MHz  {level,5:F0} dB  {(what.Length > 0 ? what : "no P25")}");
+            seen[f] = what;
+            rx.SkipChannel();
+        }
+    }
+    Console.WriteLine($"{seen.Count} active frequencies, {seen.Values.Count(v => v.Length > 0)} with P25; {rx.ScanPasses} passes");
     rx.Stop();
     return;
 }

@@ -35,6 +35,19 @@
   <Target Name="BuildAudioLib" BeforeTargets="BeforeBuild" Condition="!Exists('$(AudioLibPath)') And !$([MSBuild]::IsOSPlatform('Windows'))">
     <Exec Command="sh &quot;$(MSBuildThisFileDirectory)../../native/audio/build.sh&quot;" />
   </Target>
+  <!-- The digital voice library (P25 Phase 1 from RadioFoundry, native/digital), the same way. -->
+  <PropertyGroup>
+    <DigitalLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libss_digital.dylib</DigitalLibName>
+    <DigitalLibName Condition="$([MSBuild]::IsOSPlatform('Linux'))">libss_digital.so</DigitalLibName>
+    <DigitalLibName Condition="$([MSBuild]::IsOSPlatform('Windows'))">ss_digital.dll</DigitalLibName>
+    <DigitalLibPath>$(MSBuildThisFileDirectory)../../native/digital/out/$(DigitalLibName)</DigitalLibPath>
+  </PropertyGroup>
+  <Target Name="BuildDigitalLib" BeforeTargets="BeforeBuild" Condition="!Exists('$(DigitalLibPath)') And !$([MSBuild]::IsOSPlatform('Windows'))">
+    <Exec Command="sh &quot;$(MSBuildThisFileDirectory)../../native/digital/build.sh&quot;" />
+  </Target>
+  <ItemGroup>
+    <None Include="$(DigitalLibPath)" Link="$(DigitalLibName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(DigitalLibPath)') Or !$([MSBuild]::IsOSPlatform('Windows'))" />
+  </ItemGroup>
   <ItemGroup>
     <None Include="$(AudioLibPath)" Link="$(AudioLibName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(AudioLibPath)') Or !$([MSBuild]::IsOSPlatform('Windows'))" />
   </ItemGroup>

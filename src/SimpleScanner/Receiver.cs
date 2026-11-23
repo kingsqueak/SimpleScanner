@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using SimpleScanner.Audio;
+using SimpleScanner.Digital;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio;
 
@@ -22,6 +23,11 @@ public sealed record ScanChannel(string Name, double FrequencyHz, Mode Mode, dou
 /// once. Channels above the squelch level are then listened to in turn, strongest first: if the
 /// squelch opens, the scan stays until the signal has been gone for the hang time. Then the
 /// next window.
+///
+/// Digital voice: in narrow FM the discriminator output also goes to a P25 decoder. When it
+/// finds P25 data units on the channel, the analogue audio (which would be a rasp) gives way to
+/// the decoded speech, and <see cref="Digital"/> says what the signal is. Encrypted calls are
+/// reported and stay silent.
 /// </summary>
 public sealed class Receiver : IDisposable
 {
@@ -53,6 +59,15 @@ public sealed class Receiver : IDisposable
     private float[] _left = [], _right = [], _frames = [];
     private static readonly float[] Silence = new float[2 * Cushion];
 
+    // Digital voice, all on the DSP thread under _cfg.
+    private const int VoicePrime = ChannelReceiver.AudioRate * 220 / 1000;      // one voice superframe and a little
+    private readonly P25Decoder? _p25 = P25Decoder.TryCreate();
+    private readonly Upsampler _voiceUp = new(8000, 6);
+    private readonly FloatFifo _voice = new(ChannelReceiver.AudioRate * 3);
+    private readonly float[] _voice8k = new float[2048], _voice48k = new float[2048 * 6];
+    private bool _voicePlaying, _wasOpen;
+    private volatile P25Status? _digital;
+
     // Scan state, all under _cfg.
     private IReadOnlyList<ScanChannel> _scanList = [];
     private List<ScanWindow> _plan = [];
@@ -81,6 +96,7 @@ public sealed class Receiver : IDisposable
             Failed?.Invoke(why);
         };
         _channel.SetOffset(_offsetHz);
+        _channel.DiscriminatorTap = d => _p25?.Feed(d, _channel.DiscriminatorHzPerUnit);
 
         // FFT bins about 2 kHz wide: a few to each narrow channel.
         int size = 256;
@@ -166,6 +182,21 @@ public sealed class Receiver : IDisposable
     public Mode Mode => _channel.Mode;
     public double BandwidthHz => _channel.BandwidthHz;
 
+    /// <summary>The digital signal on the channel now (P25), or null for none.</summary>
+    public P25Status? Digital => _digital;
+    /// <summary>False when the digital voice library could not be loaded.</summary>
+    public bool DigitalAvailable => _p25 is not null;
+
+    // The channel changed or its signal went: whatever the decoder was following is over.
+    private void ResetDigitalLocked()
+    {
+        _p25?.SignalLost();
+        _voiceUp.Reset();
+        _voice.Clear();
+        _voicePlaying = false;
+        _digital = null;
+    }
+
     /// <summary>Choosing a mode by hand ends a scan.</summary>
     public void SetMode(Mode mode, double bandwidthHz)
     {
@@ -185,6 +216,7 @@ public sealed class Receiver : IDisposable
         _channel.Configure(mode, bandwidthHz);
         _blocked = BandPlan.IsBlocked(_frequencyHz, bandwidthHz);
         _squelch.Reset();
+        ResetDigitalLocked();
     }
 
     /// <summary>Tuning by hand ends a scan.</summary>
@@ -207,6 +239,7 @@ public sealed class Receiver : IDisposable
         _frequencyHz = hz;
         _blocked = BandPlan.IsBlocked(hz, _channel.BandwidthHz);
         _squelch.Reset();
+        ResetDigitalLocked();
         double offset = hz - _source.CenterHz;
         if (IsRunning && ScanPlan.Fits(offset, _channel.BandwidthHz, _source.UsableBandwidthHz))
         {
@@ -382,6 +415,7 @@ public sealed class Receiver : IDisposable
         _offsetHz = ch.FrequencyHz - _source.CenterHz;
         _channel.SetOffset(_offsetHz);
         _squelch.Reset();
+        ResetDigitalLocked();
         _scan = ScanState.Settle;
         _scanTimer = 0;
         _scanSawSignal = false;
@@ -467,6 +501,7 @@ public sealed class Receiver : IDisposable
             _audio = null;
         }
         _squelchOpen = false;
+        _digital = null;
         Volatile.Write(ref _level, -140);
     }
 
@@ -495,6 +530,32 @@ public sealed class Receiver : IDisposable
             try { Process(block); }
             finally { ArrayPool<float>.Shared.Return(block.Data); }
         }
+    }
+
+    // After the channel has been demodulated: is there P25 on it, and if so put its decoded
+    // speech in place of the analogue audio.
+    private void DigitalLocked(bool open, int count)
+    {
+        if (_wasOpen && !open && _scan != ScanState.Look && _scan != ScanState.Settle) ResetDigitalLocked();
+        _wasOpen = open;
+        if (_channel.Mode != Mode.Nfm) return;
+
+        int n;
+        while ((n = _p25!.ReadVoice(_voice8k)) > 0)
+            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
+        bool active = _p25.Active;
+        _digital = active ? _p25.Status : null;
+        if (!active && !_voicePlaying)
+        {
+            _voice.Clear();
+            return;
+        }
+        // Speech arrives nine frames at a time, every 180 ms: hold some before starting to play.
+        if (!_voicePlaying && _voice.Count >= VoicePrime) _voicePlaying = true;
+        var left = _left.AsSpan(0, count);
+        left.Clear();
+        if (_voicePlaying && _voice.Read(left) < count) _voicePlaying = false;
+        left.CopyTo(_right);
     }
 
     private void Process(Block block)
@@ -536,6 +597,7 @@ public sealed class Receiver : IDisposable
             open = _squelch.Update(level, seconds) && !_blocked;
             if (_scan != ScanState.Off) open = ScanStepLocked(level, open, seconds);
             _squelchOpen = open;
+            if (_p25 is not null && count > 0) DigitalLocked(open, count);
         }
         if (count == 0) return;
 

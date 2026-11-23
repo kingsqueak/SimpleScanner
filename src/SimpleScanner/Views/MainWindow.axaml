@@ -4,7 +4,7 @@
         xmlns:c="using:SimpleScanner.Controls"
         x:Class="SimpleScanner.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="SimpleScanner" Width="1130" Height="590" MinWidth="1060" MinHeight="560"
+        Title="SimpleScanner" Width="1130" Height="620" MinWidth="1060" MinHeight="590"
         WindowStartupLocation="CenterScreen">
   <DockPanel Margin="12">
 
@@ -58,6 +58,8 @@
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
             <TextBlock Text="OVERLOAD" Foreground="{DynamicResource LcdWarn}" FontSize="13" FontWeight="SemiBold"
                        IsVisible="{Binding Overloaded}" VerticalAlignment="Center" />
+            <TextBlock Text="ENCRYPTED" Foreground="{DynamicResource LcdWarn}" FontSize="13" FontWeight="SemiBold"
+                       IsVisible="{Binding IsEncrypted}" VerticalAlignment="Center" />
             <TextBlock Text="STEREO" Foreground="{DynamicResource LcdOpen}" FontSize="13" FontWeight="SemiBold"
                        IsVisible="{Binding IsStereo}" VerticalAlignment="Center" />
             <TextBlock Text="{Binding ModeText}" Foreground="{DynamicResource LcdText}" FontSize="20" FontWeight="SemiBold" />
@@ -79,6 +81,10 @@
                               ToolTip.Tip="Roll the mouse wheel over a digit to tune by that digit; click its top or bottom half to step it" />
           <TextBlock Text="MHz" Foreground="{DynamicResource LcdDim}" FontSize="18" VerticalAlignment="Bottom" Margin="8,0,0,14" />
         </StackPanel>
+
+        <!-- What a digital signal says about itself -->
+        <TextBlock Text="{Binding DigitalText}" Foreground="{DynamicResource LcdOpen}" FontSize="15" FontWeight="SemiBold"
+                   HorizontalAlignment="Center" MinHeight="20" />
 
         <DockPanel>
           <TextBlock DockPanel.Dock="Right" Text="{Binding LevelText}" Foreground="{DynamicResource LcdText}" FontSize="13"

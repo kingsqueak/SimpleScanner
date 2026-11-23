@@ -39,3 +39,17 @@ speech (`test_transmission.ambe`: NXDN carries the same AMBE+2 frames as DMR, so
   nxdntool mod ... --rate 24000 --full 5000`)
 - `nxdn_9600_24k.raw`: 9600 bit/s (12.5 kHz channel). RAN 12, a call to radio 77 from radio
   4321, emergency. (the same with `--9600 --ran 12 --unit 77 --src 4321 --emergency`)
+
+## D-STAR
+
+Made with `native/digital/tools/dstargen.c` (this repository, written from the D-STAR
+specification). Same sample format. The speech is D-STAR's silence frame repeated: there is no
+open encoder for its codec, so these files test the framing, the header, the slow data and that
+voice frames reach the vocoder without bit errors, not what speech sounds like.
+
+- `dstar_call_24k.raw`: a whole transmission, 105 voice frames. From KC2RGW/IC91 to CQCQCQ
+  through NE1DS C and NE1DS G, message "SimpleScanner test".
+  (`dstargen OUT --my KC2RGW --suffix IC91 --your CQCQCQ --rpt1 "NE1DS  C" --rpt2 "NE1DS  G" --text "SimpleScanner test"`)
+- `dstar_late_inverted_24k.raw`: the same kind of transmission without its bit sync, frame sync
+  and header, with the deviation turned over. From W1AW, message "late and inverted".
+  (`dstargen OUT --my W1AW --late --invert --text "late and inverted"`)

@@ -1,7 +1,7 @@
 # SimpleScanner
 
 A desktop communications scanner for the SDRplay RSPdx, for Windows, macOS and Linux
-(.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, and the first three
+(.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, and the first four
 digital voice modes.
 
 ## What works now
@@ -20,12 +20,15 @@ digital voice modes.
 - NXDN (conventional, both speeds: 4800 bit/s in 6.25 kHz channels and 9600 bit/s in 12.5 kHz):
   decoded speech, with the RAN, talkgroup and radio ID. Calls in NXDN's full-rate voice mode are
   shown and not decoded
+- D-STAR digital voice: decoded speech, with the callsigns (who is sending, who is called, which
+  repeater) and the transmission's short text message. A transmission joined after its start
+  is picked up at the next sync pattern, within half a second
 - Encrypted calls are shown and stay silent
 - Cellular telephone bands are blocked
 
-Not yet: trunk following, P25 Phase 2, D-STAR, C4FM, RadioReference import.
+Not yet: trunk following, P25 Phase 2, C4FM (System Fusion), RadioReference import.
 
-### DMR and NXDN speech and the AMBE+2 codec
+### The AMBE speech codecs
 
 DMR and NXDN speech is coded with AMBE+2, which is covered by a patent (US 8,359,197, listed as in force
 until May 2028). The decoder (mbelib) is therefore a library of its own, `native/ambe`, and a
@@ -34,8 +37,11 @@ build can leave it out:
     dotnet build -p:IncludeAmbe=false
     NO_AMBE=1 scripts/make-dmg.sh
 
-Without it the scanner still follows DMR and NXDN and shows who is talking; the display says
+Without it the scanner still follows these signals and shows who is talking; the display says
 "no voice codec" and the call is silent.
+
+D-STAR uses the older AMBE codec, whose patents have run out. Its decoder is mbelib's too and
+lives in the same library, so a build without the library has no D-STAR speech either.
 
 ## What you need
 
@@ -51,7 +57,7 @@ Without it the scanner still follows DMR and NXDN and shows who is talking; the 
 
 The native libraries are built by the first `dotnet build` on macOS and Linux; they need a C
 compiler (gcc or clang): audio output (`native/audio`, miniaudio behind a small C shim),
-digital voice (`native/digital`, P25, DMR and NXDN) and the AMBE+2 decoder (`native/ambe`). After
+digital voice (`native/digital`, P25, DMR, NXDN and D-STAR) and the AMBE+2 decoder (`native/ambe`). After
 changing C code, run that library's `build.sh` again.
 
 `tools/rsp-bench` measures the radio without the window: sample throughput and retune times,
@@ -63,5 +69,6 @@ and what kind of signal each is.
 
 GPL-3.0. miniaudio (`native/audio/miniaudio.h`) is public domain or MIT-0, its authors' choice.
 The digital voice library is built on a part of RadioFoundry (`native/digital/radiofoundry`,
-MIT, with an IMBE dequantizer from mbelib, ISC). The AMBE+2 decoder is mbelib
+MIT, with an IMBE dequantizer from mbelib, ISC); the D-STAR receiver takes its voice bit table
+from DSD (ISC). The AMBE decoders are mbelib
 (`native/ambe/mbelib`, ISC).

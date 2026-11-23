@@ -26,6 +26,11 @@ internal sealed unsafe class AmbeStream : IDisposable
             return;
         }
         _vocoder.Decode(new ReadOnlySpan<byte>(item, AmbeVocoder.ParameterBits), item[AmbeVocoder.ParameterBits], _frame);
+        Queue();
+    }
+
+    private void Queue()
+    {
         foreach (short v in _frame)
         {
             if (_count == _pcm.Length)                   // full: the oldest goes
@@ -35,6 +40,21 @@ internal sealed unsafe class AmbeStream : IDisposable
             }
             _pcm[(_head + _count++) % _pcm.Length] = v;
         }
+    }
+
+    public const int DstarItemBytes = 97;
+
+    /// <summary>A D-STAR voice frame: 96 code word bits, then 0; a last byte of 255 marks the end of a transmission.</summary>
+    public void PushDstar(byte* item)
+    {
+        if (_vocoder is null) return;
+        if (item[96] == End)
+        {
+            _vocoder.Reset();
+            return;
+        }
+        _vocoder.DecodeDstar(new ReadOnlySpan<byte>(item, 96), _frame);
+        Queue();
     }
 
     /// <summary>Speech at 8 kHz, full scale +-1. Returns the samples written.</summary>

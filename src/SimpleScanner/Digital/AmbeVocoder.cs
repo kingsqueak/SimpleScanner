@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace SimpleScanner.Digital;
 
 /// <summary>
-/// The AMBE+2 speech decoder (DMR, NXDN), through the ss_ambe native library (native/ambe:
+/// The AMBE speech decoders (AMBE+2 for DMR and NXDN, the older AMBE for D-STAR), through the ss_ambe native library (native/ambe:
 /// mbelib). That library is optional, because the codec is under a patent until 2028: a copy of
 /// the scanner without it still follows these signals and shows who is talking, with no speech.
 /// One per voice stream; use from one thread.
@@ -19,6 +19,7 @@ public sealed unsafe partial class AmbeVocoder : IDisposable
     [LibraryImport(Lib)] private static partial void ss_ambe_free(nint a);
     [LibraryImport(Lib)] private static partial void ss_ambe_reset(nint a);
     [LibraryImport(Lib)] private static partial void ss_ambe_decode(nint a, byte* bits, int errors, short* pcm);
+    [LibraryImport(Lib)] private static partial int ss_ambe_decode_dstar(nint a, byte* rows, short* pcm);
 
     private nint _handle;
 
@@ -46,6 +47,18 @@ public sealed unsafe partial class AmbeVocoder : IDisposable
         fixed (byte* b = bits)
         fixed (short* p = pcm)
             ss_ambe_decode(_handle, b, errors, p);
+    }
+
+    /// <summary>
+    /// One 20 ms frame of D-STAR's older AMBE codec: the 96 bits of its four code words (4 rows of
+    /// 24, one per byte) before error correction. Gives 160 samples at 8 kHz; returns the bit errors found.
+    /// </summary>
+    public int DecodeDstar(ReadOnlySpan<byte> rows, Span<short> pcm)
+    {
+        if (rows.Length < 96 || pcm.Length < FrameSamples) throw new ArgumentException("frame size");
+        fixed (byte* b = rows)
+        fixed (short* p = pcm)
+            return ss_ambe_decode_dstar(_handle, b, p);
     }
 
     /// <summary>Between calls: nothing of the last voice carries into the next.</summary>

@@ -53,3 +53,20 @@ SS_API void ss_ambe_decode(ss_ambe *a, const uint8_t *bits, int errors, int16_t 
         pcm[i] = (int16_t)(v > 32767.0f ? 32767 : v < -32767.0f ? -32767 : v);
     }
 }
+
+// D-STAR's speech frame (the older AMBE, 3600 x 2400 bit/s): the 96 bits of its four code words
+// as dstarrx.c sorts them (4 rows of 24, one bit per byte), before error correction, which is
+// done here. pcm: 160 samples at 8 kHz. Returns the bit errors found.
+SS_API int ss_ambe_decode_dstar(ss_ambe *a, const uint8_t *rows, int16_t *pcm)
+{
+    char fr[4][24], d[49], err_str[64];
+    float f[160];
+    int errs = 0, errs2 = 0, i;
+    for (i = 0; i < 96; i++) fr[i / 24][i % 24] = (char)(rows[i] & 1);
+    mbe_processAmbe3600x2400Framef(f, &errs, &errs2, err_str, fr, d, &a->cur, &a->prev, &a->prev_enhanced, UV_QUALITY);
+    for (i = 0; i < 160; i++) {
+        float v = f[i] * GAIN;
+        pcm[i] = (int16_t)(v > 32767.0f ? 32767 : v < -32767.0f ? -32767 : v);
+    }
+    return errs2;
+}

@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -41,6 +42,30 @@ public partial class ChannelsWindow : Window
             Vm.Flush();
             TuneRequested?.Invoke(row.Channel);
         }
+    }
+
+    // ---- column widths --------------------------------------------------------------------------
+
+    private const int DescriptionColumn = 4;
+    private const double NarrowestDescription = 80;
+
+    /// <summary>A heading's handle is being dragged. The column grows or shrinks and the description
+    /// column, which takes the room that is left, gives or takes the difference. The handles of the
+    /// columns right of the description are on their left edge, so there the drag counts the other way.</summary>
+    private void OnHeadDrag(object? sender, VectorEventArgs e)
+    {
+        if (sender is not Thumb { DataContext: ColumnHead head } thumb) return;
+        double change = thumb.HorizontalAlignment == Avalonia.Layout.HorizontalAlignment.Left ? -e.Vector.X : e.Vector.X;
+        double now = head.Width.Value;
+        double room = Math.Max(0, HeadGrid.ColumnDefinitions[DescriptionColumn].ActualWidth - NarrowestDescription);
+        head.Width = new GridLength(Math.Round(Math.Clamp(now + change, Math.Min(now, ColumnHead.Narrowest), now + room)));
+    }
+
+    /// <summary>A double-click on a handle puts the column back to its normal width.</summary>
+    private void OnHeadReset(object? sender, TappedEventArgs e)
+    {
+        if (sender is Thumb { DataContext: ColumnHead head }) head.Width = new GridLength(head.NormalWidth);
+        e.Handled = true;
     }
 
     private async void OnImportClick(object? sender, RoutedEventArgs e)

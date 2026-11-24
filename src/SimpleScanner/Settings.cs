@@ -29,6 +29,8 @@ public sealed class Settings
     public List<string>? Groups { get; set; }
     /// <summary>Sound output device by name; null is the system's default.</summary>
     public string? AudioDevice { get; set; }
+    /// <summary>Widths of the channel editor's columns that the user has changed, by column key.</summary>
+    public Dictionary<string, double>? ChannelColumns { get; set; }
     public double SearchFromMHz { get; set; } = 144;
     public double SearchToMHz { get; set; } = 148;
 

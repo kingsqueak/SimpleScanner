@@ -1,3 +1,4 @@
+using Avalonia.Controls;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -14,6 +15,8 @@ public sealed class ChannelRow(MemoryChannel channel, Action touched) : Observab
         ["Auto (from the band)", "AM", "AM 8.33 kHz", "NFM 12.5 kHz", "NFM 25 kHz", "WFM broadcast"];
 
     public MemoryChannel Channel { get; } = channel;
+    /// <summary>The list's column headings, whose widths the row's columns follow.</summary>
+    public IReadOnlyList<ColumnHead>? Heads { get; init; }
 
     private void Set(Action apply, [CallerMemberName] string? property = null)
     {
@@ -125,11 +128,17 @@ public sealed class GroupTick(string name, bool? member, Action<string, bool> se
 }
 
 /// <summary>A column heading of the channel list: clicking it sorts by that column, and it shows which way.</summary>
-public sealed partial class ColumnHead(string key, string title) : ObservableObject
+/// <remarks>It also holds the column's width, which the heading and every row follow; a width of 0 is the
+/// one column that takes whatever room the others leave.</remarks>
+public sealed partial class ColumnHead(string key, string title, double width) : ObservableObject
 {
+    public const double Narrowest = 28;
     public string Key { get; } = key;
     public string Title { get; } = title;
+    /// <summary>The width the column starts with.</summary>
+    public double NormalWidth { get; } = width;
     [ObservableProperty] private string _text = title;
+    [ObservableProperty] private GridLength _width = width > 0 ? new GridLength(width) : GridLength.Star;
 }
 
 /// <summary>A file that has been read and waits for the user to name the group its channels go in.</summary>
@@ -166,9 +175,14 @@ public sealed partial class ChannelsViewModel : ObservableObject
     /// <summary>The list's column headings, in the order of the columns.</summary>
     public IReadOnlyList<ColumnHead> Heads { get; } =
     [
-        new("Scan", "Scan"), new("MHz", "MHz"), new("Name", "Name"), new("Agency", "Agency"), new("Description", "Description"),
-        new("Tag", "Tag"), new("Type", "Type"), new("Tone", "Tone / code"), new("Groups", "Groups"),
+        new("Scan", "Scan", 46), new("MHz", "MHz", 80), new("Name", "Name", 130), new("Agency", "Agency", 150),
+        new("Description", "Description", 0),
+        new("Tag", "Tag", 104), new("Type", "Type", 58), new("Tone", "Tone / code", 92), new("Groups", "Groups", 150),
     ];
+
+    /// <summary>The widths the user has dragged the columns to, by column key, to keep between runs.</summary>
+    public Dictionary<string, double> ColumnWidths() =>
+        Heads.Where(h => h.Width.IsAbsolute && h.Width.Value != h.NormalWidth).ToDictionary(h => h.Key, h => h.Width.Value);
     private string _sortKey = "MHz";
     private bool _sortDown;
 
@@ -192,9 +206,12 @@ public sealed partial class ChannelsViewModel : ObservableObject
     [ObservableProperty] private bool _isGroupChosen;
     [ObservableProperty] private string _groupNewName = "";
 
-    public ChannelsViewModel(MemoryStore store)
+    public ChannelsViewModel(MemoryStore store, IReadOnlyDictionary<string, double>? columnWidths = null)
     {
         _store = store;
+        foreach (var head in Heads)
+            if (head.Width.IsAbsolute && columnWidths is not null && columnWidths.TryGetValue(head.Key, out double w) && double.IsFinite(w))
+                head.Width = new GridLength(Math.Clamp(w, ColumnHead.Narrowest, 2000));
         _seen = store.Version;
         ShowSort();
         Reload();
@@ -236,7 +253,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
         foreach (var c in Sorted())
         {
             if (GroupFilter == NoGroup ? c.Groups.Count > 0 : GroupFilter != AllGroups && !c.Groups.Contains(GroupFilter)) continue;
-            var row = new ChannelRow(c, Touch);
+            var row = new ChannelRow(c, Touch) { Heads = Heads };
             if (row.Matches(words)) Rows.Add(row);
         }
         CountText = Rows.Count == _store.Channels.Count ? $"{Rows.Count} channels" : $"{Rows.Count} of {_store.Channels.Count} channels";

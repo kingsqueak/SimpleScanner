@@ -19,12 +19,16 @@ public partial class MainWindow : Window
             _channels.Activate();
             return;
         }
-        var vm = new ChannelsViewModel(main.Store);
+        var vm = new ChannelsViewModel(main.Store, main.ChannelColumns);
         vm.Edited += main.MemoriesEdited;
         vm.GroupRenamed += main.GroupRenamed;
         _channels = new ChannelsWindow { DataContext = vm };
         _channels.TuneRequested += main.Tune;
-        _channels.Closed += (_, _) => _channels = null;
+        _channels.Closed += (_, _) =>
+        {
+            main.ChannelColumns = vm.ColumnWidths();
+            _channels = null;
+        };
         _channels.Show(this);
     }
 }

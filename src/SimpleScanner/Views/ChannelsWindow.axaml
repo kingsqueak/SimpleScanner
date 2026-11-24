@@ -133,7 +133,18 @@
     </Border>
 
     <!-- The channels -->
-    <Grid DockPanel.Dock="Top" ColumnDefinitions="46,80,130,150,*,104,58,92,150" Margin="8,0,24,2">
+    <Grid x:Name="HeadGrid" DockPanel.Dock="Top" Margin="8,0,8,2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="{Binding Heads[0].Width}" />
+        <ColumnDefinition Width="{Binding Heads[1].Width}" />
+        <ColumnDefinition Width="{Binding Heads[2].Width}" />
+        <ColumnDefinition Width="{Binding Heads[3].Width}" />
+        <ColumnDefinition Width="{Binding Heads[4].Width}" MinWidth="80" />
+        <ColumnDefinition Width="{Binding Heads[5].Width}" />
+        <ColumnDefinition Width="{Binding Heads[6].Width}" />
+        <ColumnDefinition Width="{Binding Heads[7].Width}" />
+        <ColumnDefinition Width="{Binding Heads[8].Width}" />
+      </Grid.ColumnDefinitions>
       <Grid.Styles>
         <!-- A column heading: plain text that can be clicked to sort -->
         <Style Selector="Button.head">
@@ -152,6 +163,29 @@
           <Setter Property="Background" Value="Transparent" />
           <Setter Property="Foreground" Value="{DynamicResource TextMain}" />
         </Style>
+        <!-- The handle at a column's edge: drag it to make the column wider or narrower -->
+        <Style Selector="Thumb.grip">
+          <Setter Property="Width" Value="9" />
+          <Setter Property="Cursor" Value="SizeWestEast" />
+          <Setter Property="Focusable" Value="False" />
+          <Setter Property="ToolTip.Tip" Value="Drag to make the column wider or narrower; double-click for its normal width" />
+          <Setter Property="Template">
+            <ControlTemplate>
+              <Border Background="Transparent">
+                <Border x:Name="Line" Width="2" CornerRadius="1" Margin="0,2" HorizontalAlignment="Center"
+                        Background="{DynamicResource TextMuted}" Opacity="0.45" />
+              </Border>
+            </ControlTemplate>
+          </Setter>
+        </Style>
+        <Style Selector="Thumb.grip:pointerover /template/ Border#Line">
+          <Setter Property="Background" Value="{DynamicResource TextMain}" />
+          <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Thumb.grip:pressed /template/ Border#Line">
+          <Setter Property="Background" Value="{DynamicResource TextMain}" />
+          <Setter Property="Opacity" Value="1" />
+        </Style>
       </Grid.Styles>
       <Button Grid.Column="0" Classes="head" Content="{Binding Heads[0].Text}" CommandParameter="Scan" />
       <Button Grid.Column="1" Classes="head" Content="{Binding Heads[1].Text}" CommandParameter="MHz" />
@@ -162,6 +196,14 @@
       <Button Grid.Column="6" Classes="head" Content="{Binding Heads[6].Text}" CommandParameter="Type" />
       <Button Grid.Column="7" Classes="head" Content="{Binding Heads[7].Text}" CommandParameter="Tone" />
       <Button Grid.Column="8" Classes="head" Content="{Binding Heads[8].Text}" CommandParameter="Groups" />
+      <Thumb Grid.Column="0" Classes="grip" DataContext="{Binding Heads[0]}" HorizontalAlignment="Right" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
+      <Thumb Grid.Column="1" Classes="grip" DataContext="{Binding Heads[1]}" HorizontalAlignment="Right" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
+      <Thumb Grid.Column="2" Classes="grip" DataContext="{Binding Heads[2]}" HorizontalAlignment="Right" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
+      <Thumb Grid.Column="3" Classes="grip" DataContext="{Binding Heads[3]}" HorizontalAlignment="Right" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
+      <Thumb Grid.Column="5" Classes="grip" DataContext="{Binding Heads[5]}" HorizontalAlignment="Left" Margin="-9,0,0,0" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
+      <Thumb Grid.Column="6" Classes="grip" DataContext="{Binding Heads[6]}" HorizontalAlignment="Left" Margin="-9,0,0,0" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
+      <Thumb Grid.Column="7" Classes="grip" DataContext="{Binding Heads[7]}" HorizontalAlignment="Left" Margin="-9,0,0,0" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
+      <Thumb Grid.Column="8" Classes="grip" DataContext="{Binding Heads[8]}" HorizontalAlignment="Left" Margin="-9,0,0,0" DragDelta="OnHeadDrag" DoubleTapped="OnHeadReset" />
     </Grid>
     <ListBox x:Name="List" ItemsSource="{Binding Rows}" SelectionMode="Multiple" Background="{DynamicResource PanelBg}" CornerRadius="8"
              SelectionChanged="OnSelectionChanged" DoubleTapped="OnRowDoubleTapped"
@@ -180,7 +222,18 @@
       </ListBox.Styles>
       <ListBox.ItemTemplate>
         <DataTemplate x:DataType="vm:ChannelRow">
-          <Grid ColumnDefinitions="46,80,130,150,*,104,58,92,150">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="{Binding Heads[0].Width}" />
+              <ColumnDefinition Width="{Binding Heads[1].Width}" />
+              <ColumnDefinition Width="{Binding Heads[2].Width}" />
+              <ColumnDefinition Width="{Binding Heads[3].Width}" />
+              <ColumnDefinition Width="{Binding Heads[4].Width}" MinWidth="80" />
+              <ColumnDefinition Width="{Binding Heads[5].Width}" />
+              <ColumnDefinition Width="{Binding Heads[6].Width}" />
+              <ColumnDefinition Width="{Binding Heads[7].Width}" />
+              <ColumnDefinition Width="{Binding Heads[8].Width}" />
+            </Grid.ColumnDefinitions>
             <CheckBox Grid.Column="0" IsChecked="{Binding Scan}" MinWidth="0" MinHeight="0" ToolTip.Tip="Include this channel when scanning" />
             <TextBlock Grid.Column="1" Text="{Binding Frequency}" />
             <TextBlock Grid.Column="2" Text="{Binding Name}" />

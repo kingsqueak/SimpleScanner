@@ -301,6 +301,17 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The stored channels, for the channel editor.</summary>
     public MemoryStore Store => _memories;
 
+    /// <summary>The channel editor's column widths, kept with the settings.</summary>
+    public Dictionary<string, double>? ChannelColumns
+    {
+        get => _settings.ChannelColumns;
+        set
+        {
+            _settings.ChannelColumns = value;
+            _settings.Save();
+        }
+    }
+
     /// <summary>The channel editor has changed the stored channels: show them again.</summary>
     public void MemoriesEdited()
     {

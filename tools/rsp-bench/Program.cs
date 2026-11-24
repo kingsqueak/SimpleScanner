@@ -19,11 +19,12 @@ using SimpleScanner;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio.SdrPlay;
 
-bool autoSquelch = args.Contains("auto"), fast = args.Contains("fast");
+bool autoSquelch = args.Contains("auto"), fast = args.Contains("fast"), vendorAgc = args.Contains("vendoragc");
+string? lnaWord = args.FirstOrDefault(a => a.StartsWith("lna="))?[4..];
 string[] radios = args.Where(a => a.StartsWith("radio=")).Select(a => a[6..]).ToArray();
 string? radio = radios.FirstOrDefault();
 string? rateWord = args.FirstOrDefault(a => a.StartsWith("rate="))?[5..];
-args = args.Where(a => a != "auto" && a != "fast" && !a.StartsWith("radio=") && !a.StartsWith("rate=")).ToArray();
+args = args.Where(a => a != "auto" && a != "fast" && a != "vendoragc" && !a.StartsWith("lna=") && !a.StartsWith("radio=") && !a.StartsWith("rate=")).ToArray();
 
 if (args.Length >= 1 && args[0] == "list")
 {
@@ -34,7 +35,8 @@ if (args.Length >= 1 && args[0] == "list")
 // The radio asked for, by serial number or by model name.
 SdrPlaySource NewSource()
 {
-    var s = new SdrPlaySource();
+    var s = new SdrPlaySource { IfAgc = vendorAgc };
+    if (lnaWord is not null) { s.AutoGain = false; s.GainStep = int.Parse(lnaWord); }
     if (radio is null) return s;
     var match = SdrPlaySource.ListRadios().FirstOrDefault(r =>
         r.Serial == radio || r.Model.Equals(radio, StringComparison.OrdinalIgnoreCase));
@@ -283,6 +285,88 @@ if (args.Length >= 3 && args[0] == "hunt")
     }
     Console.WriteLine($"{seen.Count} active frequencies, {seen.Values.Count(v => v.Length > 0)} digital; {rx.ScanPasses} passes");
     rx.Stop();
+    return;
+}
+
+if (args.Length >= 1 && args[0] == "stored")
+{
+    // rsp-bench stored [seconds] [squelch dB] [plan] [db=<file>] group=<name> group=<name> ...
+    // Scan the stored channels of these groups, as the app does for a radio with those groups ticked,
+    // and time every retune. "plan" only prints the windows and does not open a radio. db= reads
+    // another database (a copy). The word "auto" switches the auto squelch on, "vendoragc" uses the
+    // service's IF AGC in place of ours, and lna=<n> fixes the LNA state.
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    bool planOnly = args.Contains("plan");
+    string? dbFile = args.FirstOrDefault(a => a.StartsWith("db="))?[3..];
+    var groups = args.Where(a => a.StartsWith("group=")).Select(a => a[6..]).ToList();
+    var rest = args.Skip(1).Where(a => a != "plan" && !a.StartsWith("db=") && !a.StartsWith("group=")).ToArray();
+    int seconds = rest.Length > 0 ? int.Parse(rest[0]) : 30;
+    double squelch = rest.Length > 1 ? double.Parse(rest[1], inv) : -100;
+    var list = MemoryStore.Load(dbFile).Channels
+        .Where(c => c.Scan && (groups.Count == 0 || groups.Any(g => MemoryStore.InGroup(c, g))))
+        .GroupBy(c => Math.Round(c.FrequencyHz / 100)).OrderBy(g => g.First().FrequencyHz)
+        .Select(g =>
+        {
+            var c = g.First();
+            var band = BandPlan.Find(c.FrequencyHz);
+            var mode = c.Mode ?? band.Mode;
+            double width = c.BandwidthHz ?? (mode == band.Mode ? band.BandwidthHz
+                : mode switch { Mode.Am => BandPlan.AmAir, Mode.Wfm => BandPlan.Wfm, _ => BandPlan.NfmWide });
+            return new ScanChannel(c.Name, c.FrequencyHz, mode, width);
+        })
+        .Where(c => !BandPlan.IsBlocked(c.FrequencyHz, c.BandwidthHz)).ToList();
+    double usable = SdrPlaySource.BandwidthFor(Receiver.DefaultSampleRate) * 1000.0 * 0.92;
+    var plan = ScanPlan.Build(list, usable);
+    Console.WriteLine($"{list.Count} channels in {plan.Count} windows (usable {usable / 1e6:F2} MHz)");
+    foreach (var w in plan)
+        Console.WriteLine($"  centre {w.CenterHz / 1e6,9:F4} MHz  {w.Channels.Length,3} channels  {list[w.Channels[0]].FrequencyHz / 1e6:F4} - {list[w.Channels[^1]].FrequencyHz / 1e6:F4}  {list[w.Channels[0]].Mode}");
+    if (planOnly) return;
+
+    var src = NewSource();
+    var gate = new object();
+    var trace = new List<(double At, double Hz, double CallMs, double Ms, string How)>();
+    var clock = Stopwatch.StartNew();
+    src.RetuneTrace = (hz, callMs, ms, how) => { lock (gate) trace.Add((clock.Elapsed.TotalSeconds, hz, callMs, ms, how)); };
+    using var rx = new Receiver(src, playAudio: false) { ResumeSeconds = 15 };
+    rx.SquelchDb = squelch;
+    rx.AutoSquelch = autoSquelch;
+    rx.Start();
+    Thread.Sleep(1500);
+    lock (gate) trace.Clear();
+    clock.Restart();
+    rx.StartScan(list);
+    Console.WriteLine($"{src.Description}: squelch {squelch} dB{(autoSquelch ? ", auto" : "")}");
+    long lastP = 0;
+    int seenTo = 0;
+    string was = "";
+    double next = 1;
+    while (clock.Elapsed.TotalSeconds < seconds)
+    {
+        Thread.Sleep(20);
+        string now = rx.ScanListening ? $"{rx.ScanChannel?.Name} ({rx.FrequencyHz / 1e6:F4} MHz)" : "";
+        if (now != was && now.Length > 0) Console.WriteLine($"  {clock.Elapsed.TotalSeconds,5:F1} s  stopped on {now} at {rx.LevelDb:F0} dB {rx.Digital}");
+        was = now;
+        if (clock.Elapsed.TotalSeconds < next) continue;
+        next += 1;
+        List<(double At, double Hz, double CallMs, double Ms, string How)> part;
+        lock (gate) { part = trace.Skip(seenTo).ToList(); seenTo = trace.Count; }
+        long p = rx.ScanPasses;
+        var ok = part.Where(t => t.How == "ok").Select(t => t.Ms).OrderBy(m => m).ToList();
+        Console.WriteLine($"  {clock.Elapsed.TotalSeconds,5:F1} s  {p - lastP,2} passes  {part.Count,3} retunes: ok {ok.Count} (median {(ok.Count > 0 ? ok[ok.Count / 2] : 0):F0} ms, max {(ok.Count > 0 ? ok[^1] : 0):F0} ms), "
+            + $"timeouts {part.Count(t => t.How == "TIMEOUT")}, refused {part.Count(t => t.How.StartsWith("refused"))}, call max {(part.Count > 0 ? part.Max(t => t.CallMs) : 0):F0} ms  "
+            + $"LNA {src.ActiveGainStep}/{src.MaxGainStep} IF GR {src.IfGainReductionDb} gain {src.GainDb:F0} dB{(src.Overloaded ? " OVERLOAD" : "")}  dropped {rx.DroppedBlocks}");
+        lastP = p;
+    }
+    rx.Stop();
+    Console.WriteLine("by window (the centre retuned to):");
+    List<(double At, double Hz, double CallMs, double Ms, string How)> all;
+    lock (gate) all = trace.ToList();
+    foreach (var g in all.GroupBy(t => t.Hz).OrderBy(g => g.Key))
+    {
+        var ok = g.Where(t => t.How == "ok").Select(t => t.Ms).OrderBy(m => m).ToList();
+        Console.WriteLine($"  {g.Key / 1e6,9:F4} MHz  {g.Count(),4} retunes  ok median {(ok.Count > 0 ? ok[ok.Count / 2] : 0),5:F1} ms  max {(ok.Count > 0 ? ok[^1] : 0),5:F1} ms  call max {g.Max(t => t.CallMs),5:F1} ms  timeouts {g.Count(t => t.How == "TIMEOUT"),3}  refused {g.Count(t => t.How.StartsWith("refused")),3} {g.FirstOrDefault(t => t.How.StartsWith("refused")).How}");
+    }
+    Console.WriteLine($"{all.Count} retunes, {all.Count(t => t.How == "TIMEOUT")} timeouts, {all.Count(t => t.How.StartsWith("refused"))} refused, {rx.ScanPasses} passes in {seconds} s");
     return;
 }
 

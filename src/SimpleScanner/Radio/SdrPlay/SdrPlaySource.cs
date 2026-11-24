@@ -9,8 +9,13 @@ namespace SimpleScanner.Radio.SdrPlay;
 /// single-tuner models stream too, without antenna selection). The API and its background
 /// service come from SDRplay's installer; this loads the library when first used.
 ///
-/// Gain: the service's IF AGC is always on. The LNA state is ours: fixed at
-/// <see cref="GainStep"/>, or with <see cref="AutoGain"/> moved by <see cref="AutoGainStep"/>.
+/// Gain: both parts are ours. The LNA state is fixed at <see cref="GainStep"/>, or with
+/// <see cref="AutoGain"/> moved by <see cref="AutoGainStep"/>. The IF gain reduction is set from the
+/// level of the samples (see <see cref="NextIfGr"/>): the value found for each tuning is remembered and
+/// sent with the frequency when the radio comes back to it, and while the radio stays on one tuning
+/// it is trimmed ten times a second. The service's own IF AGC is left off: its stream of gain
+/// changes holds up retunes (measured on an RSPdx on an outdoor antenna, 2026-11-24: 400 to 500 ms
+/// for each retune and calls blocked for 1.5 s with it on, 13 ms with it off).
 /// </summary>
 public sealed unsafe class SdrPlaySource : IIqSource
 {
@@ -80,7 +85,59 @@ public sealed unsafe class SdrPlaySource : IIqSource
     private string _antenna = "Antenna A";
     private volatile bool _retunePending, _announceRetune, _overloadAckPending, _overloaded;
     private long _retuneStart;
-    private double _gainDb, _lastRetuneMs;
+    private double _gainDb, _lastRetuneMs, _tuneCallMs;
+
+    /// <summary>
+    /// For measuring: called once for each retune with the centre asked for (Hz), how long the API's
+    /// update call took (ms), how long until the radio confirmed it (ms) and how it ended ("ok",
+    /// "TIMEOUT" when no confirmation came, or "refused ..." with the API's error). Called on the
+    /// API's stream thread, a timer thread or the caller's: keep it short.
+    /// </summary>
+    public Action<double, double, double, string>? RetuneTrace { get; set; }
+
+    /// <summary>
+    /// Use the service's IF AGC, not ours; read when the radio is started. For comparing the two:
+    /// the service's makes retunes slow.
+    /// </summary>
+    public bool IfAgc { get; set; }
+
+    // ---- IF gain ----------------------------------------------------------------------------
+    private const double IfSetPointDbfs = AgcSetPointDbfs, IfDeadbandDb = 3, DwellMs = 250;
+    private const int PowerEvery = 8, PowerEnough = 2000;
+    private readonly object _powerLock = new();     // a leaf: nothing else is taken inside it
+    private double _powerSum;
+    private long _powerCount;
+    private readonly Dictionary<long, int> _grFor = [];     // by centre frequency, in units of 100 kHz
+    private int _grCmd = 40;                        // the IF gain reduction last sent
+    private double _gainBase;                       // the gain with no IF reduction, from the radio's last report
+
+    private static long GrKey(double centerHz) => (long)Math.Round(centerHz / 100e3);
+
+    /// <summary>
+    /// The IF gain reduction to use after the samples measured <paramref name="dbfs"/> (mean power
+    /// against full scale) at a reduction of <paramref name="gr"/>: what brings them to the set point,
+    /// within the radio's range; no change for a small error.
+    /// </summary>
+    internal static int NextIfGr(int gr, double dbfs)
+    {
+        double error = dbfs - IfSetPointDbfs;
+        if (Math.Abs(error) < IfDeadbandDb) return gr;
+        return Math.Clamp(gr + (int)Math.Round(error), MinIfGr, MaxIfGr);
+    }
+
+    // The mean power of the samples since this was last called, or null with too few to go by.
+    private double? TakePower()
+    {
+        double sum;
+        long count;
+        lock (_powerLock)
+        {
+            (sum, count) = (_powerSum, _powerCount);
+            _powerSum = 0;
+            _powerCount = 0;
+        }
+        return count >= PowerEnough ? 10 * Math.Log10(sum / count + 1e-12) : null;
+    }
 
     public string Description { get; private set; } = "SDRplay RSP";
     public double SampleRate { get; private set; }
@@ -91,7 +148,8 @@ public sealed unsafe class SdrPlaySource : IIqSource
     public event Action<string>? Failed;
 
     public IReadOnlyList<string> Antennas { get; private set; } = ["Antenna A", "Antenna B", "Antenna C"];
-    public double GainDb => Volatile.Read(ref _gainDb);
+    // With our own IF gain the reduction just sent counts at once: the radio's report of it comes later.
+    public double GainDb => IfAgc ? Volatile.Read(ref _gainDb) : Volatile.Read(ref _gainBase) - Volatile.Read(ref _grCmd);
     public bool Overloaded => _overloaded;
     public double LastRetuneMs => Volatile.Read(ref _lastRetuneMs);
     public int ActiveGainStep => _activeStep;
@@ -150,6 +208,8 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 SampleRate = sampleRate;
                 CenterHz = centerHz;
                 _activeStep = Math.Min(_gainStep, MaxLnaState(centerHz));
+                _grCmd = _ifGr = Math.Clamp(_ifGr, MinIfGr, MaxIfGr);
+                TakePower();
                 p->DevParams->FsFreq.FsHz = sampleRate;
                 if (isDx) p->DevParams->RspDxParams.AntennaSel = Antennas.ToList().IndexOf(_antenna);
                 WriteBiasT(p, out _, out _);
@@ -164,7 +224,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 ch->CtrlParams.Decimation.Enable = 0;
                 ch->CtrlParams.DcOffset.DcEnable = 1;
                 ch->CtrlParams.DcOffset.IqEnable = 1;
-                ch->CtrlParams.Agc.Enable = AgcMode50Hz;
+                ch->CtrlParams.Agc.Enable = IfAgc ? AgcMode50Hz : 0;
                 ch->CtrlParams.Agc.SetPointDbfs = AgcSetPointDbfs;
 
                 _self = GCHandle.Alloc(this);
@@ -266,16 +326,35 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 return;
             }
             bool farMove = Math.Abs(centerHz - CenterHz) >= 1e6;
+            var reason = Update.TunerFrf;
+            if (!IfAgc)
+            {
+                // Remember what this tuning wants, and send what the next one wanted last time along
+                // with the frequency: one update, not a gain change chasing the retune.
+                if (TakePower() is double dbfs)
+                {
+                    if (_grFor.Count > 4096) _grFor.Clear();
+                    _grFor[GrKey(CenterHz)] = NextIfGr(_grCmd, dbfs);
+                }
+                if (_grFor.TryGetValue(GrKey(centerHz), out int gr) && gr != _grCmd)
+                {
+                    _params->RxChannelA->TunerParams.Gain.GRdB = gr;
+                    _grCmd = _ifGr = gr;
+                    reason |= Update.TunerGr;
+                }
+            }
             CenterHz = centerHz;
             _params->RxChannelA->TunerParams.RfFreq.RfHz = centerHz;
             _retuneStart = Stopwatch.GetTimestamp();
             _retunePending = true;
-            var err = Native.UpdateDevice(_device.Dev, Native.TunerA, Update.TunerFrf, UpdateExt1.None);
+            var err = Native.UpdateDevice(_device.Dev, Native.TunerA, reason, UpdateExt1.None);
+            _tuneCallMs = Stopwatch.GetElapsedTime(_retuneStart).TotalMilliseconds;
             if (err != Err.Success)
             {
                 // Refused: say so anyway, or a listener waiting for the retune would wait for ever.
                 _retunePending = false;
                 _announceRetune = true;
+                RetuneTrace?.Invoke(centerHz, _tuneCallMs, _tuneCallMs, $"refused {Native.ErrorText(err)}");
             }
             if (farMove) _auto.Reset();
             // Each band has its own number of LNA states; one that does not exist here is refused.
@@ -460,8 +539,24 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 _lastRetuneMs = RetuneTimeoutMs;
                 _announceRetune = true;
                 _retunePending = false;
+                RetuneTrace?.Invoke(CenterHz, _tuneCallMs, RetuneTimeoutMs, "TIMEOUT");
             }
-            if (_autoGain)
+            // Staying on one tuning: trim the IF gain to the level of the samples.
+            if (!IfAgc && !_retunePending && Stopwatch.GetElapsedTime(_retuneStart).TotalMilliseconds > DwellMs
+                && TakePower() is double dbfs)
+            {
+                int gr = NextIfGr(_grCmd, dbfs);
+                if (gr != _grCmd)
+                {
+                    _params->RxChannelA->TunerParams.Gain.GRdB = gr;
+                    if (Native.UpdateDevice(_device.Dev, Native.TunerA, Update.TunerGr, UpdateExt1.None) == Err.Success)
+                        _grCmd = _ifGr = gr;
+                    else
+                        _params->RxChannelA->TunerParams.Gain.GRdB = _grCmd;
+                }
+            }
+            // Not in the middle of a retune: a gain change sent then holds it up.
+            if (_autoGain && !_retunePending)
             {
                 var now = Stopwatch.GetElapsedTime(0);
                 int? next = _auto.Step(now, _overloaded, _activeStep, _gainStep, MaxLnaState(CenterHz), _ifGr, MaxIfGr);
@@ -494,6 +589,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
             _lastRetuneMs = Stopwatch.GetElapsedTime(_retuneStart).TotalMilliseconds;
             _retunePending = false;
             _announceRetune = true;
+            RetuneTrace?.Invoke(CenterHz, _tuneCallMs, _lastRetuneMs, "ok");
         }
         if (_i.Length < n)
         {
@@ -505,6 +601,17 @@ public sealed unsafe class SdrPlaySource : IIqSource
         {
             _i[k] = xi[k] * scale;
             _q[k] = xq[k] * scale;
+        }
+        if (!IfAgc)
+        {
+            double sum = 0;
+            int m = 0;
+            for (int k = 0; k < n; k += PowerEvery, m++) sum += _i[k] * _i[k] + _q[k] * _q[k];
+            lock (_powerLock)
+            {
+                _powerSum += sum;
+                _powerCount += m;
+            }
         }
         // In one step: another thread may set it between a read and a clear, and it would be lost.
         bool retuned = Interlocked.Exchange(ref _announceRetune, false);
@@ -521,8 +628,9 @@ public sealed unsafe class SdrPlaySource : IIqSource
             {
                 case EventId.GainChange:
                     var g = (GainCbParamT*)eventParams;
-                    self._ifGr = (int)g->GRdB;
+                    if (self.IfAgc) self._ifGr = (int)g->GRdB;
                     Volatile.Write(ref self._gainDb, g->CurrGain);
+                    Volatile.Write(ref self._gainBase, g->CurrGain + g->GRdB);
                     break;
                 case EventId.PowerOverloadChange:
                     self._overloaded = *(int*)eventParams == 0;      // 0 detected, 1 corrected

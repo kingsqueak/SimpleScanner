@@ -92,3 +92,30 @@ public class AutoGainStepTests
         Assert.Null(a.Step(S(200), true, 18, 5, 18, 30, 59));
     }
 }
+
+/// <summary>Our IF gain for the SDRplay radios: the reduction that brings the samples to the set point (-30 dBFS).</summary>
+public class IfGainTests
+{
+    [Fact]
+    public void ASmallErrorChangesNothing()
+    {
+        Assert.Equal(40, SdrPlaySource.NextIfGr(40, -30));
+        Assert.Equal(40, SdrPlaySource.NextIfGr(40, -27.5));
+        Assert.Equal(40, SdrPlaySource.NextIfGr(40, -32.9));
+    }
+
+    [Fact]
+    public void TheWholeErrorIsTakenUpAtOnce()
+    {
+        Assert.Equal(50, SdrPlaySource.NextIfGr(40, -20));      // too strong: more reduction
+        Assert.Equal(28, SdrPlaySource.NextIfGr(40, -42.2));    // too weak: less
+    }
+
+    [Fact]
+    public void ItStaysInsideTheRadiosRange()
+    {
+        Assert.Equal(59, SdrPlaySource.NextIfGr(50, -3));
+        Assert.Equal(20, SdrPlaySource.NextIfGr(30, -70));
+        Assert.Equal(20, SdrPlaySource.NextIfGr(20, -120));
+    }
+}

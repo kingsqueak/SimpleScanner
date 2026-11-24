@@ -39,6 +39,10 @@ public sealed partial class MemoryRow(MemoryChannel channel, Action changed) : O
 public sealed partial class GroupRow(string name, bool selected, Action changed) : ObservableObject
 {
     public string Name { get; } = name;
+    /// <summary>Made by the program from a tag, not by the user.</summary>
+    public bool IsAuto { get; } = MemoryStore.IsTagGroup(name);
+    /// <summary>What the selector shows: a tag's group goes by the tag alone, under its own heading.</summary>
+    public string Label => IsAuto ? Name[MemoryStore.TagPrefix.Length..] : Name;
 
     public bool Selected
     {
@@ -133,6 +137,11 @@ public sealed partial class MainViewModel : ObservableObject
     public System.Collections.ObjectModel.ObservableCollection<MemoryRow> Memories { get; } = [];
     /// <summary>Every memory group with its tick. None ticked means all groups are shown and scanned.</summary>
     public System.Collections.ObjectModel.ObservableCollection<GroupRow> GroupRows { get; } = [];
+    /// <summary>The rows of <see cref="GroupRows"/> for the groups the user made, and for those made from the tags.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<GroupRow> UserGroupRows { get; } = [];
+    public System.Collections.ObjectModel.ObservableCollection<GroupRow> AutoGroupRows { get; } = [];
+    [ObservableProperty] private bool _hasUserGroups;
+    [ObservableProperty] private bool _hasAutoGroups;
     public string ScanText => IsScanning ? "Stop scan" : "Scan";
 
     public bool IsAm => !AutoMode && Mode == Mode.Am;
@@ -281,18 +290,30 @@ public sealed partial class MainViewModel : ObservableObject
         _loading = true;
         // The group rows are rebuilt only when the set of groups has changed, so an open selector keeps its rows.
         var wanted = select ?? SelectedGroups;
-        string[] names = [.. _memories.GroupNames()];
+        // The user's own groups first, then the ones made from the tags. A tag's group keeps its tick
+        // when its name changes spelling.
+        string[] names = [.. _memories.GroupNames().Where(n => !MemoryStore.IsTagGroup(n)), .. _memories.TagGroupNames()];
         if (select is not null || !names.SequenceEqual(GroupRows.Select(g => g.Name)))
         {
             GroupRows.Clear();
-            foreach (string n in names) GroupRows.Add(new GroupRow(n, wanted.Contains(n), OnGroupsChanged));
+            UserGroupRows.Clear();
+            AutoGroupRows.Clear();
+            foreach (string n in names)
+            {
+                var row = new GroupRow(n, wanted.Any(w => MemoryStore.SameGroup(w, n)), OnGroupsChanged);
+                GroupRows.Add(row);
+                (row.IsAuto ? AutoGroupRows : UserGroupRows).Add(row);
+            }
+            HasUserGroups = UserGroupRows.Count > 0;
+            HasAutoGroups = AutoGroupRows.Count > 0;
         }
         var shown = SelectedGroups;
         GroupsText = shown.Count == 0 ? AllGroups : shown.Count == 1 ? shown[0] : $"{shown.Count} groups";
         Memories.Clear();
         // A channel in several of the groups shown appears once, under the first of them.
-        string First(MemoryChannel c) => c.Groups.Where(g => shown.Count == 0 || shown.Contains(g)).Order().FirstOrDefault() ?? "";
-        foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || c.Groups.Any(shown.Contains))
+        string First(MemoryChannel c) =>
+            (shown.Count == 0 ? c.Groups : shown.Where(g => MemoryStore.InGroup(c, g))).Order().FirstOrDefault() ?? "";
+        foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || shown.Any(g => MemoryStore.InGroup(c, g)))
                      .OrderBy(First).ThenBy(c => c.FrequencyHz))
             Memories.Add(new MemoryRow(c, _memories.Save));
         _loading = false;
@@ -551,8 +572,9 @@ public sealed partial class MainViewModel : ObservableObject
         channel.Name = name;
         channel.Mode = AutoMode ? null : Mode;
         channel.BandwidthHz = AutoMode ? null : SelectedWidth?.Value;
-        // One group shown: it goes there. Otherwise it stays where it was, or goes in "My channels".
-        string? group = SelectedGroups is [var only] ? only : channel.Groups.Count == 0 ? "My channels" : null;
+        // One group shown: it goes there (unless it is a tag's group, which nothing can be put in).
+        // Otherwise it stays where it was, or goes in "My channels".
+        string? group = SelectedGroups is [var only] && !MemoryStore.IsTagGroup(only) ? only : channel.Groups.Count == 0 ? "My channels" : null;
         if (group is not null && !channel.Groups.Contains(group)) channel.Groups.Add(group);
         _picked = channel;
         _memories.Save();

@@ -95,4 +95,40 @@ public sealed class MemoryStore
     /// <summary>Every group name in use, in order.</summary>
     public List<string> GroupNames() =>
         Channels.SelectMany(c => c.Groups).Distinct().Order(StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    // ---- groups made from the tags -----------------------------------------------------------
+    // Every tag in use is also a group, without anyone making it: its members are the channels
+    // with that tag. Nothing is stored for these groups; they follow the tags as they are edited.
+
+    /// <summary>What the name of a group made from a tag starts with.</summary>
+    public const string TagPrefix = "Tag: ";
+
+    public static bool IsTagGroup(string group) => group.StartsWith(TagPrefix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// What two tags must share to count as the same: their letters and digits, whatever the case.
+    /// "Fire Dispatch", "FIRE DISPATCH", "fire-dispatch" and " Fire  Dispatch " are one tag.
+    /// </summary>
+    public static string TagKey(string? tag) =>
+        tag is null ? "" : string.Concat(tag.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant));
+
+    /// <summary>The groups made from the tags in use, in order. Each is named for its tag's most usual spelling.</summary>
+    public List<string> TagGroupNames() =>
+        Channels.Where(c => TagKey(c.Tag).Length > 0)
+            .GroupBy(c => TagKey(c.Tag))
+            .Select(g => TagPrefix + g.GroupBy(c => c.Tag!.Trim()).OrderByDescending(s => s.Count()).ThenBy(s => s.Key, StringComparer.Ordinal).First().Key)
+            .Order(StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    /// <summary>Whether two group names mean the same group: the same name, or groups of the same tag.</summary>
+    public static bool SameGroup(string a, string b) =>
+        a == b || (IsTagGroup(a) && IsTagGroup(b) && TagKey(a[TagPrefix.Length..]) == TagKey(b[TagPrefix.Length..]));
+
+    /// <summary>Whether the channel is in the group: one it was put in, or the group of its tag.</summary>
+    public static bool InGroup(MemoryChannel c, string group)
+    {
+        if (c.Groups.Contains(group)) return true;
+        if (!IsTagGroup(group)) return false;
+        string key = TagKey(c.Tag);
+        return key.Length > 0 && key == TagKey(group[TagPrefix.Length..]);
+    }
 }

@@ -228,6 +228,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
         _dirty = false;
         _store.Save();
         _seen = _store.Version;
+        RefreshGroupChoices();      // an edited tag can make or end a tag's group
         Edited?.Invoke();
     }
 
@@ -242,9 +243,8 @@ public sealed partial class ChannelsViewModel : ObservableObject
     private void Reload()
     {
         _loading = true;
-        var names = _store.GroupNames();
         string keep = GroupFilter;
-        GroupChoices = [AllGroups, .. names, NoGroup];
+        GroupChoices = Choices();
         GroupFilter = GroupChoices.Contains(keep) ? keep : AllGroups;
         _loading = false;
 
@@ -252,7 +252,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
         Rows.Clear();
         foreach (var c in Sorted())
         {
-            if (GroupFilter == NoGroup ? c.Groups.Count > 0 : GroupFilter != AllGroups && !c.Groups.Contains(GroupFilter)) continue;
+            if (GroupFilter == NoGroup ? c.Groups.Count > 0 : GroupFilter != AllGroups && !MemoryStore.InGroup(c, GroupFilter)) continue;
             var row = new ChannelRow(c, Touch) { Heads = Heads };
             if (row.Matches(words)) Rows.Add(row);
         }
@@ -265,7 +265,8 @@ public sealed partial class ChannelsViewModel : ObservableObject
     partial void OnGroupFilterChanged(string value)
     {
         if (value is null) return;
-        IsGroupChosen = value != AllGroups && value != NoGroup;
+        // A tag's group is made by the program: there is nothing to rename or delete.
+        IsGroupChosen = value != AllGroups && value != NoGroup && !MemoryStore.IsTagGroup(value);
         GroupNewName = IsGroupChosen ? value : "";
         if (!_loading) Reload();
     }
@@ -339,7 +340,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
     {
         GroupTicks.Clear();
         if (_selection.Count == 0) return;
-        foreach (string name in _store.GroupNames())
+        foreach (string name in _store.GroupNames().Where(n => !MemoryStore.IsTagGroup(n)))
         {
             int n = _selection.Count(r => r.Channel.Groups.Contains(name));
             GroupTicks.Add(new GroupTick(name, n == 0 ? false : n == _selection.Count ? true : null, SetMembership));
@@ -360,14 +361,30 @@ public sealed partial class ChannelsViewModel : ObservableObject
         RefreshGroupChoices();
     }
 
+    // What the filter offers: everything, the user's groups, the groups made from the tags, and the channels in no group.
+    private List<string> Choices() =>
+        [AllGroups, .. _store.GroupNames().Where(n => !MemoryStore.IsTagGroup(n)), .. _store.TagGroupNames(), NoGroup];
+
+    // Whether a name typed for a group can be used; says why not.
+    private bool NameAllowed(string name)
+    {
+        if (name is not (AllGroups or NoGroup) && !MemoryStore.IsTagGroup(name)) return true;
+        Status = MemoryStore.IsTagGroup(name)
+            ? $"A group's name cannot begin with \"{MemoryStore.TagPrefix.Trim()}\": those are the groups made from the tags"
+            : $"A group cannot be called \"{name}\"";
+        return false;
+    }
+
     // The filter's list of groups, kept in step without touching the rows: a channel taken out of
     // the group being shown stays on screen until the filter is next changed.
     private void RefreshGroupChoices()
     {
+        var choices = Choices();
+        if (choices.SequenceEqual(GroupChoices)) return;
         _loading = true;
         string keep = GroupFilter;
-        GroupChoices = [AllGroups, .. _store.GroupNames(), NoGroup];
-        GroupFilter = GroupChoices.Contains(keep) ? keep : AllGroups;
+        GroupChoices = choices;
+        GroupFilter = choices.FirstOrDefault(c => MemoryStore.SameGroup(c, keep)) ?? AllGroups;
         _loading = false;
     }
 
@@ -381,6 +398,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
             Status = name.Length == 0 ? "Type a name for the group first" : "Select the channels to put in the group first";
             return;
         }
+        if (!NameAllowed(name)) return;
         SetMembership(name, true);
         NewGroup = "";
         Status = $"{_selection.Count} channel{(_selection.Count == 1 ? "" : "s")} in \"{name}\"";
@@ -400,11 +418,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
             if (IsGroupChosen && name.Length == 0) Status = "Type the group's new name first";
             return;
         }
-        if (name is AllGroups or NoGroup)
-        {
-            Status = $"A group cannot be called \"{name}\"";
-            return;
-        }
+        if (!NameAllowed(name)) return;
         bool merged = _store.GroupNames().Contains(name);
         int n = 0;
         foreach (var c in _store.Channels)
@@ -425,7 +439,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
             ? $"\"{old}\" joined to \"{name}\": {n} channel{(n == 1 ? "" : "s")} moved"
             : $"\"{old}\" is now \"{name}\" ({n} channel{(n == 1 ? "" : "s")})";
         _loading = true;
-        GroupChoices = [AllGroups, .. _store.GroupNames(), NoGroup];
+        GroupChoices = Choices();
         GroupFilter = name;
         _loading = false;
         Reload();
@@ -526,6 +540,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
             Status = "Type a group name for the imported channels";
             return;
         }
+        if (!NameAllowed(group)) return;
         var result = RadioReferenceCsv.Import(_store, Pending.Channels, group);
         Status = $"{Pending.FileName} into \"{group}\": {result}";
         _dirty = true;

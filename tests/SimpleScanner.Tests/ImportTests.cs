@@ -264,4 +264,49 @@ public class ImportTests
         }
         finally { File.Delete(path); }
     }
+
+    [Fact]
+    public void Every_tag_is_a_group_whatever_its_case()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ss-tags-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new MemoryStore(path);
+            store.Channels.Add(new MemoryChannel { Name = "A", FrequencyHz = 154.1e6, Tag = "Fire Dispatch", Groups = ["Mine"] });
+            store.Channels.Add(new MemoryChannel { Name = "B", FrequencyHz = 154.2e6, Tag = "FIRE DISPATCH" });
+            store.Channels.Add(new MemoryChannel { Name = "C", FrequencyHz = 154.3e6, Tag = " fire-dispatch " });
+            store.Channels.Add(new MemoryChannel { Name = "D", FrequencyHz = 154.4e6, Tag = "Fire Dispatch" });
+            store.Channels.Add(new MemoryChannel { Name = "E", FrequencyHz = 155.1e6, Tag = "Law Tac" });
+            store.Channels.Add(new MemoryChannel { Name = "F", FrequencyHz = 155.2e6 });
+
+            // One group for each tag, named for the tag's most usual spelling; none for a channel with no tag.
+            Assert.Equal(["Tag: Fire Dispatch", "Tag: Law Tac"], store.TagGroupNames());
+            Assert.Equal(["Mine"], store.GroupNames());
+            Assert.Equal(4, store.Channels.Count(c => MemoryStore.InGroup(c, "Tag: Fire Dispatch")));
+            Assert.Equal(4, store.Channels.Count(c => MemoryStore.InGroup(c, "Tag: fire dispatch")));
+            Assert.True(MemoryStore.SameGroup("Tag: Fire Dispatch", "Tag: FIRE-DISPATCH"));
+            Assert.False(MemoryStore.SameGroup("Fire Dispatch", "FIRE DISPATCH"));      // the user's own groups are exact
+
+            // The editor offers them after the user's groups, shows their channels, and will not rename or delete them.
+            var vm = new ChannelsViewModel(store);
+            Assert.Equal([ChannelsViewModel.AllGroups, "Mine", "Tag: Fire Dispatch", "Tag: Law Tac", ChannelsViewModel.NoGroup], vm.GroupChoices);
+            vm.GroupFilter = "Tag: Fire Dispatch";
+            Assert.Equal(["A", "B", "C", "D"], vm.Rows.Select(r => r.Channel.Name));
+            Assert.False(vm.IsGroupChosen);
+            Assert.DoesNotContain(vm.GroupTicks, t => t.Name.StartsWith("Tag: "));
+
+            // A changed tag moves the channel; the last channel leaving ends the group.
+            vm.GroupFilter = ChannelsViewModel.AllGroups;
+            vm.Rows.First(r => r.Channel.Name == "E").Tag = "fire dispatch";
+            vm.Flush();
+            Assert.Equal([ChannelsViewModel.AllGroups, "Mine", "Tag: Fire Dispatch", ChannelsViewModel.NoGroup], vm.GroupChoices);
+
+            // A group of the user's cannot take a name that looks like a tag's group.
+            vm.SetSelection([vm.Rows[0]]);
+            vm.NewGroup = "Tag: Mine";
+            vm.AddToNewGroupCommand.Execute(null);
+            Assert.Equal(["Mine"], store.GroupNames());
+        }
+        finally { File.Delete(path); }
+    }
 }

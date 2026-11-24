@@ -29,13 +29,28 @@
                   <Button Classes="seg" Content="All groups" Command="{Binding ShowAllGroupsCommand}" HorizontalAlignment="Stretch"
                           ToolTip.Tip="Untick every group: all of them are shown and scanned" />
                   <ScrollViewer MaxHeight="360">
-                    <ItemsControl ItemsSource="{Binding GroupRows}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:GroupRow">
-                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Name}" MinHeight="0" Padding="6,3" />
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <StackPanel>
+                      <TextBlock Text="User Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasUserGroups}"
+                                 ToolTip.Tip="The groups you made, in the channel editor or by importing" />
+                      <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasUserGroups}" />
+                      <ItemsControl ItemsSource="{Binding UserGroupRows}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:GroupRow">
+                            <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <TextBlock Text="Auto Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasAutoGroups}"
+                                 ToolTip.Tip="One group for each tag in use, made by the program: its channels are those with that tag, however the tag is written" />
+                      <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasAutoGroups}" />
+                      <ItemsControl ItemsSource="{Binding AutoGroupRows}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:GroupRow">
+                            <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
                   </ScrollViewer>
                 </StackPanel>
               </Flyout>

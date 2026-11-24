@@ -1,8 +1,8 @@
 # SimpleScanner
 
 A desktop communications scanner for the SDRplay RSPdx, for Windows, macOS and Linux
-(.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, and the first five
-digital voice modes.
+(.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, the first five
+digital voice modes, and several radios at once.
 
 ## What works now
 
@@ -13,6 +13,9 @@ digital voice modes.
 - Squelch, a level bar, and automatic front-end gain
 - Stored channels in groups (a channel can be in several), a scan over the groups chosen that
   looks at several megahertz at a time, and a search between two frequencies
+- Several radios at once, each with its own display, groups and scan (see "Several radios" below)
+- Under the groups on the Operate tab, the frequencies of the groups chosen, each with a tick to
+  take it in or out of the scan. A change of tick is taken up by a running scan at once
 - Import of RadioReference frequency downloads (the CSV file of a county or an agency), and a
   channel editor: filter the list, edit any field, put channels in groups
 - A duplicate checker in the channel editor: lists the channels stored more than once (same
@@ -47,6 +50,29 @@ digital voice modes.
 Not yet: trunk following, P25 Phase 2. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
 the scan stops on. Trunked-system frequencies in a download are stored unticked.
 
+### Several radios
+
+With more than one RSP plugged in, the scanner can run them together. On the Settings tab, choose a
+radio in the Receiver box and tick "Use" for each one wanted; they are started at the next launch.
+The first runs inside the program; each further radio runs in a helper process of its own, started
+and ended by the program (the SDRplay API gives a process one radio).
+
+- Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its
+  own Scan, Skip and Avoid buttons. Click a strip to select that radio. Tune, Mode, Filter, Audio,
+  Search and the Scan row on the Operate tab work the radio selected.
+- Each radio has its own ticked groups. The groups shown on Operate and on Scan Groups are those
+  of the radio selected, and the heading says whose they are.
+- Scan starts and stops the radio selected and leaves the others as they are: one can sit on a
+  fixed station while another scans. When two radios scan channels they have in common, those are
+  shared out between them, so each is visited by one radio, and shared out again when one stops.
+- A channel's own Scan tick (on Scan Groups, and in the frequency list on Operate) is the same for
+  every radio.
+- Each radio keeps its own settings (antenna, gain, squelch, volume and the rest) under its serial
+  number, and has a Pan slider on the Settings tab to put its sound to the left or the right.
+- The small window shows every radio's strip.
+
+With one radio the window is as it was, with the one large display.
+
 ### The RadioReference web service
 
 The browser uses RadioReference's database web service, which needs two things: the user's own
@@ -77,14 +103,15 @@ lives in the same library, so a build without the library has no D-STAR speech e
 
 ## What you need
 
-- An SDRplay RSPdx or RSPdx-R2 (other single-tuner RSPs stream too)
+- An SDRplay RSPdx or RSPdx-R2 (other single-tuner RSPs stream too). Several can be used at once;
+  an RSPdx and an RSP1 together are what has been tried
 - The SDRplay API 3.x, from <https://www.sdrplay.com/api/>. It is not included.
 
 ## Building
 
     dotnet build
     dotnet test
-    dotnet run --project src/SimpleScanner            # add "-- --start" to switch the radio on at launch
+    dotnet run --project src/SimpleScanner            # add "-- --start" to switch the radios on at launch
     scripts/make-dmg.sh                                # macOS app and DMG
 
 The native libraries are built by the first `dotnet build` on macOS and Linux; they need a C

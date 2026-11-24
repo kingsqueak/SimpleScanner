@@ -41,8 +41,10 @@ public sealed partial class GroupRow(string name, bool selected, Action changed)
     public string Name { get; } = name;
     /// <summary>Made by the program from a tag, not by the user.</summary>
     public bool IsAuto { get; } = MemoryStore.IsTagGroup(name);
-    /// <summary>What the selector shows: a tag's group goes by the tag alone, under its own heading.</summary>
-    public string Label => IsAuto ? Name[MemoryStore.TagPrefix.Length..] : Name;
+    /// <summary>Made by the program from a location.</summary>
+    public bool IsPlace { get; } = MemoryStore.IsPlaceGroup(name);
+    /// <summary>What the selector shows: a tag's or a location's group goes by the tag or location alone, under its own heading.</summary>
+    public string Label => MemoryStore.GroupLabel(Name);
 
     public bool Selected
     {
@@ -155,8 +157,10 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The rows of <see cref="GroupRows"/> for the groups the user made, and for those made from the tags.</summary>
     public System.Collections.ObjectModel.ObservableCollection<GroupRow> UserGroupRows { get; } = [];
     public System.Collections.ObjectModel.ObservableCollection<GroupRow> AutoGroupRows { get; } = [];
+    public System.Collections.ObjectModel.ObservableCollection<GroupRow> PlaceGroupRows { get; } = [];
     [ObservableProperty] private bool _hasUserGroups;
     [ObservableProperty] private bool _hasAutoGroups;
+    [ObservableProperty] private bool _hasPlaceGroups;
     public string ScanText => IsScanning ? "Stop" : "Scan";
 
     public bool IsAm => !AutoMode && Mode == Mode.Am;
@@ -312,22 +316,24 @@ public sealed partial class MainViewModel : ObservableObject
         _loading = true;
         // The group rows are rebuilt only when the set of groups has changed, so an open selector keeps its rows.
         var wanted = select ?? SelectedGroups;
-        // The user's own groups first, then the ones made from the tags. A tag's group keeps its tick
+        // The user's own groups first, then the ones made from the locations and the tags. A tag's group keeps its tick
         // when its name changes spelling.
-        string[] names = [.. _memories.GroupNames().Where(n => !MemoryStore.IsTagGroup(n)), .. _memories.TagGroupNames()];
+        string[] names = [.. _memories.GroupNames().Where(n => !MemoryStore.IsAutoGroup(n)), .. _memories.PlaceGroupNames(), .. _memories.TagGroupNames()];
         if (select is not null || !names.SequenceEqual(GroupRows.Select(g => g.Name)))
         {
             GroupRows.Clear();
             UserGroupRows.Clear();
             AutoGroupRows.Clear();
+            PlaceGroupRows.Clear();
             foreach (string n in names)
             {
                 var row = new GroupRow(n, wanted.Any(w => MemoryStore.SameGroup(w, n)), OnGroupsChanged);
                 GroupRows.Add(row);
-                (row.IsAuto ? AutoGroupRows : UserGroupRows).Add(row);
+                (row.IsPlace ? PlaceGroupRows : row.IsAuto ? AutoGroupRows : UserGroupRows).Add(row);
             }
             HasUserGroups = UserGroupRows.Count > 0;
             HasAutoGroups = AutoGroupRows.Count > 0;
+            HasPlaceGroups = PlaceGroupRows.Count > 0;
         }
         var shown = SelectedGroups;
         GroupsText = shown.Count == 0 ? AllGroups : shown.Count == 1 ? shown[0] : $"{shown.Count} groups";
@@ -378,6 +384,11 @@ public sealed partial class MainViewModel : ObservableObject
             _settings.Save();
         }
     }
+
+    /// <summary>The RadioReference browser's account name and place, kept with the settings.</summary>
+    public Settings.RrPlace RadioReferencePlace => _settings.RadioReference ??= new Settings.RrPlace();
+
+    public void SaveSettings() => _settings.Save();
 
     /// <summary>The channel editor has changed the stored channels: show them again.</summary>
     public void MemoriesEdited()
@@ -666,7 +677,7 @@ public sealed partial class MainViewModel : ObservableObject
         channel.BandwidthHz = AutoMode ? null : SelectedWidth?.Value;
         // One group shown: it goes there (unless it is a tag's group, which nothing can be put in).
         // Otherwise it stays where it was, or goes in "My channels".
-        string? group = SelectedGroups is [var only] && !MemoryStore.IsTagGroup(only) ? only : channel.Groups.Count == 0 ? "My channels" : null;
+        string? group = SelectedGroups is [var only] && !MemoryStore.IsAutoGroup(only) ? only : channel.Groups.Count == 0 ? "My channels" : null;
         if (group is not null && !channel.Groups.Contains(group)) channel.Groups.Add(group);
         _picked = channel;
         _memories.Save();

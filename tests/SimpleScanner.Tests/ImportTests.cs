@@ -357,4 +357,98 @@ public class ImportTests
         }
         finally { File.Delete(path); File.Delete(path + ".part"); }
     }
+
+    [Fact]
+    public void The_duplicate_checker_lists_the_sets_whole_and_selects_the_extras()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ss-dups-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new MemoryStore(path);
+            MemoryChannel Ch(string name, double mhz, string? description = null, string? agency = null, string? location = null, string? group = null) =>
+                new() { Name = name, FrequencyHz = mhz * 1e6, Description = description, Agency = agency, Location = location, Groups = group is null ? [] : [group] };
+            store.Channels.AddRange([
+                Ch("Manch PD", 154.815, "Dispatch"),                                              // the bare one of a pair
+                Ch("manch pd ", 154.815, "Dispatch", "Manchester", "Manchester, NH", "County"),     // the same, fuller, name written differently
+                Ch("Fire", 33.74, "Greenville fire", "Greenville"),                               // one frequency, two towns:
+                Ch("Fire", 33.74, "Mason fire", "Mason"),                                         //   the same name, different descriptions
+                Ch("Tower", 121.3),
+                Ch("Ground", 121.9),
+                Ch("Other user", 121.9),                                                          // shares a frequency only
+            ]);
+            var vm = new ChannelsViewModel(store);
+            Assert.Equal(7, vm.Rows.Count);
+            Assert.False(vm.ShowingDuplicates);
+
+            vm.DuplicateMode = "Same frequency and name";
+            Assert.True(vm.ShowingDuplicates);
+            Assert.Equal("2 sets of duplicates, 4 channels", vm.DuplicateText);
+            Assert.Equal([33.74e6, 33.74e6, 154.815e6, 154.815e6], vm.Rows.Select(r => r.Channel.FrequencyHz));
+            Assert.Equal([true, false, true, false], vm.Rows.Select(r => r.FirstOfSet));
+            Assert.Equal([false, false, true, true], vm.Rows.Select(r => r.Shaded));              // the sets told apart
+            Assert.Equal("Manchester", vm.Rows[2].Agency);                                        // the fuller entry leads its set
+            Assert.Equal("location Manchester, NH  ·  receive as Auto (from the band)  ·  from typed in or stored from the radio", vm.Rows[2].More);
+
+            vm.DuplicateMode = "Same frequency, name and description";
+            Assert.Equal("1 set of duplicates, 2 channels", vm.DuplicateText);
+            vm.DuplicateMode = "Same frequency";
+            Assert.Equal("3 sets of duplicates, 6 channels", vm.DuplicateText);
+
+            // The filter still applies: duplicates among the channels it lets through.
+            vm.Filter = "manch";
+            Assert.Equal("1 set of duplicates, 2 channels", vm.DuplicateText);
+            vm.Filter = "";
+
+            // Editing a description is how two that share a frequency are told apart; and the extras can be deleted.
+            vm.DuplicateMode = "Same frequency and name";
+            IReadOnlyList<ChannelRow>? asked = null;
+            vm.SelectRequested += rows => asked = rows;
+            vm.SelectExtrasCommand.Execute(null);
+            Assert.Equal(["Mason fire", "Dispatch"], asked!.Select(r => r.Description));
+            vm.SetSelection([asked![1]]);                                                         // only the bare Manchester one
+            vm.DeleteSelectedCommand.Execute(null);
+            Assert.Equal(6, store.Channels.Count);
+            Assert.Equal("1 set of duplicates, 2 channels", vm.DuplicateText);                    // the pair that is left
+            Assert.Contains(store.Channels, c => c.Agency == "Manchester");
+
+            vm.DuplicateMode = "Off";
+            Assert.Equal(6, vm.Rows.Count);
+            Assert.All(vm.Rows, r => Assert.False(r.InSet));
+        }
+        finally { File.Delete(path); File.Delete(path + ".part"); }
+    }
+
+    [Fact]
+    public void Every_location_is_a_group_and_can_be_typed_in_the_editor()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ss-places-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new MemoryStore(path);
+            store.Channels.AddRange([
+                new MemoryChannel { Name = "A", FrequencyHz = 154e6, Location = "Manchester, NH", Tag = "Law Dispatch" },
+                new MemoryChannel { Name = "B", FrequencyHz = 155e6, Location = "manchester NH" },
+                new MemoryChannel { Name = "C", FrequencyHz = 156e6 },
+            ]);
+            Assert.Equal(["Location: Manchester, NH"], store.PlaceGroupNames());
+            Assert.True(MemoryStore.IsAutoGroup("Location: Manchester, NH"));
+            Assert.Equal("Manchester, NH", MemoryStore.GroupLabel("Location: Manchester, NH"));
+            Assert.Equal(2, store.Channels.Count(c => MemoryStore.InGroup(c, "Location: Manchester, NH")));
+            Assert.False(MemoryStore.SameGroup("Location: Law Dispatch", "Tag: Law Dispatch"));    // a tag and a location are never one group
+
+            var vm = new ChannelsViewModel(store);
+            Assert.Equal(["All groups", "Location: Manchester, NH", "Tag: Law Dispatch", "(in no group)"], vm.GroupChoices);
+            vm.GroupFilter = "Location: Manchester, NH";
+            Assert.Equal(2, vm.Rows.Count);
+            Assert.False(vm.IsGroupChosen);                                                        // nothing to rename or delete
+            vm.GroupFilter = "All groups";
+            vm.Rows.Single(r => r.Name == "C").Location = " Concord, NH ";
+            vm.Flush();
+            Assert.Equal(["Location: Concord, NH", "Location: Manchester, NH"], store.PlaceGroupNames());
+            Assert.Equal("Concord, NH", MemoryStore.Load(path).Channels.Single(c => c.Name == "C").Location);
+            vm.Filter = "concord";
+            Assert.Single(vm.Rows);
+        }
+        finally { File.Delete(path); File.Delete(path + ".part"); }
+    }
 }

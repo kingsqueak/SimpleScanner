@@ -75,7 +75,17 @@
                                 </DataTemplate>
                               </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="Auto Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasAutoGroups}"
+                            <TextBlock Text="Auto Groups · Location" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasPlaceGroups}"
+                                       ToolTip.Tip="One group for each location in use, made by the program: a town, a county, or statewide and nationwide users. Channels loaded from RadioReference online have a location; it can be typed for any channel in the channel editor" />
+                            <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasPlaceGroups}" />
+                            <ItemsControl ItemsSource="{Binding PlaceGroupRows}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:GroupRow">
+                                  <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="Auto Groups · Tag" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasAutoGroups}"
                                        ToolTip.Tip="One group for each tag in use, made by the program: its channels are those with that tag, however the tag is written" />
                             <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasAutoGroups}" />
                             <ItemsControl ItemsSource="{Binding AutoGroupRows}">

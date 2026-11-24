@@ -15,6 +15,14 @@ public partial class ChannelsWindow : Window
 
     /// <summary>A channel was double-clicked: the main window tunes to it.</summary>
     public event Action<MemoryChannel>? TuneRequested;
+    /// <summary>The RadioReference browser was asked for: the main window, which holds the settings, opens it.</summary>
+    public event Action? OnlineRequested;
+
+    private void OnOnlineClick(object? sender, RoutedEventArgs e)
+    {
+        Vm?.Flush();
+        OnlineRequested?.Invoke();
+    }
 
     public ChannelsWindow()
     {
@@ -23,6 +31,10 @@ public partial class ChannelsWindow : Window
         _save = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => Vm?.Flush());
         _save.Start();
         Activated += (_, _) => Vm?.ReloadIfChanged();
+        DataContextChanged += (_, _) =>
+        {
+            if (Vm is { } vm) vm.SelectRequested += Select;
+        };
         Closed += (_, _) =>
         {
             _save.Stop();
@@ -31,6 +43,18 @@ public partial class ChannelsWindow : Window
     }
 
     private ChannelsViewModel? Vm => DataContext as ChannelsViewModel;
+
+    /// <summary>Select these rows in the list, and no others.</summary>
+    private void Select(IReadOnlyList<ChannelRow> rows)
+    {
+        if (Vm is not { } vm) return;
+        var wanted = rows.ToHashSet();
+        List.Selection.BeginBatchUpdate();
+        List.Selection.Clear();
+        for (int i = 0; i < vm.Rows.Count; i++)
+            if (wanted.Contains(vm.Rows[i])) List.Selection.Select(i);
+        List.Selection.EndBatchUpdate();
+    }
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e) =>
         Vm?.SetSelection(List.SelectedItems?.OfType<ChannelRow>().ToList() ?? []);

@@ -18,10 +18,17 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.5" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/icon.png" />
+  </ItemGroup>
+
+  <!-- The RadioReference application key, from the file at the top of the repository that git ignores.
+       A build without the file has no key and says so when the RadioReference window is opened. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)../../radioreference.key')">
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../radioreference.key" LogicalName="radioreference.key" Link="radioreference.key" />
   </ItemGroup>
 
   <ItemGroup>

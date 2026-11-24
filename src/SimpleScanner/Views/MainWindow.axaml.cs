@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using SimpleScanner.RadioReference;
 using SimpleScanner.ViewModels;
 
 namespace SimpleScanner.Views;
@@ -99,12 +100,44 @@ public partial class MainWindow : Window
         main.Reloaded += vm.StoreReloaded;
         _channels = new ChannelsWindow { DataContext = vm };
         _channels.TuneRequested += main.Tune;
+        _channels.OnlineRequested += () => OpenRadioReference(main, vm);
         _channels.Closed += (_, _) =>
         {
             main.Reloaded -= vm.StoreReloaded;
             main.ChannelColumns = vm.ColumnWidths();
+            _online?.Close();
             _channels = null;
         };
         _channels.Show(this);
+    }
+
+    private RadioReferenceWindow? _online;
+
+    /// <summary>Open the RadioReference browser over the channel editor, or bring it forward.</summary>
+    private void OpenRadioReference(MainViewModel main, ChannelsViewModel channels)
+    {
+        if (_online is not null)
+        {
+            _online.Activate();
+            return;
+        }
+        var cache = new RrCache();
+        var client = new RrClient(cache);
+        var vm = new RadioReferenceViewModel(main.Store, client, main.RadioReferencePlace, cache: cache);
+        vm.PlaceChanged += main.SaveSettings;
+        vm.Loaded += () =>
+        {
+            channels.ReloadIfChanged();
+            main.MemoriesEdited();
+        };
+        _online = new RadioReferenceWindow { DataContext = vm };
+        _online.Closed += (_, _) =>
+        {
+            main.SaveSettings();
+            client.Dispose();
+            cache.Dispose();
+            _online = null;
+        };
+        _online.Show((Window?)_channels ?? this);
     }
 }

@@ -31,6 +31,7 @@ public sealed class ChannelRow(MemoryChannel channel, Action touched) : Observab
     public string Agency { get => Channel.Agency ?? ""; set => Set(() => Channel.Agency = Opt(value)); }
     public string Description { get => Channel.Description ?? ""; set => Set(() => Channel.Description = Opt(value)); }
     public string Tag { get => Channel.Tag ?? ""; set => Set(() => Channel.Tag = Opt(value)); }
+    public string Location { get => Channel.Location ?? ""; set => Set(() => Channel.Location = Opt(value)); }
     public string Format { get => Channel.Format ?? ""; set => Set(() => Channel.Format = Opt(value)); }
     public string Tone { get => Channel.Tone ?? ""; set => Set(() => Channel.Tone = Opt(value)); }
     public string Callsign { get => Channel.Callsign ?? ""; set => Set(() => Channel.Callsign = Opt(value)); }
@@ -86,6 +87,40 @@ public sealed class ChannelRow(MemoryChannel channel, Action touched) : Observab
 
     public string Groups => string.Join(", ", Channel.Groups);
 
+    // ---- in the duplicate checker ----------------------------------------------------------------
+
+    /// <summary>The row is one of a set of duplicates, and shows the rest of its fields on a second line.</summary>
+    public bool InSet { get; init; }
+    /// <summary>Every other set is shaded, so that it is plain where one set ends and the next begins.</summary>
+    public bool Shaded { get; init; }
+    /// <summary>The first row of its set: the one "Select the extras" leaves alone.</summary>
+    public bool FirstOfSet { get; init; }
+
+    /// <summary>The fields the list has no column for, so that duplicates can be compared whole.</summary>
+    public string More
+    {
+        get
+        {
+            var parts = new List<string>();
+            void Add(string label, string? value)
+            {
+                if (!string.IsNullOrWhiteSpace(value)) parts.Add($"{label} {value.Trim()}");
+            }
+            Add("location", Channel.Location);
+            Add("callsign", Channel.Callsign);
+            Add("input", Input);
+            Add("class", Channel.StationClass);
+            Add("receive as", Receive);
+            Add("from", Channel.ImportKey is null ? "typed in or stored from the radio"
+                : Channel.ImportKey.StartsWith(RadioReference.RrImport.KeyPrefix, StringComparison.Ordinal) ? "RadioReference online" : "a CSV file");
+            return string.Join("  ·  ", parts);
+        }
+    }
+
+    /// <summary>How much is known about the channel: of two duplicates, the fuller one is listed first and kept.</summary>
+    public int Fullness => new[] { Channel.Agency, Channel.Description, Channel.Tag, Channel.Format, Channel.Tone, Channel.Callsign,
+        Channel.StationClass, Channel.Location }.Count(v => !string.IsNullOrWhiteSpace(v)) + (Channel.InputHz is null ? 0 : 1) + Channel.Groups.Count;
+
     public void GroupsChanged() => OnPropertyChanged(nameof(Groups));
     public void ScanChanged() => OnPropertyChanged(nameof(Scan));
 
@@ -94,7 +129,7 @@ public sealed class ChannelRow(MemoryChannel channel, Action touched) : Observab
     {
         if (words.Length == 0) return true;
         string all = string.Join('\n', Frequency, Channel.Name, Channel.Agency, Channel.Description, Channel.Tag,
-            Channel.Format, Channel.Tone, Channel.Callsign, Groups);
+            Channel.Format, Channel.Tone, Channel.Callsign, Channel.Location, Groups);
         return words.All(w => all.Contains(w, StringComparison.CurrentCultureIgnoreCase));
     }
 
@@ -161,6 +196,9 @@ public sealed record PendingImport(string FileName, List<MemoryChannel> Channels
 public sealed partial class ChannelsViewModel : ObservableObject
 {
     public const string AllGroups = "All groups", NoGroup = "(in no group)";
+    /// <summary>What the duplicate checker can count as the same channel; the first is the checker switched off.</summary>
+    public static IReadOnlyList<string> DuplicateChoices { get; } =
+        ["Off", "Same frequency and name", "Same frequency, name and description", "Same frequency"];
     private readonly MemoryStore _store;
     private List<ChannelRow> _selection = [];
     private readonly Queue<PendingImport> _queue = new();
@@ -205,6 +243,41 @@ public sealed partial class ChannelsViewModel : ObservableObject
     /// <summary>A real group is chosen in the filter, so it can be renamed or deleted.</summary>
     [ObservableProperty] private bool _isGroupChosen;
     [ObservableProperty] private string _groupNewName = "";
+    /// <summary>One of <see cref="DuplicateChoices"/>. When it is not "Off" the list holds only channels that have
+    /// a duplicate, set by set.</summary>
+    [ObservableProperty] private string _duplicateMode = DuplicateChoices[0];
+    [ObservableProperty] private bool _showingDuplicates;
+    [ObservableProperty] private string _duplicateText = "";
+
+    /// <summary>The window should select these rows (the extras of every set), in place of what is selected.</summary>
+    public event Action<IReadOnlyList<ChannelRow>>? SelectRequested;
+
+    partial void OnDuplicateModeChanged(string value)
+    {
+        if (value is null) return;                 // a ComboBox says null in passing
+        ShowingDuplicates = value != DuplicateChoices[0];
+        Reload();
+    }
+
+    /// <summary>Select every row but the first of each set of duplicates, ready for Delete.</summary>
+    [RelayCommand]
+    private void SelectExtras()
+    {
+        var extras = Rows.Where(r => r.InSet && !r.FirstOfSet).ToList();
+        SelectRequested?.Invoke(extras);
+        Status = extras.Count == 0 ? "No duplicates are listed"
+            : $"{extras.Count} extra{(extras.Count == 1 ? "" : "s")} selected: the first of each set is left. Look them over, then press Delete.";
+    }
+
+    // What makes two channels the same, by the mode chosen: frequencies to 10 Hz, text whatever its case.
+    private (long, string, string) DuplicateKey(MemoryChannel c)
+    {
+        long hz = (long)Math.Round(c.FrequencyHz / 10);
+        int mode = DuplicateChoices.ToList().IndexOf(DuplicateMode);
+        string name = mode is 1 or 2 ? c.Name.Trim().ToLowerInvariant() : "";
+        string description = mode == 2 ? (c.Description ?? "").Trim().ToLowerInvariant() : "";
+        return (hz, name, description);
+    }
 
     public ChannelsViewModel(MemoryStore store, IReadOnlyDictionary<string, double>? columnWidths = null)
     {
@@ -260,11 +333,31 @@ public sealed partial class ChannelsViewModel : ObservableObject
 
         string[] words = Filter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         Rows.Clear();
+        var shown = new List<MemoryChannel>();
         foreach (var c in Sorted())
         {
             if (GroupFilter == NoGroup ? c.Groups.Count > 0 : GroupFilter != AllGroups && !MemoryStore.InGroup(c, GroupFilter)) continue;
-            var row = new ChannelRow(c, Touch) { Heads = Heads };
-            if (row.Matches(words)) Rows.Add(row);
+            if (new ChannelRow(c, Touch).Matches(words)) shown.Add(c);
+        }
+        if (!ShowingDuplicates)
+        {
+            foreach (var c in shown) Rows.Add(new ChannelRow(c, Touch) { Heads = Heads });
+            DuplicateText = "";
+        }
+        else
+        {
+            // Only the channels that have a duplicate among those the filters let through, set by set in
+            // frequency order, the fullest entry of each set first.
+            var sets = shown.GroupBy(DuplicateKey).Where(g => g.Count() > 1).OrderBy(g => g.Key).ToList();
+            int n = 0;
+            foreach (var set in sets)
+            {
+                var fullestFirst = set.OrderByDescending(c => new ChannelRow(c, Touch).Fullness).ToList();
+                for (int i = 0; i < fullestFirst.Count; i++)
+                    Rows.Add(new ChannelRow(fullestFirst[i], Touch) { Heads = Heads, InSet = true, Shaded = n % 2 == 1, FirstOfSet = i == 0 });
+                n++;
+            }
+            DuplicateText = sets.Count == 0 ? "No duplicates" : $"{sets.Count} set{(sets.Count == 1 ? "" : "s")} of duplicates, {Rows.Count} channels";
         }
         CountText = Rows.Count == _store.Channels.Count ? $"{Rows.Count} channels" : $"{Rows.Count} of {_store.Channels.Count} channels";
         SetSelection([]);
@@ -275,8 +368,8 @@ public sealed partial class ChannelsViewModel : ObservableObject
     partial void OnGroupFilterChanged(string value)
     {
         if (value is null) return;
-        // A tag's group is made by the program: there is nothing to rename or delete.
-        IsGroupChosen = value != AllGroups && value != NoGroup && !MemoryStore.IsTagGroup(value);
+        // A tag's or a location's group is made by the program: there is nothing to rename or delete.
+        IsGroupChosen = value != AllGroups && value != NoGroup && !MemoryStore.IsAutoGroup(value);
         GroupNewName = IsGroupChosen ? value : "";
         if (!_loading) Reload();
     }
@@ -350,7 +443,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
     {
         GroupTicks.Clear();
         if (_selection.Count == 0) return;
-        foreach (string name in _store.GroupNames().Where(n => !MemoryStore.IsTagGroup(n)))
+        foreach (string name in _store.GroupNames().Where(n => !MemoryStore.IsAutoGroup(n)))
         {
             int n = _selection.Count(r => r.Channel.Groups.Contains(name));
             GroupTicks.Add(new GroupTick(name, n == 0 ? false : n == _selection.Count ? true : null, SetMembership));
@@ -371,16 +464,16 @@ public sealed partial class ChannelsViewModel : ObservableObject
         RefreshGroupChoices();
     }
 
-    // What the filter offers: everything, the user's groups, the groups made from the tags, and the channels in no group.
+    // What the filter offers: everything, the user's groups, the groups made from the locations and the tags, and the channels in no group.
     private List<string> Choices() =>
-        [AllGroups, .. _store.GroupNames().Where(n => !MemoryStore.IsTagGroup(n)), .. _store.TagGroupNames(), NoGroup];
+        [AllGroups, .. _store.GroupNames().Where(n => !MemoryStore.IsAutoGroup(n)), .. _store.PlaceGroupNames(), .. _store.TagGroupNames(), NoGroup];
 
     // Whether a name typed for a group can be used; says why not.
     private bool NameAllowed(string name)
     {
-        if (name is not (AllGroups or NoGroup) && !MemoryStore.IsTagGroup(name)) return true;
-        Status = MemoryStore.IsTagGroup(name)
-            ? $"A group's name cannot begin with \"{MemoryStore.TagPrefix.Trim()}\": those are the groups made from the tags"
+        if (name is not (AllGroups or NoGroup) && !MemoryStore.IsAutoGroup(name)) return true;
+        Status = MemoryStore.IsAutoGroup(name)
+            ? $"A group's name cannot begin with \"{MemoryStore.TagPrefix.Trim()}\" or \"{MemoryStore.PlacePrefix.Trim()}\": those are the groups made from the tags and the locations"
             : $"A group cannot be called \"{name}\"";
         return false;
     }
@@ -502,6 +595,8 @@ public sealed partial class ChannelsViewModel : ObservableObject
         CountText = Rows.Count == _store.Channels.Count ? $"{Rows.Count} channels" : $"{Rows.Count} of {_store.Channels.Count} channels";
         SetSelection([]);
         RefreshGroupChoices();
+        // A set that is down to one channel is a set no longer.
+        if (ShowingDuplicates) Reload();
     }
 
     // ---- import -----------------------------------------------------------------------------

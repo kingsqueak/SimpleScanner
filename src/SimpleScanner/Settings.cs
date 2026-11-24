@@ -45,6 +45,19 @@ public sealed class Settings
     public int AvoidMinutes { get; set; } = 30;
     /// <summary>Seconds a scan stays on a busy channel before it carries on; 0 is until the signal drops.</summary>
     public int ResumeSeconds { get; set; }
+    /// <summary>The RadioReference browser's account name and the place last looked at (numbers are RadioReference's own).
+    /// The password is not kept here: see <see cref="RadioReference.RrPassword"/>.</summary>
+    public sealed class RrPlace
+    {
+        public string? Username { get; set; }
+        public string? Zip { get; set; }
+        public double? HomeLat { get; set; }
+        public double? HomeLon { get; set; }
+        public int Country { get; set; }
+        public int State { get; set; }
+        public int County { get; set; }
+    }
+    public RrPlace? RadioReference { get; set; }
     public double SearchFromMHz { get; set; } = 144;
     public double SearchToMHz { get; set; } = 148;
 

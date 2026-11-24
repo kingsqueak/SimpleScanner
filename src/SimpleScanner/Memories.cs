@@ -45,6 +45,9 @@ public sealed class MemoryChannel
     public double? InputHz { get; set; }
     /// <summary>FCC station class: BM base and mobile, RM repeater and mobile, M mobile, B base, F fixed.</summary>
     public string? StationClass { get; set; }
+    /// <summary>Where it is used: a town ("Manchester, NH"), a county, or "New Hampshire statewide". Every
+    /// location in use is also a scan group, made by the program.</summary>
+    public string? Location { get; set; }
     /// <summary>For an imported channel, the row it came from, so that importing the file again does not add it twice.</summary>
     public string? ImportKey { get; set; }
 }
@@ -145,39 +148,55 @@ public sealed class MemoryStore
     public List<string> GroupNames() =>
         Channels.SelectMany(c => c.Groups).Distinct().Order(StringComparer.CurrentCultureIgnoreCase).ToList();
 
-    // ---- groups made from the tags -----------------------------------------------------------
+    // ---- groups made by the program -----------------------------------------------------------
     // Every tag in use is also a group, without anyone making it: its members are the channels
-    // with that tag. Nothing is stored for these groups; they follow the tags as they are edited.
+    // with that tag. The same goes for every location. Nothing is stored for these groups;
+    // they follow the tags and locations as they are edited.
 
     /// <summary>What the name of a group made from a tag starts with.</summary>
     public const string TagPrefix = "Tag: ";
+    /// <summary>What the name of a group made from a location starts with.</summary>
+    public const string PlacePrefix = "Location: ";
 
     public static bool IsTagGroup(string group) => group.StartsWith(TagPrefix, StringComparison.Ordinal);
+    public static bool IsPlaceGroup(string group) => group.StartsWith(PlacePrefix, StringComparison.Ordinal);
+    /// <summary>A group the program makes (from a tag or a location), which cannot be renamed, deleted or ticked by hand.</summary>
+    public static bool IsAutoGroup(string group) => IsTagGroup(group) || IsPlaceGroup(group);
+    /// <summary>A group's name as it is shown under its heading: without the prefix of a group the program makes.</summary>
+    public static string GroupLabel(string group) =>
+        IsTagGroup(group) ? group[TagPrefix.Length..] : IsPlaceGroup(group) ? group[PlacePrefix.Length..] : group;
 
     /// <summary>
-    /// What two tags must share to count as the same: their letters and digits, whatever the case.
+    /// What two tags (or two locations) must share to count as the same: their letters and digits, whatever the case.
     /// "Fire Dispatch", "FIRE DISPATCH", "fire-dispatch" and " Fire  Dispatch " are one tag.
     /// </summary>
     public static string TagKey(string? tag) =>
         tag is null ? "" : string.Concat(tag.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant));
 
     /// <summary>The groups made from the tags in use, in order. Each is named for its tag's most usual spelling.</summary>
-    public List<string> TagGroupNames() =>
-        Channels.Where(c => TagKey(c.Tag).Length > 0)
-            .GroupBy(c => TagKey(c.Tag))
-            .Select(g => TagPrefix + g.GroupBy(c => c.Tag!.Trim()).OrderByDescending(s => s.Count()).ThenBy(s => s.Key, StringComparer.Ordinal).First().Key)
+    public List<string> TagGroupNames() => MadeGroups(TagPrefix, c => c.Tag);
+
+    /// <summary>The groups made from the locations in use, in order.</summary>
+    public List<string> PlaceGroupNames() => MadeGroups(PlacePrefix, c => c.Location);
+
+    private List<string> MadeGroups(string prefix, Func<MemoryChannel, string?> field) =>
+        Channels.Where(c => TagKey(field(c)).Length > 0)
+            .GroupBy(c => TagKey(field(c)))
+            .Select(g => prefix + g.GroupBy(c => field(c)!.Trim()).OrderByDescending(s => s.Count()).ThenBy(s => s.Key, StringComparer.Ordinal).First().Key)
             .Order(StringComparer.CurrentCultureIgnoreCase).ToList();
 
-    /// <summary>Whether two group names mean the same group: the same name, or groups of the same tag.</summary>
+    /// <summary>Whether two group names mean the same group: the same name, or groups of the same tag or location.</summary>
     public static bool SameGroup(string a, string b) =>
-        a == b || (IsTagGroup(a) && IsTagGroup(b) && TagKey(a[TagPrefix.Length..]) == TagKey(b[TagPrefix.Length..]));
+        a == b
+        || (IsTagGroup(a) && IsTagGroup(b) && TagKey(a[TagPrefix.Length..]) == TagKey(b[TagPrefix.Length..]))
+        || (IsPlaceGroup(a) && IsPlaceGroup(b) && TagKey(a[PlacePrefix.Length..]) == TagKey(b[PlacePrefix.Length..]));
 
-    /// <summary>Whether the channel is in the group: one it was put in, or the group of its tag.</summary>
+    /// <summary>Whether the channel is in the group: one it was put in, or the group of its tag or of its location.</summary>
     public static bool InGroup(MemoryChannel c, string group)
     {
         if (c.Groups.Contains(group)) return true;
-        if (!IsTagGroup(group)) return false;
-        string key = TagKey(c.Tag);
-        return key.Length > 0 && key == TagKey(group[TagPrefix.Length..]);
+        string? value = IsTagGroup(group) ? c.Tag : IsPlaceGroup(group) ? c.Location : null;
+        string key = TagKey(value);
+        return key.Length > 0 && key == TagKey(GroupLabel(group));
     }
 }

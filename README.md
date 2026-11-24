@@ -15,6 +15,17 @@ digital voice modes.
   looks at several megahertz at a time, and a search between two frequencies
 - Import of RadioReference frequency downloads (the CSV file of a county or an agency), and a
   channel editor: filter the list, edit any field, put channels in groups
+- A duplicate checker in the channel editor: lists the channels stored more than once (same
+  frequency and name, with or without the description, or the same frequency alone), set by set
+  with every field, to edit them apart or select the extras and delete them
+- A RadioReference browser (the channel editor's "RadioReference online…" button): sign in with
+  your own radioreference.com account, give a ZIP code or choose a country, state and county,
+  tick the categories and agencies wanted in the tree of what that place has, and load them
+  as stored channels. What is fetched is kept on the computer for a week. Telemetry channels are
+  stored unticked
+- Scan groups the program makes by itself, beside the ones you make: one for each tag in use
+  (Fire Dispatch, Law Tac…) and one for each location (a town where RadioReference lists a
+  county by town, otherwise the county, "statewide" or "nationwide")
 - What is stored about a channel is on the display when the scanner is on it: its name, whose
   it is, and its tag, tone or code, station class, repeater input and callsign
 - P25 Phase 1 (conventional): decoded speech, with the NAC, talkgroup and radio ID on the display
@@ -33,9 +44,19 @@ digital voice modes.
 - Encrypted calls are shown and stay silent
 - Cellular telephone bands are blocked
 
-Not yet: trunk following, P25 Phase 2, fetching from RadioReference's web
-service. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
+Not yet: trunk following, P25 Phase 2. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
 the scan stops on. Trunked-system frequencies in a download are stored unticked.
+
+### The RadioReference web service
+
+The browser uses RadioReference's database web service, which needs two things: the user's own
+RadioReference account with a Premium subscription, and an application key that RadioReference
+issues to a program's author. The key is not in this repository. A build takes it from a file
+`radioreference.key` at the top of the repository (git ignores it); a copy built without one says so
+and can be given a key in the environment variable `RADIOREFERENCE_KEY` or in a file
+`radioreference.key` beside the settings. The password is kept only if asked, in the macOS login
+keychain; on other systems it is asked for at each run. Answers are kept in `radioreference.db`
+(SQLite) beside the settings.
 
 ### The AMBE speech codecs
 

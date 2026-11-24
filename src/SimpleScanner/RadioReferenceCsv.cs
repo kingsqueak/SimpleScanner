@@ -5,7 +5,7 @@ using SimpleScanner.Dsp;
 namespace SimpleScanner;
 
 /// <summary>What an import did.</summary>
-public sealed record ImportResult(int Added, int AlreadyStored, int Skipped, int Trunked)
+public sealed record ImportResult(int Added, int AlreadyStored, int Skipped, int Trunked, int Telemetry = 0)
 {
     public override string ToString()
     {
@@ -13,6 +13,7 @@ public sealed record ImportResult(int Added, int AlreadyStored, int Skipped, int
         if (AlreadyStored > 0) s.Append($", {AlreadyStored} already stored");
         if (Skipped > 0) s.Append($", {Skipped} left out (outside 0.1–2000 MHz, or in a blocked band)");
         if (Trunked > 0) s.Append($". {Trunked} trunked-system frequencies are stored but not ticked for scanning");
+        if (Telemetry > 0) s.Append($". {Telemetry} telemetry (data) frequenc{(Telemetry == 1 ? "y is" : "ies are")} stored but not ticked for scanning");
         return s.ToString();
     }
 }
@@ -112,11 +113,12 @@ public static class RadioReferenceCsv
     /// digital voice modes are all sent in a 12.5 kHz channel and are found by the decoders that
     /// listen to every narrow-FM channel.
     /// </summary>
-    private static (Mode?, double?) Receive(string format, double hz) => format.Trim().ToUpperInvariant() switch
+    internal static (Mode?, double?) Receive(string format, double hz) => format.Trim().ToUpperInvariant() switch
     {
         "AM" => (Mode.Am, hz is >= 108e6 and < 137e6 ? BandPlan.AmAir : BandPlan.AmWide),
         "FM" => (Mode.Nfm, BandPlan.NfmWide),
-        "FMN" or "P25" or "P25E" or "PROJECT 25" or "DMR" or "DMRE" or "NXDN" or "NXDNE" or "DSTAR" or "D-STAR"
+        "FMN" or "P25" or "P25E" or "PROJECT 25" or "DMR" or "DMRE" or "NXDN" or "NXDNE" or "NXDN48" or "NXDN48E"
+            or "NXDN96" or "NXDN96E" or "DSTAR" or "D-STAR" or "D-STARE" or "YSF" or "YSFE"
             or "TRBO" or "LTR" or "MOTOROLA" => (Mode.Nfm, BandPlan.NfmNarrow),
         "FMW" or "WFM" => (Mode.Wfm, BandPlan.Wfm),
         _ => (null, null),

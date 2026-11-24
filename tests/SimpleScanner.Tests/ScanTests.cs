@@ -368,4 +368,54 @@ public class ScanTests
         Assert.True(second.ScanListening);
         second.Dispose();
     }
+
+    private static (double Left, double Right) Loudness(Receiver rx, double seconds)
+    {
+        double left = 0, right = 0;
+        var gate = new object();
+        void Take(ReadOnlySpan<float> a)
+        {
+            lock (gate)
+            {
+                for (int k = 0; k + 1 < a.Length; k += 2)
+                {
+                    left += a[k] * a[k];
+                    right += a[k + 1] * a[k + 1];
+                }
+            }
+        }
+        rx.AudioOutput += Take;
+        Thread.Sleep((int)(seconds * 1000));
+        rx.AudioOutput -= Take;
+        lock (gate) return (left, right);
+    }
+
+    [Fact]
+    public void ThePanPutsTheSoundToOneSideAndTheMiddleLeavesItAlone()
+    {
+        Assert.Equal((1f, 1f, 0f), Receiver.PanGains(0));
+        Assert.Equal((1f, 0f, 1f), Receiver.PanGains(-1));
+        Assert.Equal((0f, 1f, 1f), Receiver.PanGains(1));
+        Assert.Equal((1f, 0.5f, 0.5f), Receiver.PanGains(-0.5));
+        Assert.Equal((0f, 1f, 1f), Receiver.PanGains(3));
+
+        // Noise with the squelch off is sound in both speakers alike.
+        var source = new FakeSource { Noise = 0.02 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchEnabled = false, Volume = 1 };
+        rx.Start();
+        Thread.Sleep(200);
+        var (l, r) = Loudness(rx, 0.3);
+        Assert.True(l > 0 && Math.Abs(l - r) < 0.02 * l, $"middle: {l} and {r}");
+        rx.Pan = -1;
+        Thread.Sleep(50);
+        var (leftOnly, none) = Loudness(rx, 0.3);
+        Assert.True(leftOnly > 0);
+        Assert.Equal(0, none);
+        rx.Pan = 0.5;
+        Thread.Sleep(50);
+        var (half, full) = Loudness(rx, 0.3);
+        Assert.InRange(half / full, 0.2, 0.3);       // half the level is a quarter of the power
+        rx.Pan = double.NaN;
+        Assert.Equal(0, rx.Pan);
+    }
 }

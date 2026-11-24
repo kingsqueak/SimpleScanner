@@ -260,6 +260,12 @@ public sealed class RemoteReceiver : IReceiver
         set => Set(nameof(Volume), value, s => s with { Volume = value });
     }
 
+    public double Pan
+    {
+        get => Status.Pan;
+        set => Set(nameof(Pan), value, s => s with { Pan = Math.Clamp(value, -1, 1) });
+    }
+
     public double ScanHangSeconds
     {
         get => Status.ScanHangSeconds;

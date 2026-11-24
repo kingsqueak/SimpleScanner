@@ -1,0 +1,91 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SimpleScanner.ViewModels"
+             xmlns:c="using:SimpleScanner.Controls"
+             x:Class="SimpleScanner.Views.RadioStrip"
+             x:DataType="vm:RadioViewModel">
+  <!-- One radio's display where several run at once: the same things as the full display, in a strip.
+       Its DataContext is that radio. Clicking anywhere in it makes it the radio the controls work. -->
+  <UserControl.Styles>
+    <Style Selector="Border.strip">
+      <Setter Property="BorderBrush" Value="{DynamicResource LcdBorder}" />
+    </Style>
+    <Style Selector="Border.strip.sel">
+      <Setter Property="BorderBrush" Value="{DynamicResource LcdText}" />
+    </Style>
+    <Style Selector="TextBlock.flag">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+  <Border Classes="strip" Classes.sel="{Binding IsSelected}" Background="{DynamicResource LcdBg}"
+          BorderThickness="1" CornerRadius="8" Padding="10,6,12,8">
+    <Grid ColumnDefinitions="Auto,Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="5">
+      <Button Grid.Column="0" Classes="power" Classes.lit="{Binding IsOn}" Command="{Binding TogglePowerCommand}"
+              VerticalAlignment="Center" ToolTip.Tip="Start or stop this radio. Green when it is running.">
+        <Path Width="24" Height="24" StrokeThickness="2.4" StrokeLineCap="Round"
+              Data="M 12,3 L 12,11.5 M 7.5,5.6 A 8,8 0 1 0 16.5,5.6" />
+      </Button>
+
+      <!-- Which radio, and where it is tuned -->
+      <StackPanel Grid.Column="1" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="{Binding Name}" Foreground="{DynamicResource LcdText}" FontSize="12" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding Serial}" Foreground="{DynamicResource LcdDim}" FontSize="11" VerticalAlignment="Bottom" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal">
+          <c:FrequencyReadout FrequencyHz="{Binding FrequencyHz}" FontSize="34"
+                              Foreground="{DynamicResource LcdText}" DimForeground="{DynamicResource LcdDim}"
+                              ToolTip.Tip="Roll the mouse wheel over a digit to tune by that digit; click its top or bottom half to step it" />
+          <TextBlock Text="MHz" Foreground="{DynamicResource LcdDim}" FontSize="12" VerticalAlignment="Bottom" Margin="6,0,0,7" />
+        </StackPanel>
+      </StackPanel>
+
+      <!-- What it is on: the channel, whose it is, its particulars, and what a digital signal says (or what went wrong) -->
+      <StackPanel Grid.Column="2" VerticalAlignment="Center">
+        <TextBlock Text="{Binding BandName}" Foreground="{DynamicResource LcdText}" FontSize="15" TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding DetailText}" Foreground="{DynamicResource LcdText}" FontSize="12" TextTrimming="CharacterEllipsis" MinHeight="15" />
+        <TextBlock Text="{Binding InfoText}" Foreground="{DynamicResource LcdDim}" FontSize="11" TextTrimming="CharacterEllipsis" MinHeight="14" />
+        <Panel MinHeight="15">
+          <TextBlock Text="{Binding DigitalText}" Foreground="{DynamicResource LcdOpen}" FontSize="12" FontWeight="SemiBold"
+                     TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="11" TextTrimming="CharacterEllipsis"
+                     IsVisible="{Binding !IsSelected}" ToolTip.Tip="{Binding Status}" />
+        </Panel>
+      </StackPanel>
+
+      <!-- Its state, and under that the two buttons that belong to the channel its scan has stopped on -->
+      <StackPanel Grid.Column="3" Spacing="7" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+          <TextBlock Classes="flag" Text="OVERLOAD" Foreground="{DynamicResource LcdWarn}" IsVisible="{Binding Overloaded}" />
+          <TextBlock Classes="flag" Text="ENCRYPTED" Foreground="{DynamicResource LcdWarn}" IsVisible="{Binding IsEncrypted}" />
+          <TextBlock Classes="flag" Text="MUTE" Foreground="{DynamicResource LcdWarn}" IsVisible="{Binding IsMuted}" />
+          <TextBlock Classes="flag" Text="STEREO" Foreground="{DynamicResource LcdOpen}" IsVisible="{Binding IsStereo}" />
+          <TextBlock Text="{Binding ModeText}" Foreground="{DynamicResource LcdText}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource LcdOpen}" IsVisible="{Binding SquelchOpen}">
+            <TextBlock Text="RX" Foreground="Black" FontSize="12" FontWeight="Bold" />
+          </Border>
+          <Border CornerRadius="4" Padding="6,1" BorderBrush="{DynamicResource LcdDim}" BorderThickness="1"
+                  IsVisible="{Binding !SquelchOpen}">
+            <TextBlock Text="RX" Foreground="{DynamicResource LcdDim}" FontSize="12" FontWeight="Bold" />
+          </Border>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
+                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and carry on" />
+          <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}" IsEnabled="{Binding IsScanning}" Margin="0"
+                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings" />
+        </StackPanel>
+      </StackPanel>
+
+      <DockPanel Grid.Row="1" Grid.ColumnSpan="4">
+        <TextBlock DockPanel.Dock="Right" Text="{Binding LevelText}" Foreground="{DynamicResource LcdText}" FontSize="11"
+                   Width="52" TextAlignment="Right" VerticalAlignment="Center" />
+        <c:LevelBar Height="8" Value="{Binding Level}" Marker="{Binding SquelchDb}" ShowMarker="{Binding SquelchOn}"
+                    Fill="{DynamicResource LcdText}" Track="{DynamicResource MeterTrack}" MarkerBrush="{DynamicResource LcdOpen}"
+                    ToolTip.Tip="{Binding GainText}" />
+      </DockPanel>
+    </Grid>
+  </Border>
+</UserControl>

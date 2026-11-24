@@ -9,6 +9,25 @@
         Icon="avares://SimpleScanner/Assets/icon.png"
         Title="SimpleScanner" Width="1130" Height="664" MinWidth="700" MinHeight="634"
         WindowStartupLocation="CenterScreen">
+  <Window.Styles>
+    <!-- A scan group's radio, at the right of the group's name (set here, not on the box, so that the narrow window can move it) -->
+    <Style Selector="ComboBox.radio">
+      <Setter Property="DockPanel.Dock" Value="Right" />
+      <Setter Property="Margin" Value="4,0,12,0" />
+      <Setter Property="Width" Value="84" />
+    </Style>
+    <!-- Faint while the group is left to any radio -->
+    <Style Selector="ComboBox.radio.any">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <!-- In a narrow window there is no room for it beside the group's name: it goes underneath -->
+    <Style Selector="Window.narrow ComboBox.radio">
+      <Setter Property="DockPanel.Dock" Value="Bottom" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="Margin" Value="26,0,0,4" />
+      <Setter Property="Width" Value="70" />
+    </Style>
+  </Window.Styles>
   <Panel Margin="12">
 
   <!-- The small window: the display, scaled to the window, and one row of buttons under it -->
@@ -16,7 +35,7 @@
     <WrapPanel DockPanel.Dock="Bottom" ItemSpacing="8" LineSpacing="6" Margin="0,8,0,0">
       <Button Classes="seg" Classes.lit="{Binding Radio.IsMuted}" Content="Mute" Command="{Binding Radio.ToggleMuteCommand}"
               ToolTip.Tip="Silence the speaker without touching the volume. Press again for sound." />
-      <Button Classes="seg" Classes.lit="{Binding Radio.IsScanning}" Content="{Binding Radio.ScanText}"
+      <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
               Command="{Binding ToggleScanCommand}" MinWidth="82"
               ToolTip.Tip="Scan the ticked channels of the groups shown" />
       <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
@@ -24,36 +43,81 @@
       <Button Classes="seg" Content="Avoid" Command="{Binding Radio.AvoidChannelCommand}"
               IsEnabled="{Binding Radio.IsScanning}"
               ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings" />
+      <!-- With one radio this button is on the display -->
+      <Button Classes="seg" Content="Full window" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding IsMulti}"
+              ToolTip.Tip="Back to the full window" />
     </WrapPanel>
-    <Border Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}"
-            BorderThickness="1" CornerRadius="8" Padding="10,6,10,8">
-      <Viewbox Stretch="Uniform">
-        <v:Display Width="600" DataContext="{Binding Radio}" />
+    <Panel>
+      <Border Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}" IsVisible="{Binding IsSingle}"
+              BorderThickness="1" CornerRadius="8" Padding="10,6,10,8">
+        <Viewbox Stretch="Uniform">
+          <v:Display Width="600" DataContext="{Binding Radio}" />
+        </Viewbox>
+      </Border>
+      <!-- Several radios: a strip each, scaled together to the window. The buttons below work the one selected. -->
+      <Viewbox Stretch="Uniform" IsVisible="{Binding IsMulti}">
+        <ItemsControl ItemsSource="{Binding RadioList}" Width="640">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Spacing="6" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:RadioViewModel">
+              <v:RadioStrip />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
       </Viewbox>
-    </Border>
+    </Panel>
   </DockPanel>
 
   <DockPanel x:Name="FullView" IsVisible="{Binding !IsMini}">
 
     <!-- The readout: what a scanner shows on its display -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}"
-            BorderThickness="1" CornerRadius="8" Padding="18,12,18,14">
+            BorderThickness="1" CornerRadius="8" Padding="18,12,18,14" IsVisible="{Binding IsSingle}">
       <v:Display DataContext="{Binding Radio}" />
     </Border>
+    <!-- Several radios: a strip each, one under another. The one clicked is the one the controls below work. -->
+    <ScrollViewer DockPanel.Dock="Top" IsVisible="{Binding IsMulti}" MaxHeight="356"
+                  HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <ItemsControl ItemsSource="{Binding RadioList}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="6" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:RadioViewModel">
+            <v:RadioStrip />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
 
     <TextBlock DockPanel.Dock="Bottom" Text="{Binding Radio.Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
                TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" />
 
     <!-- The controls, in tabs under the readout -->
-    <TabControl x:Name="Tabs" Margin="0,8,0,0" Padding="0" SelectionChanged="OnTabChanged">
+    <Panel Margin="0,8,0,0">
+    <!-- With several radios the small-window button has no display to sit on: it is at the end of the tab headings -->
+    <Button Classes="seg" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding IsMulti}" ZIndex="1"
+            HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,0,0" Padding="7,4" MinWidth="0"
+            ToolTip.Tip="Small window: only the radios' displays, with Mute, Scan, Skip and Avoid under them">
+      <Path Width="16" Height="16" Stretch="Uniform" StrokeThickness="2" StrokeLineCap="Round" StrokeJoin="Round"
+            Stroke="{DynamicResource TextMuted}"
+            Data="M 20,4 L 14,10 M 14,5 L 14,10 L 19,10 M 4,20 L 10,14 M 5,14 L 10,14 L 10,19" />
+    </Button>
+    <TabControl x:Name="Tabs" Padding="0" SelectionChanged="OnTabChanged">
 
       <TabItem Header="Operate">
         <DockPanel>
           <!-- The user groups again, at the right: the same rows as on Scan Groups, so a tick here is a tick there -->
           <Border DockPanel.Dock="Right" Width="230" Margin="12,10,0,0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
             <DockPanel>
-              <TextBlock DockPanel.Dock="Top" Text="User Groups" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
-                         ToolTip.Tip="The groups you made. Tick one or several to show and scan; with none ticked on Scan Groups, all are." />
+              <TextBlock DockPanel.Dock="Top" Text="{Binding GroupsTitle}" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
+                         ToolTip.Tip="The groups you made. Tick one or several to show and scan; with none ticked on Scan Groups, all are. With several radios each has its own ticks: these are those of the radio selected, and a group ticked for more than one radio is shared out between them." />
               <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
               <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <ItemsControl ItemsSource="{Binding UserGroupRows}">
@@ -70,7 +134,7 @@
           <!-- Scan the stored channels: kept at the foot of the tab -->
           <TextBlock Grid.Row="0" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
           <WrapPanel Grid.Row="0" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
-            <Button Classes="seg" Classes.lit="{Binding Radio.IsScanning}" Content="{Binding Radio.ScanText}"
+            <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
                     Command="{Binding ToggleScanCommand}" MinWidth="82"
                     ToolTip.Tip="Scan the ticked channels of the groups shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
             <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
@@ -211,7 +275,18 @@
                   <ItemsControl ItemsSource="{Binding UserGroupRows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:GroupRow">
-                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                        <DockPanel>
+                          <ComboBox Classes="radio" Classes.any="{Binding IsAny}" IsVisible="{Binding HasRadios}" ItemsSource="{Binding Radios}" SelectedItem="{Binding Radio}"
+                                    MinHeight="0" Height="22" Padding="6,0,0,0" FontSize="11" VerticalAlignment="Center"
+                                    ToolTip.Tip="The radio that scans this group. Any leaves it to the program, which shares those channels out among the radios that are on. A group given to a radio that is off is shared out the same way.">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate x:DataType="vm:RadioChoice">
+                                <TextBlock Text="{Binding Label}" FontSize="11" />
+                              </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                        </DockPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -227,7 +302,18 @@
                   <ItemsControl ItemsSource="{Binding PlaceGroupRows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:GroupRow">
-                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                        <DockPanel>
+                          <ComboBox Classes="radio" Classes.any="{Binding IsAny}" IsVisible="{Binding HasRadios}" ItemsSource="{Binding Radios}" SelectedItem="{Binding Radio}"
+                                    MinHeight="0" Height="22" Padding="6,0,0,0" FontSize="11" VerticalAlignment="Center"
+                                    ToolTip.Tip="The radio that scans this group. Any leaves it to the program, which shares those channels out among the radios that are on. A group given to a radio that is off is shared out the same way.">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate x:DataType="vm:RadioChoice">
+                                <TextBlock Text="{Binding Label}" FontSize="11" />
+                              </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                        </DockPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -243,7 +329,18 @@
                   <ItemsControl ItemsSource="{Binding AutoGroupRows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:GroupRow">
-                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                        <DockPanel>
+                          <ComboBox Classes="radio" Classes.any="{Binding IsAny}" IsVisible="{Binding HasRadios}" ItemsSource="{Binding Radios}" SelectedItem="{Binding Radio}"
+                                    MinHeight="0" Height="22" Padding="6,0,0,0" FontSize="11" VerticalAlignment="Center"
+                                    ToolTip.Tip="The radio that scans this group. Any leaves it to the program, which shares those channels out among the radios that are on. A group given to a radio that is off is shared out the same way.">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate x:DataType="vm:RadioChoice">
+                                <TextBlock Text="{Binding Label}" FontSize="11" />
+                              </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                        </DockPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -290,7 +387,7 @@
           </WrapPanel>
           <TextBlock Grid.Row="1" Grid.Column="0" Text="Radio" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
           <StackPanel Grid.Row="1" Grid.Column="1" Spacing="6">
-          <WrapPanel ItemSpacing="8" LineSpacing="6">
+          <WrapPanel ItemSpacing="8" LineSpacing="6" IsVisible="{Binding ShownIsHere}">
             <CheckBox Content="Auto gain" IsChecked="{Binding Radio.AutoGain}" FontSize="12"
                       ToolTip.Tip="Let the scanner step the radio's front-end attenuation: up on overload, back down when it clears" />
             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -302,8 +399,8 @@
           </WrapPanel>
             <StackPanel Orientation="Horizontal" Spacing="8">
               <TextBlock Text="Receiver" Classes="label" Width="84" />
-              <ComboBox ItemsSource="{Binding Radio.Radios}" SelectedItem="{Binding Radio.SelectedRadio}" Width="190" PlaceholderText="None found"
-                        ToolTip.Tip="The radio to use, when more than one is plugged in. Choosing another while the receiver is on changes over to it at once. A radio that another program is using is not listed.">
+              <ComboBox ItemsSource="{Binding ReceiverChoices}" SelectedItem="{Binding ShownReceiver}" Width="190" PlaceholderText="None found"
+                        ToolTip.Tip="The radio these settings belong to, when more than one is plugged in. Choosing one that is running selects it, as clicking its display does. A radio that another program is using is not listed.">
                 <ComboBox.ItemTemplate>
                   <DataTemplate x:DataType="r:RadioInfo">
                     <TextBlock Text="{Binding Label}" />
@@ -311,18 +408,33 @@
                 </ComboBox.ItemTemplate>
               </ComboBox>
               <!-- On the receiver's line: the tab has no room for another line at the window's least height -->
-              <TextBlock Text="Antenna" Classes="label" Margin="12,0,0,0" />
-              <ComboBox ItemsSource="{Binding Radio.Antennas}" SelectedItem="{Binding Radio.SelectedAntenna}" Width="130" />
+              <TextBlock Text="Antenna" Classes="label" Margin="12,0,0,0" IsVisible="{Binding ShownIsHere}" />
+              <ComboBox ItemsSource="{Binding Radio.Antennas}" SelectedItem="{Binding Radio.SelectedAntenna}" Width="130" IsVisible="{Binding ShownIsHere}" />
+              <CheckBox Content="Use" IsChecked="{Binding ShownUse}" IsEnabled="{Binding CanSetUse}" FontSize="12" Margin="12,0,0,0"
+                        ToolTip.Tip="Run this radio whenever it is plugged in. With several ticked, all run at once, each with a display of its own and a share of the scan. A change takes effect when the app is next started. With none ticked, the radio used last is used." />
             </StackPanel>
-            <CheckBox Content="FM broadcast notch" IsChecked="{Binding Radio.FmNotch}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12"
+            <!-- A radio that is plugged in but not run by the program now -->
+            <StackPanel Spacing="8" IsVisible="{Binding ShownIsElsewhere}">
+              <TextBlock Classes="label" TextWrapping="Wrap" MaxWidth="520" HorizontalAlignment="Left"
+                         Text="This radio is plugged in but not running here. With Use ticked it runs beside the others from the next start of the app; its own settings are shown once it is running." />
+              <Button Classes="seg" Content="Change over to this radio now" Command="{Binding ChangeOverCommand}" IsVisible="{Binding CanChangeOver}"
+                      HorizontalAlignment="Left"
+                      ToolTip.Tip="Stop using the radio in use and use this one in its place, at once. The settings on screen go with it." />
+            </StackPanel>
+            <CheckBox Content="FM broadcast notch" IsChecked="{Binding Radio.FmNotch}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12" IsVisible="{Binding ShownIsHere}"
                       ToolTip.Tip="Switch in the radio's filter that cuts the FM broadcast band (88 to 108 MHz), so strong stations there cannot overload it while it listens elsewhere. Turn it off to listen to broadcast FM." />
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShownIsHere}">
               <TextBlock Text="Correction" Classes="label" Width="84" />
               <NumericUpDown Value="{Binding Radio.Ppm}" Minimum="-100" Maximum="100" Increment="0.1" FormatString="0.0" Width="130"
                              ToolTip.Tip="Frequency correction for the radio's reference oscillator, in parts per million. 0 unless signals on known frequencies all read off by the same proportion." />
               <TextBlock Text="ppm" Classes="label" />
+              <TextBlock Text="Pan" Classes="label" Margin="24,0,0,0" />
+              <TextBlock Text="L" Classes="label" />
+              <Slider Minimum="-1" Maximum="1" Value="{Binding Radio.Pan}" Width="130" Margin="0,-12" SmallChange="0.1" LargeChange="0.5"
+                      ToolTip.Tip="Where this radio's sound sits between the left and the right speaker. With several radios, put each to a side to tell them apart by ear. The middle holds: a touch either side of it is the middle." />
+              <TextBlock Text="R" Classes="label" />
             </StackPanel>
-            <CheckBox Content="Enable bias T" IsChecked="{Binding Radio.BiasT}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12"
+            <CheckBox Content="Enable bias T" IsChecked="{Binding Radio.BiasT}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12" IsVisible="{Binding ShownIsHere}"
                       ToolTip.Tip="Put DC (about 4.7 V) on the antenna socket to power a masthead preamplifier or an active antenna. On an RSPdx it is on Antenna B only. Leave it off unless something on that socket needs the power." />
           </StackPanel>
           <TextBlock Grid.Row="2" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
@@ -341,6 +453,7 @@
         </Grid>
       </TabItem>
     </TabControl>
+    </Panel>
   </DockPanel>
   </Panel>
 </Window>

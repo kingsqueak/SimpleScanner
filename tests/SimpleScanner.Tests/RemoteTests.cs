@@ -55,6 +55,7 @@ public class RemoteTests
         var rx = pair.Remote;
         rx.SquelchDb = -61;
         rx.Volume = 0.25;
+        rx.Pan = -0.5;
         rx.ResumeSeconds = 4;
         rx.AvoidTime = TimeSpan.FromMinutes(60);
         rx.SetMode(Mode.Am, BandPlan.AmAir);
@@ -69,6 +70,8 @@ public class RemoteTests
         Assert.True(Wait(() => pair.Real.FrequencyHz == 121.5e6 && pair.Source.GainStep == 2, 2));
         Assert.Equal(-61, pair.Real.SquelchDb);
         Assert.Equal(0.25, pair.Real.Volume, 6);
+        Assert.Equal(-0.5, pair.Real.Pan);
+        Assert.Equal(-0.5, rx.Pan);
         Assert.Equal(4, pair.Real.ResumeSeconds);
         Assert.Equal(TimeSpan.FromMinutes(60), pair.Real.AvoidTime);
         Assert.Equal(Mode.Am, pair.Real.Mode);
@@ -77,6 +80,7 @@ public class RemoteTests
         Assert.Equal(-61, rx.SquelchDb);
         Assert.Equal(121.5e6, rx.FrequencyHz);
         Assert.Equal(4, rx.ResumeSeconds);
+        Assert.Equal(-0.5, rx.Pan);
     }
 
     [Fact]

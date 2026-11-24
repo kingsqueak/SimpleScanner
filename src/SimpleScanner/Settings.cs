@@ -27,6 +27,8 @@ public sealed class RadioSettings
     public double BandwidthHz { get; set; } = BandPlan.NfmWide;
     public double StepHz { get; set; }
     public bool Stereo { get; set; } = true;
+    /// <summary>The memory groups ticked for this radio: the ones it shows and scans. Empty is all of them; null (never set) takes the groups that were shared.</summary>
+    public List<string>? Groups { get; set; }
 }
 
 /// <summary>What is kept between runs, in Application Support (macOS), ~/.local/share (Linux)
@@ -143,9 +145,7 @@ public sealed class Settings
         if (Radios.Count == 0 && RadioSerial is { Length: > 0 } serial) Radios[serial] = Flat();
     }
 
-    private static string Folder =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SimpleScanner");
-    private static string FilePath => Path.Combine(Folder, "settings.json");
+    private static string FilePath => Path.Combine(AppFiles.Folder, "settings.json");
     private string _path = FilePath;
 
     /// <param name="path">The file, when it is not the usual one (for trying things on a copy).</param>

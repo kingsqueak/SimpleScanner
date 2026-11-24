@@ -3,8 +3,14 @@ namespace SimpleScanner;
 /// <summary>Where the program keeps what it stores, beside the settings.</summary>
 public static class AppFiles
 {
+    /// <summary>The environment variable that names another folder for the settings and the database, for trying things without touching the real ones.</summary>
+    public const string FolderVariable = "SIMPLESCANNER_DATA";
+
+    /// <summary>Application Support/SimpleScanner (macOS), unless <see cref="FolderVariable"/> names another folder.</summary>
     public static string Folder { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SimpleScanner");
+        Environment.GetEnvironmentVariable(FolderVariable) is { Length: > 0 } other
+            ? Path.GetFullPath(other)
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SimpleScanner");
 
     /// <summary>
     /// The one database (SQLite): the stored channels, and what has been fetched from RadioReference.

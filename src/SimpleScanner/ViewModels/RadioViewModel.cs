@@ -19,7 +19,7 @@ public sealed partial class RadioViewModel : ObservableObject
     private readonly IReceiver _rx;
     private readonly MemoryStore _memories;
     private readonly Action<Action> _post;
-    private readonly double _levelOffsetDb, _pan;
+    private readonly double _levelOffsetDb;
     private long _lastPasses;
     private double _passRate;
     private bool _searching;
@@ -66,6 +66,8 @@ public sealed partial class RadioViewModel : ObservableObject
     [ObservableProperty] private double _volume;
     /// <summary>The speaker is silenced; the volume setting is left as it is. Not kept between runs.</summary>
     [ObservableProperty] private bool _isMuted;
+    /// <summary>Where this radio's sound sits between the left speaker (-1) and the right (1).</summary>
+    [ObservableProperty] private double _pan;
     [ObservableProperty] private double _squelchDb;
     [ObservableProperty] private bool _squelchOn;
     /// <summary>The squelch also stays shut on noise above its level.</summary>
@@ -91,6 +93,10 @@ public sealed partial class RadioViewModel : ObservableObject
     [ObservableProperty] private bool _hasBiasT = true;
     [ObservableProperty] private bool _isScanning;
     [ObservableProperty] private bool _isSearching;
+    /// <summary>This is the radio the controls work: its strip is marked among the others.</summary>
+    [ObservableProperty] private bool _isSelected;
+    /// <summary>What the radio is called where several are shown: its model, once that is known.</summary>
+    [ObservableProperty] private string _name = "Radio";
     public string SearchText => IsSearching ? "Stop search" : "Search";
     public string ScanText => IsScanning ? "Stop" : "Scan";
 
@@ -111,6 +117,12 @@ public sealed partial class RadioViewModel : ObservableObject
     /// <summary>The serial number of the radio this is running on, or will open; null when none has been chosen or opened yet.</summary>
     public string? Serial => IsOn ? _rx.Source.Radio?.Serial ?? _rx.Source.Serial : _rx.Source.Serial ?? _rx.Source.Radio?.Serial;
 
+    /// <summary>The radio's model, if it has been seen (it is listed, or has been opened).</summary>
+    public string? Model => _rx.Source.Radio?.Model ?? Radios.FirstOrDefault(r => r.Serial == Serial)?.Model;
+
+    /// <summary>The width the radio can watch from one tuning, for sharing a scan out; the usual one until it has been started.</summary>
+    public double UsableHz => _rx.Source.UsableBandwidthHz is > 0 and var hz ? hz : Receiver.DefaultSampleRate * 0.8;
+
     /// <summary>The serial number chosen for this receiver (null: it finds a radio itself).</summary>
     public string? ChosenSerial => _rx.Source.Serial;
 
@@ -124,8 +136,8 @@ public sealed partial class RadioViewModel : ObservableObject
         _memories = memories;
         _post = post ?? (a => Dispatcher.UIThread.Post(a));
         _levelOffsetDb = settings.LevelOffsetDb;
-        _pan = settings.Pan;
         _loading = true;
+        Pan = double.IsFinite(settings.Pan) ? Math.Clamp(settings.Pan, -1, 1) : 0;
         _antennas = _rx.Source.Antennas;
         _selectedAntenna = _antennas.Contains(settings.Antenna) || _antennas.Count == 0 ? settings.Antenna : _antennas[0];
         _selectedStep = Steps.FirstOrDefault(s => Math.Abs(s.Value - settings.StepHz) < 0.5) ?? Steps[0];
@@ -151,6 +163,7 @@ public sealed partial class RadioViewModel : ObservableObject
         _rx.Source.AutoGain = AutoGain;
         _rx.Source.GainStep = (int)GainStep;
         _rx.Volume = Volume / 100;
+        _rx.Pan = Pan;
         _rx.SquelchDb = SquelchDb;
         _rx.SquelchEnabled = SquelchOn;
         _rx.AutoSquelch = AutoSquelch;
@@ -174,7 +187,7 @@ public sealed partial class RadioViewModel : ObservableObject
         s.BandwidthHz = SelectedWidth?.Value ?? s.BandwidthHz;
         s.StepHz = SelectedStep.Value;
         s.Volume = Volume / 100;
-        s.Pan = _pan;
+        s.Pan = Pan;
         s.SquelchDb = SquelchDb;
         s.SquelchOn = SquelchOn;
         s.AutoSquelch = AutoSquelch;
@@ -468,6 +481,24 @@ public sealed partial class RadioViewModel : ObservableObject
     [RelayCommand]
     private void ToggleMute() => IsMuted = !IsMuted;
 
+    partial void OnPanChanged(double value)
+    {
+        // The slider's middle holds: a touch either side of it is the middle.
+        double pan = Math.Abs(value) < 0.05 ? 0 : Math.Clamp(Math.Round(value, 2), -1, 1);
+        if (pan != value)
+        {
+            Pan = pan;
+            return;
+        }
+        if (_loading) return;
+        _rx.Pan = value;
+        Dirty = true;
+    }
+
+    /// <summary>Put the sound back in the middle.</summary>
+    [RelayCommand]
+    private void CentrePan() => Pan = 0;
+
     /// <summary>The squelch slider's left end, which is squelch off.</summary>
     public const double SquelchOffDb = -140;
 
@@ -539,6 +570,15 @@ public sealed partial class RadioViewModel : ObservableObject
         Radios = found;
         SelectedRadio = found.FirstOrDefault(r => r.Serial == serial);
         _loading = false;
+        Name = Model ?? "Radio";
+    }
+
+    /// <summary>Change the window's own receiver over to another radio, as choosing it in the Receiver box once did.</summary>
+    public void ChangeTo(RadioInfo radio)
+    {
+        if (IsHelper) return;
+        if (!Radios.Contains(radio)) Radios = [.. Radios, radio];
+        SelectedRadio = radio;
     }
 
     /// <summary>Another radio was chosen: remember it and, if the receiver is on, change over to it now.</summary>

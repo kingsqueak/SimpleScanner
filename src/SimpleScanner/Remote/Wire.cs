@@ -53,6 +53,7 @@ internal sealed record ReceiverStatus
     public bool DigitalNothingToHear { get; init; }
     public string? AudioDevice { get; init; }
     public double Volume { get; init; }
+    public double Pan { get; init; }
     public double ScanHangSeconds { get; init; }
     public double ScanSkipSeconds { get; init; }
     public double? ResumeSeconds { get; init; }

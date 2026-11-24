@@ -205,6 +205,7 @@ public class RadioViewModelTests
             Assert.True(vm.IsAm);
             Assert.Equal("121.5", vm.EntryText);
             Assert.Equal(0.3, rx.Volume, 6);
+            Assert.Equal(-1, rx.Pan);
             Assert.Equal(-80, rx.SquelchDb);
             Assert.True(rx.SquelchEnabled);
             Assert.True(rx.AutoSquelch);
@@ -228,6 +229,18 @@ public class RadioViewModelTests
             Assert.Equal(0, rx.Volume);
             vm.ToggleMuteCommand.Execute(null);
             Assert.Equal(0.6, rx.Volume, 6);
+
+            // The pan goes to the receiver; a touch either side of the middle is the middle.
+            vm.Dirty = false;
+            vm.Pan = 0.5;
+            Assert.Equal(0.5, rx.Pan);
+            Assert.True(vm.Dirty);
+            vm.Pan = 0.03;
+            Assert.Equal(0, vm.Pan);
+            Assert.Equal(0, rx.Pan);
+            vm.Pan = -7;
+            Assert.Equal(-1, vm.Pan);
+            Assert.Equal(-1, rx.Pan);
 
             var back = new RadioSettings { Antenna = "Antenna B", Use = true };
             vm.WriteTo(back);

@@ -159,6 +159,7 @@ internal sealed class ReceiverHost
             DigitalNothingToHear = digital is { NothingToHear: true },
             AudioDevice = rx.AudioDevice,
             Volume = rx.Volume,
+            Pan = rx.Pan,
             ScanHangSeconds = rx.ScanHangSeconds,
             ScanSkipSeconds = rx.ScanSkipSeconds,
             ResumeSeconds = rx.ResumeSeconds,

@@ -52,7 +52,7 @@ public sealed class Receiver : IReceiver
     private Thread? _thread;
     private AudioOut? _audio;
     private string? _audioDevice;
-    private double _frequencyHz = 162_400_000, _offsetHz = ScanPlan.SingleOffsetHz, _volume = 0.5, _level = -140;
+    private double _frequencyHz = 162_400_000, _offsetHz = ScanPlan.SingleOffsetHz, _volume = 0.5, _pan, _level = -140;
     private bool _blocked, _squelchOpen;
     private volatile bool _flushUntilRetuned;
     private bool _retunedUnsaid;            // on the radio's thread only
@@ -170,10 +170,31 @@ public sealed class Receiver : IReceiver
         }
     }
 
+    /// <summary>
+    /// For a pan between -1 and 1: the gain of the left and of the right speaker, and how far left and
+    /// right are brought together first (0 not at all, 1 into one).
+    /// </summary>
+    public static (float Left, float Right, float Mix) PanGains(double pan)
+    {
+        float p = (float)Math.Clamp(pan, -1, 1);
+        return (p > 0 ? 1 - p : 1, p < 0 ? 1 + p : 1, Math.Abs(p));
+    }
+
     public double Volume
     {
         get => _volume;
         set => _volume = Math.Clamp(value, 0, 1);
+    }
+
+    /// <summary>
+    /// Where the sound sits between the left speaker (-1) and the right (1). In the middle (0) left and
+    /// right go out as they are. Towards one side the other is turned down, and a stereo station is
+    /// brought together so that neither of its channels is lost.
+    /// </summary>
+    public double Pan
+    {
+        get => _pan;
+        set => _pan = double.IsFinite(value) ? Math.Clamp(value, -1, 1) : 0;
     }
 
     public double SquelchDb
@@ -779,11 +800,26 @@ public sealed class Receiver : IReceiver
         var a = _frames.AsSpan(0, 2 * count);
         float target = open ? (float)(_volume * _volume) : 0f, g = _gain;
         const float step = 1f / 240;
-        for (int k = 0; k < count; k++)
+        float pan = (float)_pan;
+        if (pan == 0)
         {
-            g += Math.Clamp(target - g, -step, step);
-            a[2 * k] = _left[k] * g;
-            a[2 * k + 1] = _right[k] * g;
+            for (int k = 0; k < count; k++)
+            {
+                g += Math.Clamp(target - g, -step, step);
+                a[2 * k] = _left[k] * g;
+                a[2 * k + 1] = _right[k] * g;
+            }
+        }
+        else
+        {
+            var (gl, gr, mix) = PanGains(pan);
+            for (int k = 0; k < count; k++)
+            {
+                g += Math.Clamp(target - g, -step, step);
+                float l = _left[k], r = _right[k], both = mix * 0.5f * (l + r);
+                a[2 * k] = ((1 - mix) * l + both) * g * gl;
+                a[2 * k + 1] = ((1 - mix) * r + both) * g * gr;
+            }
         }
         _gain = g;
 

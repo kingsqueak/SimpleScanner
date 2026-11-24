@@ -38,6 +38,8 @@ public interface IReceiver : IDisposable
 
     string? AudioDevice { get; set; }
     double Volume { get; set; }
+    /// <summary>Where this receiver's sound sits between the left speaker (-1) and the right (1); 0 is the middle.</summary>
+    double Pan { get; set; }
 
     double ScanHangSeconds { get; set; }
     double ScanSkipSeconds { get; set; }

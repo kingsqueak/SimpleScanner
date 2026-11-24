@@ -17,8 +17,7 @@ public static class RrKey
         if (Clean(Environment.GetEnvironmentVariable("RADIOREFERENCE_KEY")) is { } fromEnv) return fromEnv;
         try
         {
-            string beside = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SimpleScanner", "radioreference.key");
+            string beside = Path.Combine(AppFiles.Folder, "radioreference.key");
             if (File.Exists(beside) && Clean(File.ReadAllText(beside)) is { } fromFile) return fromFile;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }

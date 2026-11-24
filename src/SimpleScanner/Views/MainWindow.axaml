@@ -5,91 +5,9 @@
         x:Class="SimpleScanner.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Icon="avares://SimpleScanner/Assets/icon.png"
-        Title="SimpleScanner" Width="1130" Height="664" MinWidth="1060" MinHeight="634"
+        Title="SimpleScanner" Width="1130" Height="664" MinWidth="700" MinHeight="634"
         WindowStartupLocation="CenterScreen">
   <DockPanel Margin="12">
-
-    <!-- Stored channels, and the scan over them -->
-    <Border DockPanel.Dock="Right" Width="290" Margin="12,0,0,0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
-      <DockPanel>
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-          <Button DockPanel.Dock="Right" Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" Margin="6,0,0,0"
-                  IsEnabled="{Binding IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
-          <Button DockPanel.Dock="Right" Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
-                  Command="{Binding ToggleScanCommand}" MinWidth="82" Margin="6,0,0,0"
-                  ToolTip.Tip="Scan the ticked channels of the groups shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
-          <Button Classes="seg" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                  ToolTip.Tip="Which groups of stored channels to show and scan. Tick one or several; with none ticked, all are shown.">
-            <DockPanel>
-              <TextBlock DockPanel.Dock="Right" Text="▾" Margin="6,0,0,0" />
-              <TextBlock Text="{Binding GroupsText}" TextTrimming="CharacterEllipsis" />
-            </DockPanel>
-            <Button.Flyout>
-              <Flyout Placement="BottomEdgeAlignedLeft">
-                <StackPanel Spacing="4" MinWidth="220">
-                  <Button Classes="seg" Content="All groups" Command="{Binding ShowAllGroupsCommand}" HorizontalAlignment="Stretch"
-                          ToolTip.Tip="Untick every group: all of them are shown and scanned" />
-                  <ScrollViewer MaxHeight="360">
-                    <StackPanel>
-                      <TextBlock Text="User Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasUserGroups}"
-                                 ToolTip.Tip="The groups you made, in the channel editor or by importing" />
-                      <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasUserGroups}" />
-                      <ItemsControl ItemsSource="{Binding UserGroupRows}">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:GroupRow">
-                            <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                      <TextBlock Text="Auto Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasAutoGroups}"
-                                 ToolTip.Tip="One group for each tag in use, made by the program: its channels are those with that tag, however the tag is written" />
-                      <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasAutoGroups}" />
-                      <ItemsControl ItemsSource="{Binding AutoGroupRows}">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:GroupRow">
-                            <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                    </StackPanel>
-                  </ScrollViewer>
-                </StackPanel>
-              </Flyout>
-            </Button.Flyout>
-          </Button>
-        </DockPanel>
-        <Button DockPanel.Dock="Bottom" Classes="seg" Content="Channels, groups and import…" Click="OnChannelsClick"
-                HorizontalAlignment="Stretch" Margin="0,8,0,0"
-                ToolTip.Tip="Open the channel editor: edit what is stored about each channel, put channels in groups, and load RadioReference CSV downloads" />
-        <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-          <Button DockPanel.Dock="Right" Classes="seg" Content="Delete" Command="{Binding DeleteChannelCommand}" Margin="6,0,0,0"
-                  ToolTip.Tip="Remove the selected channel" />
-          <Button DockPanel.Dock="Right" Classes="seg" Content="Store" Command="{Binding StoreChannelCommand}" Margin="6,0,0,0"
-                  ToolTip.Tip="Store the frequency on the display under this name. With one group shown it goes in that group; otherwise in &quot;My channels&quot;, or where it already was" />
-          <TextBox Text="{Binding NewName}" PlaceholderText="Name for this frequency" />
-        </DockPanel>
-        <ListBox ItemsSource="{Binding Memories}" SelectedItem="{Binding SelectedMemory}" Background="Transparent">
-          <ListBox.Styles>
-            <Style Selector="ListBoxItem">
-              <Setter Property="Padding" Value="8,2" />
-              <Setter Property="MinHeight" Value="0" />
-            </Style>
-          </ListBox.Styles>
-          <ListBox.ItemTemplate>
-            <DataTemplate x:DataType="vm:MemoryRow">
-              <DockPanel>
-                <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Scan}" MinWidth="0" Margin="0,0,6,0"
-                          ToolTip.Tip="Include this channel when scanning" />
-                <StackPanel>
-                  <TextBlock Text="{Binding Name}" FontSize="13" TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding Detail}" Classes="label" />
-                </StackPanel>
-              </DockPanel>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
-      </DockPanel>
-    </Border>
 
     <!-- The readout: what a scanner shows on its display -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}"
@@ -121,12 +39,21 @@
         <TextBlock Text="{Binding InfoText}" Foreground="{DynamicResource LcdDim}" FontSize="13"
                    TextTrimming="CharacterEllipsis" MinHeight="17" />
 
+        <!-- The power button at the left, the frequency in the middle -->
+        <Panel>
+          <Button Classes="power" Classes.lit="{Binding IsOn}" Command="{Binding TogglePowerCommand}"
+                  HorizontalAlignment="Left" VerticalAlignment="Center"
+                  ToolTip.Tip="Start or stop the radio. Green when it is running.">
+            <Path Width="24" Height="24" StrokeThickness="2.4" StrokeLineCap="Round"
+                  Data="M 12,3 L 12,11.5 M 7.5,5.6 A 8,8 0 1 0 16.5,5.6" />
+          </Button>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
           <c:FrequencyReadout FrequencyHz="{Binding FrequencyHz}" FontSize="64"
                               Foreground="{DynamicResource LcdText}" DimForeground="{DynamicResource LcdDim}"
                               ToolTip.Tip="Roll the mouse wheel over a digit to tune by that digit; click its top or bottom half to step it" />
           <TextBlock Text="MHz" Foreground="{DynamicResource LcdDim}" FontSize="18" VerticalAlignment="Bottom" Margin="8,0,0,14" />
         </StackPanel>
+        </Panel>
 
         <!-- What a digital signal says about itself -->
         <TextBlock Text="{Binding DigitalText}" Foreground="{DynamicResource LcdOpen}" FontSize="15" FontWeight="SemiBold"
@@ -149,90 +76,218 @@
     <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
                TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" />
 
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*" Margin="2,14,0,0" RowSpacing="12" ColumnSpacing="12">
+    <!-- The controls, in three tabs under the readout -->
+    <TabControl Margin="0,8,0,0" Padding="0">
 
-      <!-- Tuning -->
-      <TextBlock Grid.Row="0" Grid.Column="0" Text="Tune" Classes="label" />
-      <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-        <Button Classes="seg" Classes.lit="{Binding IsOn}" Content="{Binding PowerText}" Command="{Binding TogglePowerCommand}"
-                MinWidth="64" ToolTip.Tip="Start or stop the radio" />
-        <TextBox Text="{Binding EntryText}" Width="120" PlaceholderText="MHz"
-                 ToolTip.Tip="Type a frequency in MHz and press Enter">
-          <TextBox.KeyBindings>
-            <KeyBinding Gesture="Enter" Command="{Binding EnterFrequencyCommand}" />
-          </TextBox.KeyBindings>
-        </TextBox>
-        <Button Classes="seg" Content="Go" Command="{Binding EnterFrequencyCommand}" />
-        <Button Classes="seg" Content="◀" Command="{Binding StepDownCommand}" Margin="12,0,4,0" ToolTip.Tip="One step down" />
-        <Button Classes="seg" Content="▶" Command="{Binding StepUpCommand}" ToolTip.Tip="One step up" />
-        <TextBlock Text="Step" Classes="label" Margin="6,0,0,0" />
-        <ComboBox ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}" Width="116"
-                  ToolTip.Tip="Tuning step for the arrow buttons. Auto uses the usual channel spacing of the band." />
-      </StackPanel>
+      <TabItem Header="Operate">
+        <DockPanel>
+          <!-- Stored channels and their groups, at the right of the tab -->
+          <Border DockPanel.Dock="Right" Width="290" Margin="12,10,0,0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
+            <DockPanel>
+              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                <Button Classes="seg" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        ToolTip.Tip="Which groups of stored channels to show and scan. Tick one or several; with none ticked, all are shown.">
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="▾" Margin="6,0,0,0" />
+                    <TextBlock Text="{Binding GroupsText}" TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                  <Button.Flyout>
+                    <Flyout Placement="BottomEdgeAlignedLeft">
+                      <StackPanel Spacing="4" MinWidth="220">
+                        <Button Classes="seg" Content="All groups" Command="{Binding ShowAllGroupsCommand}" HorizontalAlignment="Stretch"
+                                ToolTip.Tip="Untick every group: all of them are shown and scanned" />
+                        <ScrollViewer MaxHeight="360">
+                          <StackPanel>
+                            <TextBlock Text="User Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasUserGroups}"
+                                       ToolTip.Tip="The groups you made, in the channel editor or by importing" />
+                            <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasUserGroups}" />
+                            <ItemsControl ItemsSource="{Binding UserGroupRows}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:GroupRow">
+                                  <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="Auto Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasAutoGroups}"
+                                       ToolTip.Tip="One group for each tag in use, made by the program: its channels are those with that tag, however the tag is written" />
+                            <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasAutoGroups}" />
+                            <ItemsControl ItemsSource="{Binding AutoGroupRows}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:GroupRow">
+                                  <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </ScrollViewer>
+                      </StackPanel>
+                    </Flyout>
+                  </Button.Flyout>
+                </Button>
+              </DockPanel>
+              <Button DockPanel.Dock="Bottom" Classes="seg" Content="Channels, groups and import…" Click="OnChannelsClick"
+                      HorizontalAlignment="Stretch" Margin="0,8,0,0"
+                      ToolTip.Tip="Open the channel editor: edit what is stored about each channel, put channels in groups, and load RadioReference CSV downloads" />
+              <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                <Button DockPanel.Dock="Right" Classes="seg" Content="Delete" Command="{Binding DeleteChannelCommand}" Margin="6,0,0,0"
+                        ToolTip.Tip="Remove the selected channel" />
+                <Button DockPanel.Dock="Right" Classes="seg" Content="Store" Command="{Binding StoreChannelCommand}" Margin="6,0,0,0"
+                        ToolTip.Tip="Store the frequency on the display under this name. With one group shown it goes in that group; otherwise in &quot;My channels&quot;, or where it already was" />
+                <TextBox Text="{Binding NewName}" PlaceholderText="Name for this frequency" />
+              </DockPanel>
+              <ListBox ItemsSource="{Binding Memories}" SelectedItem="{Binding SelectedMemory}" Background="Transparent">
+                <ListBox.Styles>
+                  <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="8,2" />
+                    <Setter Property="MinHeight" Value="0" />
+                  </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:MemoryRow">
+                    <DockPanel>
+                      <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Scan}" MinWidth="0" Margin="0,0,6,0"
+                                ToolTip.Tip="Include this channel when scanning" />
+                      <StackPanel>
+                        <TextBlock Text="{Binding Name}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Detail}" Classes="label" />
+                      </StackPanel>
+                    </DockPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+          </Border>
 
- 
-      <!-- Search a range -->
-      <TextBlock Grid.Row="1" Grid.Column="0" Text="Search" Classes="label" />
-      <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-        <TextBox Text="{Binding SearchFrom}" Width="90" ToolTip.Tip="Lowest frequency to search, in MHz" />
-        <TextBlock Text="to" Classes="label" />
-        <TextBox Text="{Binding SearchTo}" Width="90" ToolTip.Tip="Highest frequency to search, in MHz" />
-        <TextBlock Text="MHz" Classes="label" />
-        <Button Classes="seg" Classes.lit="{Binding IsSearching}" Content="{Binding SearchText}" Command="{Binding ToggleSearchCommand}"
-                MinWidth="96" Margin="6,0,0,0"
-                ToolTip.Tip="Look through this range for anything above the squelch mark and stop on it. Uses the band's usual channel spacing unless a step is chosen. Skip leaves a frequency out for ten minutes; Store keeps it." />
-        <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
-                ToolTip.Tip="Leave the frequency the search has stopped on and carry on" />
-      </StackPanel>
+          <Grid DockPanel.Dock="Bottom" ColumnDefinitions="44,*" Margin="2,8,0,0" ColumnSpacing="12">
+          <!-- Scan the stored channels: kept at the foot of the tab -->
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+          <WrapPanel Grid.Row="0" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
+            <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
+                    Command="{Binding ToggleScanCommand}" MinWidth="82"
+                    ToolTip.Tip="Scan the ticked channels of the groups shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
+            <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}"
+                    IsEnabled="{Binding IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
+          </WrapPanel>
+          </Grid>
 
-      <!-- Mode -->
-      <TextBlock Grid.Row="2" Grid.Column="0" Text="Mode" Classes="label" />
-      <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-        <Button Classes="seg" Classes.lit="{Binding AutoMode}" Content="Auto" Command="{Binding SetAutoModeCommand}"
-                ToolTip.Tip="Choose the mode and filter from the band: AM on airband, FM elsewhere" />
-        <Button Classes="seg" Classes.lit="{Binding IsAm}" Content="AM" Command="{Binding SetModeCommand}" CommandParameter="AM" />
-        <Button Classes="seg" Classes.lit="{Binding IsNfm}" Content="NFM" Command="{Binding SetModeCommand}" CommandParameter="NFM"
-                ToolTip.Tip="Narrow FM: public service, business, marine, weather and amateur" />
-        <Button Classes="seg" Classes.lit="{Binding IsWfm}" Content="WFM" Command="{Binding SetModeCommand}" CommandParameter="WFM"
-                ToolTip.Tip="Wide FM: broadcast radio" />
-        <TextBlock Text="Filter" Classes="label" Margin="6,0,0,0" />
-        <ComboBox ItemsSource="{Binding Widths}" SelectedItem="{Binding SelectedWidth}" Width="170"
-                  ToolTip.Tip="Channel filter. Use the narrow one where channels are 12.5 kHz (FM) or 8.33 kHz (AM) apart." />
-      </StackPanel>
+          <!-- The rows wrap when the window is narrow (a label stays with its control); if they then need more height than there is, they scroll -->
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="44,*" Margin="2,12,0,4" RowSpacing="12" ColumnSpacing="12">
 
-      <!-- Audio -->
-      <TextBlock Grid.Row="3" Grid.Column="0" Text="Audio" Classes="label" />
-      <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-        <TextBlock Text="Volume" Classes="label" />
-        <Slider Minimum="0" Maximum="100" Value="{Binding Volume}" Width="170" />
-        <CheckBox Content="Squelch" IsChecked="{Binding SquelchOn}" FontSize="12" Margin="14,0,0,0"
-                  ToolTip.Tip="Mute the speaker until a signal is stronger than the mark on the level bar" />
-        <Slider Minimum="-140" Maximum="-40" Value="{Binding SquelchDb}" Width="200" IsEnabled="{Binding SquelchOn}"
-                ToolTip.Tip="Squelch level: set the green mark just above the bar's resting level" />
-        <CheckBox Content="Stereo" IsChecked="{Binding StereoOn}" FontSize="12" Margin="14,0,0,0"
-                  ToolTip.Tip="Broadcast FM in stereo when the station sends it. Untick for mono, which is quieter on a weak station." />
-      </StackPanel>
+              <!-- Tuning: the frequency, and under it the step buttons (the power button is on the display) -->
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Tune" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="6">
+                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                  <TextBox Text="{Binding EntryText}" Width="120" PlaceholderText="MHz"
+                           ToolTip.Tip="Type a frequency in MHz and press Enter">
+                    <TextBox.KeyBindings>
+                      <KeyBinding Gesture="Enter" Command="{Binding EnterFrequencyCommand}" />
+                    </TextBox.KeyBindings>
+                  </TextBox>
+                  <Button Classes="seg" Content="Go" Command="{Binding EnterFrequencyCommand}" />
+                </WrapPanel>
+                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Classes="seg" Content="◀" Command="{Binding StepDownCommand}" ToolTip.Tip="One step down" />
+                    <Button Classes="seg" Content="▶" Command="{Binding StepUpCommand}" ToolTip.Tip="One step up" />
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Step" Classes="label" Margin="6,0,0,0" />
+                    <ComboBox ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}" Width="116"
+                              ToolTip.Tip="Tuning step for the arrow buttons. Auto uses the usual channel spacing of the band." />
+                  </StackPanel>
+                </WrapPanel>
+              </StackPanel>
 
-      <!-- Radio -->
-      <TextBlock Grid.Row="4" Grid.Column="0" Text="Output" Classes="label" />
-      <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-        <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" Width="330"
-                  ToolTip.Tip="Which sound device the scanner's audio goes to. It can be changed while receiving." />
-        <Button Classes="seg" Content="Refresh" Command="{Binding RescanAudioDevicesCommand}"
-                ToolTip.Tip="Look again for sound devices, after plugging one in" />
-      </StackPanel>
+              <!-- Mode, and under it the filter -->
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Mode" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+              <StackPanel Grid.Row="1" Grid.Column="1" Spacing="6">
+                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                  <Button Classes="seg" Classes.lit="{Binding AutoMode}" Content="Auto" Command="{Binding SetAutoModeCommand}"
+                          ToolTip.Tip="Choose the mode and filter from the band: AM on airband, FM elsewhere" />
+                  <Button Classes="seg" Classes.lit="{Binding IsAm}" Content="AM" Command="{Binding SetModeCommand}" CommandParameter="AM" />
+                  <Button Classes="seg" Classes.lit="{Binding IsNfm}" Content="NFM" Command="{Binding SetModeCommand}" CommandParameter="NFM"
+                          ToolTip.Tip="Narrow FM: public service, business, marine, weather and amateur" />
+                  <Button Classes="seg" Classes.lit="{Binding IsWfm}" Content="WFM" Command="{Binding SetModeCommand}" CommandParameter="WFM"
+                          ToolTip.Tip="Wide FM: broadcast radio" />
+                </WrapPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="Filter" Classes="label" />
+                  <ComboBox ItemsSource="{Binding Widths}" SelectedItem="{Binding SelectedWidth}" Width="170"
+                            ToolTip.Tip="Channel filter. Use the narrow one where channels are 12.5 kHz (FM) or 8.33 kHz (AM) apart." />
+                </StackPanel>
+              </StackPanel>
 
-      <TextBlock Grid.Row="5" Grid.Column="0" Text="Radio" Classes="label" />
-      <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-        <CheckBox Content="Auto gain" IsChecked="{Binding AutoGain}" FontSize="12"
-                  ToolTip.Tip="Let the scanner step the radio's front-end attenuation: up on overload, back down when it clears" />
-        <TextBlock Text="LNA step" Classes="label" Margin="6,0,0,0" />
-        <Slider Minimum="0" Maximum="{Binding MaxGainStep}" Value="{Binding GainStep}" Width="170"
-                TickFrequency="1" IsSnapToTickEnabled="True"
-                ToolTip.Tip="Front-end attenuation: 0 is the most gain. With Auto gain on, this is the most gain the scanner may use." />
-        <TextBlock Text="Antenna" Classes="label" Margin="14,0,0,0" />
-        <ComboBox ItemsSource="{Binding Antennas}" SelectedItem="{Binding SelectedAntenna}" Width="130" />
-      </StackPanel>
-    </Grid>
+              <!-- Audio: volume and stereo, and under them the squelch -->
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Audio" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Spacing="6">
+                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Volume" Classes="label" />
+                    <Slider Minimum="0" Maximum="100" Value="{Binding Volume}" Width="170" />
+                  </StackPanel>
+                  <CheckBox Content="Stereo" IsChecked="{Binding StereoOn}" FontSize="12" Margin="6,0,0,0"
+                            ToolTip.Tip="Broadcast FM in stereo when the station sends it. Untick for mono, which is quieter on a weak station." />
+                </WrapPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <CheckBox Content="Squelch" IsChecked="{Binding SquelchOn}" FontSize="12"
+                            ToolTip.Tip="Mute the speaker until a signal is stronger than the mark on the level bar" />
+                  <Slider Minimum="-140" Maximum="-40" Value="{Binding SquelchDb}" Width="200" IsEnabled="{Binding SquelchOn}"
+                          ToolTip.Tip="Squelch level: set the green mark just above the bar's resting level" />
+                </StackPanel>
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Search">
+        <Grid RowDefinitions="Auto" ColumnDefinitions="44,*" Margin="2,12,0,0" RowSpacing="12" ColumnSpacing="12">
+          <!-- Search a range -->
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Search" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+          <WrapPanel Grid.Row="0" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBox Text="{Binding SearchFrom}" Width="90" ToolTip.Tip="Lowest frequency to search, in MHz" />
+              <TextBlock Text="to" Classes="label" />
+              <TextBox Text="{Binding SearchTo}" Width="90" ToolTip.Tip="Highest frequency to search, in MHz" />
+              <TextBlock Text="MHz" Classes="label" />
+            </StackPanel>
+            <Button Classes="seg" Classes.lit="{Binding IsSearching}" Content="{Binding SearchText}" Command="{Binding ToggleSearchCommand}"
+                    MinWidth="96" Margin="6,0,0,0"
+                    ToolTip.Tip="Look through this range for anything above the squelch mark and stop on it. Uses the band's usual channel spacing unless a step is chosen. Skip leaves a frequency out for ten minutes; Store keeps it." />
+            <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
+                    ToolTip.Tip="Leave the frequency the search has stopped on and carry on" />
+          </WrapPanel>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Settings">
+        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="44,*" Margin="2,12,0,0" RowSpacing="12" ColumnSpacing="12">
+          <!-- Sound device and radio -->
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Output" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+          <WrapPanel Grid.Row="0" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
+            <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" Width="330"
+                      ToolTip.Tip="Which sound device the scanner's audio goes to. It can be changed while receiving." />
+            <Button Classes="seg" Content="Refresh" Command="{Binding RescanAudioDevicesCommand}"
+                    ToolTip.Tip="Look again for sound devices, after plugging one in" />
+          </WrapPanel>
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Radio" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+          <WrapPanel Grid.Row="1" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
+            <CheckBox Content="Auto gain" IsChecked="{Binding AutoGain}" FontSize="12"
+                      ToolTip.Tip="Let the scanner step the radio's front-end attenuation: up on overload, back down when it clears" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="LNA step" Classes="label" Margin="6,0,0,0" />
+              <Slider Minimum="0" Maximum="{Binding MaxGainStep}" Value="{Binding GainStep}" Width="170"
+                      TickFrequency="1" IsSnapToTickEnabled="True"
+                      ToolTip.Tip="Front-end attenuation: 0 is the most gain. With Auto gain on, this is the most gain the scanner may use." />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="Antenna" Classes="label" Margin="14,0,0,0" />
+              <ComboBox ItemsSource="{Binding Antennas}" SelectedItem="{Binding SelectedAntenna}" Width="130" />
+            </StackPanel>
+          </WrapPanel>
+        </Grid>
+      </TabItem>
+    </TabControl>
   </DockPanel>
 </Window>

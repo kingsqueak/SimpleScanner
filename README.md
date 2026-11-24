@@ -77,10 +77,10 @@ With one radio the window is as it was, with the one large display.
 
 The browser uses RadioReference's database web service, which needs two things: the user's own
 RadioReference account with a Premium subscription, and an application key that RadioReference
-issues to a program's author. The key is not in this repository. A build takes it from a file
-`radioreference.key` at the top of the repository (git ignores it); a copy built without one says so
-and can be given a key in the environment variable `RADIOREFERENCE_KEY` or in a file
-`radioreference.key` beside the settings. The password is kept only if asked, in the macOS login
+issues to a program's author. No key is in this repository or in a build: enter the one issued to
+you under "Application key…" in the RadioReference window. It is kept in a file
+`radioreference.key` beside the settings, readable only by you; the environment variable
+`RADIOREFERENCE_KEY` is used in its place when set. The password is kept only if asked, in the macOS login
 keychain; on other systems it is asked for at each run. Answers are kept in the program's database,
 `simplescanner.db` (SQLite) beside the settings: the same file that holds the stored channels (table
 `channels`), whether or not a RadioReference account is used. A `memories.json` from an earlier

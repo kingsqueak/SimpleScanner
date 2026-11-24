@@ -118,6 +118,7 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
     private readonly RrCache? _cache;
     private readonly Settings.RrPlace _place;
     private readonly Func<string?> _findKey;
+    private readonly string? _keyFolder;  // where the user's own application key is kept; null when it cannot be set here
     private bool _moving;                 // the choosers are being set by the program, not by the user
     private int _treeFor;                 // counts the trees built, so a slow answer for an old one is dropped
     private (double Lat, double Lon)? _home;
@@ -140,6 +141,10 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
     [ObservableProperty] private string _accountText = "";
     [ObservableProperty] private bool _busy;
     [ObservableProperty] private string _status = "";
+    /// <summary>The user's own application key, as typed or as kept.</summary>
+    [ObservableProperty] private string _keyText = "";
+    /// <summary>Which application key is in use, in words.</summary>
+    [ObservableProperty] private string _keyNote = "";
 
     [ObservableProperty] private string _zip = "";
     [ObservableProperty] private IReadOnlyList<RrCountry> _countries = [];
@@ -156,13 +161,18 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
     [ObservableProperty] private bool _canLoad;
 
     public RadioReferenceViewModel(MemoryStore store, RrClient client, Settings.RrPlace? place = null, Func<string?>? findKey = null,
-        RrCache? cache = null)
+        RrCache? cache = null, string? keyFolder = null)
     {
         _store = store;
         _client = client;
         _cache = cache;
         _place = place ?? new Settings.RrPlace();
-        _findKey = findKey ?? RrKey.Find;
+        // The real program keeps the user's own key beside the settings. A caller that supplies the
+        // key itself (a test) has nowhere to keep one unless it names a folder.
+        _keyFolder = keyFolder ?? (findKey is null ? AppFiles.Folder : null);
+        _findKey = findKey ?? (() => RrKey.Find(_keyFolder!));
+        _keyText = _keyFolder is null ? "" : RrKey.Own(_keyFolder) ?? "";
+        _keyNote = NoteForKey();
         _username = _place.Username ?? "";
         _zip = _place.Zip ?? "";
         // Distances are measured from the ZIP code last looked up, whichever county is shown.
@@ -180,7 +190,8 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
     {
         if (_findKey() is null)
         {
-            Status = "This copy of SimpleScanner was built without a RadioReference application key, so it cannot use the service. " +
+            Status = "RadioReference's web service needs an application key, and none has been entered yet. " +
+                     "If RadioReference has issued you one, enter it under \"Application key\" above. " +
                      "CSV downloads from radioreference.com can still be imported in the channels window.";
             return;
         }
@@ -227,7 +238,7 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
         }
         if (_findKey() is not { } key)
         {
-            Status = "This copy of SimpleScanner has no RadioReference application key";
+            Status = "Enter a RadioReference application key first, under \"Application key\"";
             return;
         }
         _client.Auth = new RrAuth(user, Password, key);
@@ -272,6 +283,41 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
         Remember = false;
         AccountText = "";
         Status = "Signed out. What was fetched before stays on this computer and can still be browsed.";
+    }
+
+    // ---- the application key ----------------------------------------------------------------
+
+    private string NoteForKey()
+    {
+        if (_keyFolder is not null && RrKey.Own(_keyFolder) is not null)
+            return _findKey() == RrKey.Own(_keyFolder) ? "In use: the key you entered." : "A key from the environment is in use, not the one entered here.";
+        return _findKey() is null ? "No key has been entered." : "In use: a key from the environment.";
+    }
+
+    /// <summary>Keep the key typed (or, when empty, remove the one kept) and use it from now on.</summary>
+    [RelayCommand]
+    private async Task SaveKeyAsync()
+    {
+        if (_keyFolder is null) return;
+        if (!RrKey.Keep(KeyText, _keyFolder))
+        {
+            Status = "The application key could not be kept: the settings folder cannot be written";
+            return;
+        }
+        KeyText = RrKey.Own(_keyFolder) ?? "";
+        KeyNote = NoteForKey();
+        string? key = _findKey();
+        if (key is null)
+        {
+            // Nothing can be asked without a key.
+            if (SignedIn) SignOut();
+            Status = "The application key was removed. The service cannot be used until one is entered.";
+            return;
+        }
+        if (_client.Auth is { } auth) _client.Auth = auth with { AppKey = key };
+        Status = KeyText.Length > 0 ? "The application key was kept and is in use." : "The application key was removed. The key from the environment is in use.";
+        // A window opened without a key has fetched nothing yet.
+        if (Countries.Count == 0) await OpenAsync();
     }
 
     // ---- the place --------------------------------------------------------------------------

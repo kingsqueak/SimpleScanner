@@ -1,30 +1,55 @@
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace SimpleScanner.RadioReference;
 
 /// <summary>
-/// This program's RadioReference application key. It is not in the source: a build takes it
-/// from the file radioreference.key at the top of the repository (which git ignores) when that
-/// file is there. A copy built without it can be given one in the environment variable
-/// RADIOREFERENCE_KEY, or in a file radioreference.key beside the settings.
+/// The RadioReference application key. None is in the source or in a build: whoever has a key
+/// enters it in the RadioReference window, which keeps it in a file radioreference.key beside
+/// the settings. It can also be given in the environment variable RADIOREFERENCE_KEY, which
+/// is used in place of the one kept.
 /// </summary>
 public static class RrKey
 {
-    public static string? Find()
+    private const string FileName = "radioreference.key";
+
+    public static string? Find() => Find(AppFiles.Folder);
+
+    /// <summary>The key to use: the environment's, else the user's own in <paramref name="folder"/>; null when there is none.</summary>
+    public static string? Find(string folder) =>
+        Clean(Environment.GetEnvironmentVariable("RADIOREFERENCE_KEY")) ?? Own(folder);
+
+    /// <summary>The key the user entered, kept in <paramref name="folder"/>; null when there is none.</summary>
+    public static string? Own(string folder)
     {
-        if (Clean(Environment.GetEnvironmentVariable("RADIOREFERENCE_KEY")) is { } fromEnv) return fromEnv;
         try
         {
-            string beside = Path.Combine(AppFiles.Folder, "radioreference.key");
-            if (File.Exists(beside) && Clean(File.ReadAllText(beside)) is { } fromFile) return fromFile;
+            string beside = Path.Combine(folder, FileName);
+            return File.Exists(beside) ? Clean(File.ReadAllText(beside)) : null;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        using var built = Assembly.GetExecutingAssembly().GetManifestResourceStream("radioreference.key");
-        if (built is null) return null;
-        using var reader = new StreamReader(built);
-        return Clean(reader.ReadToEnd());
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>
+    /// Keep the user's own key in <paramref name="folder"/>, readable by this user only; an empty
+    /// key removes the one kept. False when the file could not be written or removed.
+    /// </summary>
+    public static bool Keep(string? key, string folder)
+    {
+        try
+        {
+            string beside = Path.Combine(folder, FileName);
+            if (Clean(key) is not { } text)
+            {
+                File.Delete(beside);
+                return true;
+            }
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(beside, text + "\n");
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(beside, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
     private static string? Clean(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();

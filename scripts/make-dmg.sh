@@ -24,8 +24,21 @@ stage="$out/stage"
 rm -rf "$out"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$stage"
 
+# The native libraries are built again here for the oldest macOS the app says it runs on
+# (LSMinimumSystemVersion below). Built without this they carry this Mac's own macOS version
+# as their minimum, and an older macOS refuses to load them.
+export MACOSX_DEPLOYMENT_TARGET=14.0
+echo "== native libraries (macOS $MACOSX_DEPLOYMENT_TARGET and later)"
+for lib in audio digital $([ -n "${NO_AMBE:-}" ] || echo ambe); do
+  sh "native/$lib/build.sh" >/dev/null
+done
+
 echo "== app ($rid)"
+rm -rf "src/SimpleScanner/obj/Release/net10.0/$rid" "src/SimpleScanner/bin/Release/net10.0/$rid"
+# DebugType=none: no debug record in the program, which would carry the build folder's path.
+# The intermediate folder is removed first, since a change of this setting alone does not compile again.
 dotnet publish src/SimpleScanner/SimpleScanner.csproj -c Release -r "$rid" --self-contained true \
+  -p:DebugType=none -p:DebugSymbols=false \
   -p:UseAppHost=true -p:IncludeAmbe="$([ -n "${NO_AMBE:-}" ] && echo false || echo true)" -o "$app/Contents/MacOS"
 find "$app/Contents" -name '*.pdb' -delete
 

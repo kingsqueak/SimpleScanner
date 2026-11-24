@@ -240,6 +240,16 @@ public sealed partial class ChannelsViewModel : ObservableObject
         Reload();
     }
 
+    /// <summary>The channels were read again from a file something else had changed: the rows here are
+    /// of channels that are no longer stored, so the list is made again, and any edit not yet written is lost.</summary>
+    public void StoreReloaded()
+    {
+        _dirty = false;
+        _seen = _store.Version;
+        Reload();
+        Status = "The stored channels were changed outside the program and read again";
+    }
+
     private void Reload()
     {
         _loading = true;

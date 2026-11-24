@@ -340,6 +340,24 @@ public sealed partial class MainViewModel : ObservableObject
         if (!IsScanning) ShowLabel();
     }
 
+    private int _diskTicks;
+    /// <summary>The channels were read again after something else changed the file; the channel editor shows them again too.</summary>
+    public event Action? Reloaded;
+
+    // The stored channels have been read again from the file, changed by something other than this
+    // program. Every channel is a new object. A scan in progress goes on with the channels it began with.
+    private void MemoriesReloaded()
+    {
+        if (_picked is { } was)
+            _picked = _memories.FindAll(was.FrequencyHz).FirstOrDefault(c => c.Name == was.Name);
+        RefreshMemories();
+        if (!IsScanning) ShowLabel();
+        Status = IsScanning
+            ? "The stored channels were changed outside the program and read again; the scan goes on with the ones it began with"
+            : "The stored channels were changed outside the program and read again";
+        Reloaded?.Invoke();
+    }
+
     /// <summary>The channel editor has renamed a group: if it was ticked here, the new name is.</summary>
     public void GroupRenamed(string old, string name) =>
         RefreshMemories(SelectedGroups.Select(g => g == old ? name : g).Distinct().ToList());
@@ -733,6 +751,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void Tick()
     {
+        if (++_diskTicks >= 20)     // once a second
+        {
+            _diskTicks = 0;
+            if (_memories.ReloadIfChangedOnDisk()) MemoriesReloaded();
+        }
         if (IsOn)
         {
             var src = _rx.Source;

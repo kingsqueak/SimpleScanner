@@ -22,10 +22,12 @@ public partial class MainWindow : Window
         var vm = new ChannelsViewModel(main.Store, main.ChannelColumns);
         vm.Edited += main.MemoriesEdited;
         vm.GroupRenamed += main.GroupRenamed;
+        main.Reloaded += vm.StoreReloaded;
         _channels = new ChannelsWindow { DataContext = vm };
         _channels.TuneRequested += main.Tune;
         _channels.Closed += (_, _) =>
         {
+            main.Reloaded -= vm.StoreReloaded;
             main.ChannelColumns = vm.ColumnWidths();
             _channels = null;
         };

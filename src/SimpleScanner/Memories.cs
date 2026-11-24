@@ -70,6 +70,7 @@ public sealed class MemoryStore
     public static MemoryStore Load(string? path = null)
     {
         var store = new MemoryStore(path);
+        store._stamp = Stamp(store._path);
         try { store.Channels = JsonSerializer.Deserialize<List<MemoryChannel>>(File.ReadAllText(store._path), Json) ?? []; }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
         return store;
@@ -81,9 +82,57 @@ public sealed class MemoryStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, JsonSerializer.Serialize(Channels, Json));
+            // Written beside the file and then put in its place, so that nothing reading it finds half a file.
+            string part = _path + ".part";
+            File.WriteAllText(part, JsonSerializer.Serialize(Channels, Json));
+            File.Move(part, _path, overwrite: true);
+            _stamp = Stamp(_path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    // ---- the file changed by something else ---------------------------------------------------
+
+    // The file as it was when last read or written here: when it was changed, and its length.
+    private (DateTime Changed, long Length) _stamp;
+    /// <summary>Counts the times the channels were read again from a file something else had changed.
+    /// Every channel is then a new object: whatever holds the old ones must let them go.</summary>
+    public int Reloads { get; private set; }
+
+    private static (DateTime, long) Stamp(string path)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+            return file.Exists ? (file.LastWriteTimeUtc, file.Length) : default;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return default; }
+    }
+
+    /// <summary>
+    /// Read the channels again if the file is not as this program left it: edited by hand, written by
+    /// another tool, or by another copy of the program. Cheap enough to ask every second. A file
+    /// that cannot be read yet (half written) is left for the next time; one that has gone changes nothing.
+    /// </summary>
+    /// <returns>True when the channels have been replaced.</returns>
+    public bool ReloadIfChangedOnDisk()
+    {
+        var now = Stamp(_path);
+        if (now == _stamp) return false;
+        if (now == default)
+        {
+            _stamp = now;
+            return false;
+        }
+        List<MemoryChannel>? read;
+        try { read = JsonSerializer.Deserialize<List<MemoryChannel>>(File.ReadAllText(_path), Json); }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return false; }
+        if (read is null) return false;
+        Channels = read;
+        _stamp = now;
+        Version++;
+        Reloads++;
+        return true;
     }
 
     /// <summary>The stored channel on this frequency (within 100 Hz), if any.</summary>

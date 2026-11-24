@@ -309,4 +309,52 @@ public class ImportTests
         }
         finally { File.Delete(path); }
     }
+
+    [Fact]
+    public void A_file_changed_by_something_else_is_read_again()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ss-reload-{Guid.NewGuid():N}.json");
+        try
+        {
+            var writer = new MemoryStore(path);
+            writer.Channels.Add(new MemoryChannel { Name = "One", FrequencyHz = 146.52e6 });
+            writer.Save();
+            var store = MemoryStore.Load(path);
+            Assert.False(store.ReloadIfChangedOnDisk());
+
+            // Its own saving is not a change by something else.
+            store.Channels.Add(new MemoryChannel { Name = "Two", FrequencyHz = 146.55e6 });
+            store.Save();
+            Assert.False(store.ReloadIfChangedOnDisk());
+
+            // Half a file is left alone, and what is held stays.
+            File.WriteAllText(path, "[ { \"Name\": \"Thr");
+            Assert.False(store.ReloadIfChangedOnDisk());
+            Assert.Equal(2, store.Channels.Count);
+
+            // Another writer's file is taken up, once.
+            writer.Channels.Add(new MemoryChannel { Name = "Three", FrequencyHz = 146.58e6, Tag = "Ham" });
+            writer.Channels.Add(new MemoryChannel { Name = "Four", FrequencyHz = 146.61e6 });
+            writer.Save();
+            int version = store.Version;
+            Assert.True(store.ReloadIfChangedOnDisk());
+            Assert.Equal(["One", "Three", "Four"], store.Channels.Select(c => c.Name));
+            Assert.Equal(1, store.Reloads);
+            Assert.True(store.Version > version);
+            Assert.False(store.ReloadIfChangedOnDisk());
+
+            // The editor shows the new channels and drops what it held of the old ones.
+            var vm = new ChannelsViewModel(store);
+            File.WriteAllText(path, "[ { \"Name\": \"Only\", \"FrequencyHz\": 162400000 } ]");
+            Assert.True(store.ReloadIfChangedOnDisk());
+            vm.StoreReloaded();
+            Assert.Equal(["Only"], vm.Rows.Select(r => r.Channel.Name));
+
+            // A file that has gone changes nothing.
+            File.Delete(path);
+            Assert.False(store.ReloadIfChangedOnDisk());
+            Assert.Single(store.Channels);
+        }
+        finally { File.Delete(path); File.Delete(path + ".part"); }
+    }
 }

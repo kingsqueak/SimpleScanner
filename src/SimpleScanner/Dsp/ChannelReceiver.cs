@@ -33,7 +33,10 @@ public sealed class ChannelReceiver
     private Deemphasis? _deemph;
     private Biquad[] _highPass = [], _lowPass = [];
     private float _audioGain = 1;
-    private float[] _re = [], _im = [], _wRe = [], _wIm = [], _nRe = [], _nIm = [], _disc = [], _sub = [];
+    private float[] _re = [], _im = [], _wRe = [], _wIm = [], _nRe = [], _nIm = [], _disc = [], _sub = [], _hf = [], _mag = [];
+    private Biquad[] _roughPass = [];
+    private double _roughPower, _roughMean, _roughScale = 1;
+    private long _roughCount;
 
     public ChannelReceiver(double inputRate)
     {
@@ -52,6 +55,43 @@ public sealed class ChannelReceiver
 
     /// <summary>The channel's power over the last block, in dB relative to full scale.</summary>
     public double LevelDbfs { get; private set; } = -140;
+
+    /// <summary>
+    /// How rough the demodulated signal is above the frequencies a transmission can put there,
+    /// averaged over the last few milliseconds: what a noise squelch goes by. In narrow FM it is
+    /// the discriminator's output above the channel's edge, in Hz RMS: a carrier quiets it and
+    /// noise alone, however strong, does not. In AM it is the same part of the envelope, as a
+    /// fraction of the carrier: a carrier's envelope moves only as fast as its modulation, the
+    /// envelope of noise as fast as the filter lets it. Zero in broadcast FM, where it is not measured.
+    /// </summary>
+    public double Roughness => Mode switch
+    {
+        Mode.Nfm => Math.Sqrt(_roughPower) * _roughScale,
+        Mode.Am => _roughMean > 1e-12 ? Math.Sqrt(_roughPower) / _roughMean : 0,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// The most <see cref="Roughness"/> a signal worth hearing has; noise alone is well above it.
+    /// Zero where roughness is not measured. Set from generated signals: noise alone reads about
+    /// 3200 Hz in the 11 kHz FM filter and 3900 in the 16 kHz one, a carrier 6 dB over the noise
+    /// with speech on it under 1300 and 1900; in AM noise reads 0.2 or more (far more when it is
+    /// impulses) and a carrier 6 dB over it about 0.06, with speech peaks to 0.14.
+    /// </summary>
+    public double RoughnessLimit => Mode switch
+    {
+        Mode.Nfm => 600 + 0.13 * BandwidthHz,
+        Mode.Am => 0.16,
+        _ => 0,
+    };
+
+    /// <summary>Start the roughness average again: the channel has moved.</summary>
+    public void ResetRoughness()
+    {
+        _roughCount = 0;
+        _roughPower = _roughMean = 0;
+        foreach (var f in _roughPass) f.Reset();
+    }
 
     /// <summary>
     /// In narrow FM, the discriminator's output at 48 kHz before any audio filtering: what a
@@ -81,6 +121,10 @@ public sealed class ChannelReceiver
         BandwidthHz = bandwidthHz;
         _toWide.Reset();
         _am.Reset();
+        // Above the edge of the channel filter there is nothing of a transmission left.
+        _roughPass = mode == Mode.Wfm ? [] : Biquad.Butterworth4(AudioRate, RoughCornerHz(mode, bandwidthHz), highPass: true);
+        _roughScale = mode == Mode.Nfm ? (bandwidthHz < 13000 ? 2500 : 5000) : 1;
+        ResetRoughness();
         switch (mode)
         {
             case Mode.Wfm:
@@ -190,7 +234,13 @@ public sealed class ChannelReceiver
                 _fm!.Process(_nRe.AsSpan(0, count), _nIm.AsSpan(0, count), audio);
                 DiscriminatorTap?.Invoke(audio[..count]);
             }
-            else _am.Process(_nRe.AsSpan(0, count), _nIm.AsSpan(0, count), audio);
+            else
+            {
+                _am.Process(_nRe.AsSpan(0, count), _nIm.AsSpan(0, count), audio);
+                Ensure(ref _mag, count);
+                for (int i = 0; i < count; i++) _mag[i] = MathF.Sqrt(_nRe[i] * _nRe[i] + _nIm[i] * _nIm[i]);
+            }
+            MeasureRoughness(Mode == Mode.Nfm ? audio[..count] : _mag.AsSpan(0, count), Mode == Mode.Am);
         }
 
         var a = audio[..count];
@@ -200,6 +250,41 @@ public sealed class ChannelReceiver
         for (int i = 0; i < a.Length; i++) a[i] = Math.Clamp(a[i] * _audioGain, -1f, 1f);
         a.CopyTo(right);
         return count;
+    }
+
+    /// <summary>Where the roughness measure starts: above the audio, and above the edge of the channel filter.</summary>
+    public static double RoughCornerHz(Mode mode, double bandwidthHz) =>
+        Math.Clamp(bandwidthHz * 0.55, 4000, 12000);
+
+    private const int RoughSpan = AudioRate * 8 / 1000;
+
+    // FM: give it the discriminator's output. AM: the envelope, which is measured against its
+    // own mean over the same few milliseconds, so that a burst of impulses cannot pass for a carrier.
+    private void MeasureRoughness(ReadOnlySpan<float> x, bool envelope)
+    {
+        int n = x.Length;
+        Ensure(ref _hf, n);
+        var h = _hf.AsSpan(0, n);
+        x.CopyTo(h);
+        double mean = _roughMean, p = _roughPower;
+        long k = _roughCount, k0 = k;
+        if (envelope)
+            for (int i = 0; i < n; i++)
+            {
+                if (k0 < RoughSpan) k0++;
+                mean += (h[i] - mean) / k0;
+            }
+        foreach (var f in _roughPass) f.Process(h);
+        // A plain mean to begin with, so the figure is right from the first samples after a
+        // reset, then a running one.
+        for (int i = 0; i < n; i++)
+        {
+            if (k < RoughSpan) k++;
+            p += (h[i] * h[i] - p) / k;
+        }
+        _roughMean = mean;
+        _roughPower = p;
+        _roughCount = k;
     }
 
     private void Measure(ReadOnlySpan<float> re, ReadOnlySpan<float> im)

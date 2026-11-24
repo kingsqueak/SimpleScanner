@@ -249,6 +249,102 @@ public class DspTests
     }
 
     [Fact]
+    public void AutoSquelchStaysShutOnNoiseAboveTheLevel()
+    {
+        var sq = new Squelch { ThresholdDb = -90, Auto = true };
+        for (int i = 0; i < 100; i++) Assert.False(sq.Update(-70, 0.005, roughness: 3000, roughLimit: 2000));
+        Assert.True(sq.Noisy);
+        Assert.False(sq.Update(-70, 0.005, 1700, 2000));        // under the limit, but not clean enough to open on
+        Assert.False(sq.Update(-70, 0.005, 300, 2000));
+        Assert.False(sq.Update(-70, 0.005, 300, 2000));
+        Assert.True(sq.Update(-70, 0.005, 300, 2000));
+        Assert.True(sq.Update(-70, 0.05, 1900, 2000));          // open: only over the limit counts against it
+        Assert.True(sq.Update(-70, 0.05, 2600, 2000));          // a speech peak
+        Assert.True(sq.Update(-70, 0.05, 300, 2000));
+        Assert.True(sq.Update(-70, 0.06, 3000, 2000));          // the transmission ends and the noise is back
+        Assert.False(sq.Update(-70, 0.06, 3000, 2000));
+        Assert.False(sq.Update(-100, 0.1, 300, 2000));          // clean but under the level
+        // No limit (broadcast FM), or Auto off: the level alone.
+        sq.Reset();
+        Assert.True(sq.Update(-70, 0.02, 3000, 0));
+        sq.Reset();
+        sq.Auto = false;
+        Assert.True(sq.Update(-70, 0.02, 3000, 2000));
+    }
+
+    /// <summary>
+    /// Gaussian noise across the stream with, in a channel 30 kHz up, a carrier that many dB over
+    /// the noise in the channel's width (none for null), speech-like modulation on it; optionally
+    /// impulses 120 times a second. Returns the lowest and highest roughness after the start.
+    /// </summary>
+    private static (double low, double high) Roughness(Mode mode, double bandwidthHz, double? carrierDb, bool impulses = false)
+    {
+        const double fs = 240000, sigma = 0.001;
+        var rx = new ChannelReceiver(fs);
+        rx.Configure(mode, bandwidthHz);
+        rx.SetOffset(30000);
+        var rng = new Random(11);
+        double Gauss() => Math.Sqrt(-2 * Math.Log(1 - rng.NextDouble())) * Math.Cos(2 * Math.PI * rng.NextDouble());
+        double amp = carrierDb is { } db ? Math.Sqrt(2 * sigma * sigma * bandwidthHz / fs * Math.Pow(10, db / 10)) : 0;
+        double deviation = mode == Mode.Nfm ? (bandwidthHz < 13000 ? 2500 : 5000) : 0, depth = mode == Mode.Am ? 0.8 : 0;
+        const int block = 480;
+        var re = new float[block];
+        var im = new float[block];
+        var l = new float[rx.MaxAudio(block)];
+        var r = new float[rx.MaxAudio(block)];
+        double ph = 0, tone = 0, low = double.MaxValue, high = 0;
+        long t = 0;
+        for (int b = 0; b < 500; b++)
+        {
+            for (int i = 0; i < block; i++, t++)
+            {
+                double sec = t / fs;
+                // A tone wandering over 300 to 2700 Hz at syllable speed and loudness.
+                tone += 2 * Math.PI * (1500 + 1200 * Math.Sin(2 * Math.PI * 3.1 * sec)) / fs;
+                double m = Math.Sin(tone) * (0.55 + 0.45 * Math.Sin(2 * Math.PI * 4.3 * sec));
+                ph += 2 * Math.PI * (30000 + deviation * m) / fs;
+                double spike = impulses && t % 2000 == 0 ? 0.5 : 0;
+                re[i] = (float)(amp * (1 + depth * m) * Math.Cos(ph) + sigma * Gauss() + spike);
+                im[i] = (float)(amp * (1 + depth * m) * Math.Sin(ph) + sigma * Gauss() + 0.6 * spike);
+            }
+            rx.Process(re, im, l, r);
+            if (b < 20) continue;
+            low = Math.Min(low, rx.Roughness);
+            high = Math.Max(high, rx.Roughness);
+        }
+        return (low, high);
+    }
+
+    [Theory]
+    [InlineData(Mode.Nfm, BandPlan.NfmNarrow)]
+    [InlineData(Mode.Nfm, BandPlan.NfmWide)]
+    [InlineData(Mode.Am, BandPlan.AmAir833)]
+    [InlineData(Mode.Am, BandPlan.AmAir)]
+    public void RoughnessTellsNoiseFromASignalWhateverTheLevel(Mode mode, double bandwidthHz)
+    {
+        var rx = new ChannelReceiver(240000);
+        rx.Configure(mode, bandwidthHz);
+        double limit = rx.RoughnessLimit, clean = 0.75 * limit;
+        Assert.True(limit > 0);
+
+        // Noise alone, and noise with impulses, never comes down to where the squelch could open.
+        Assert.True(Roughness(mode, bandwidthHz, null).low > clean);
+        Assert.True(Roughness(mode, bandwidthHz, null, impulses: true).low > clean);
+        // A weak signal with speech on it (10 dB over the noise) and a strong one never look like noise.
+        Assert.True(Roughness(mode, bandwidthHz, 10).high < limit);
+        Assert.True(Roughness(mode, bandwidthHz, 40).high < clean);
+    }
+
+    [Fact]
+    public void BroadcastFmHasNoRoughnessTest()
+    {
+        var rx = new ChannelReceiver(240000);
+        rx.Configure(Mode.Wfm, BandPlan.Wfm);
+        Assert.Equal(0, rx.RoughnessLimit);
+        Assert.Equal(0, rx.Roughness);
+    }
+
+    [Fact]
     public void BandPlanKnowsTheCommonBandsAndBlocksCellular()
     {
         Assert.Equal(Mode.Am, BandPlan.Find(121.5e6).Mode);

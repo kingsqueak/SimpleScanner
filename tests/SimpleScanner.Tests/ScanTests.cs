@@ -10,6 +10,8 @@ internal sealed class FakeSource : IIqSource
     private volatile bool _run, _retuned;
     private double _center;
     public double CarrierHz;                 // 0 for none
+    public double Noise = 1e-4;              // peak to peak, in each of I and Q
+    public volatile bool NeverSaysRetuned;   // the word that the radio has retuned gets lost
     public int Tunes;
 
     public string Description => "fake";
@@ -67,13 +69,14 @@ internal sealed class FakeSource : IIqSource
         {
             double offset = Volatile.Read(ref CarrierHz) - CenterHz;
             bool carrier = CarrierHz != 0 && Math.Abs(offset) < SampleRate / 2;
+            double noise = Volatile.Read(ref Noise);
             for (int k = 0; k < n; k++, sample++)
             {
                 double ph = 2 * Math.PI * offset * sample / SampleRate;
-                re[k] = (float)((carrier ? 0.05 * Math.Cos(ph) : 0) + 1e-4 * (rng.NextDouble() - 0.5));
-                im[k] = (float)((carrier ? 0.05 * Math.Sin(ph) : 0) + 1e-4 * (rng.NextDouble() - 0.5));
+                re[k] = (float)((carrier ? 0.05 * Math.Cos(ph) : 0) + noise * (rng.NextDouble() - 0.5));
+                im[k] = (float)((carrier ? 0.05 * Math.Sin(ph) : 0) + noise * (rng.NextDouble() - 0.5));
             }
-            bool retuned = _retuned;
+            bool retuned = _retuned && !NeverSaysRetuned;
             _retuned = false;
             Samples?.Invoke(re, im, retuned);
             while (clock.Elapsed.TotalSeconds < sample / SampleRate) Thread.Sleep(0);
@@ -270,5 +273,56 @@ public class ScanTests
             Assert.Null(back.Find(100e6));
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void WithAutoSquelchTheScanPassesNoiseAboveTheSquelchLevelAndStillStopsOnACarrier()
+    {
+        // Noise 20 dB over the squelch level on every channel, as on a noisy band.
+        var source = new FakeSource { Noise = 0.3 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6)
+            { SquelchDb = -60, ScanHangSeconds = 0.2, AutoSquelch = true };
+        ScanChannel[] list =
+        [
+            new("one", 33.0e6, Mode.Nfm, BandPlan.NfmWide), new("two", 33.1e6, Mode.Nfm, BandPlan.NfmWide),
+            new("three", 33.4e6, Mode.Nfm, BandPlan.NfmWide), new("four", 39.0e6, Mode.Nfm, BandPlan.NfmWide),
+        ];
+        rx.Start();
+        rx.StartScan(list);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.Elapsed.TotalSeconds < 1.0)
+        {
+            Assert.False(rx.ScanListening, "stopped on noise");
+            Thread.Sleep(2);
+        }
+        Assert.True(rx.ScanPasses >= 3, $"only {rx.ScanPasses} passes in a second");
+
+        // A carrier 14 dB over that noise: it stops there.
+        source.CarrierHz = 33.4e6;
+        Assert.True(Wait(() => rx.ScanListening, 2), "did not stop on the carrier");
+        Assert.Equal("three", rx.ScanChannel?.Name);
+        source.CarrierHz = 0;
+        Assert.True(Wait(() => !rx.ScanListening, 2), "did not leave when the carrier went");
+
+        // Without it the level alone decides, and the noise holds the scan.
+        rx.AutoSquelch = false;
+        Assert.True(Wait(() => rx.ScanListening, 2), "the plain squelch should open on this noise");
+        rx.Stop();
+    }
+
+    [Fact]
+    public void TheScanCarriesOnWhenWordOfARetuneIsLost()
+    {
+        var source = new FakeSource();
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60 };
+        ScanChannel[] list = [new("one", 120.0e6, Mode.Am, BandPlan.AmAir), new("two", 130.0e6, Mode.Am, BandPlan.AmAir)];
+        rx.Start();
+        rx.StartScan(list);
+        Assert.True(Wait(() => rx.ScanPasses >= 3, 2));
+        source.NeverSaysRetuned = true;
+        Thread.Sleep(100);
+        long before = rx.ScanPasses;
+        Assert.True(Wait(() => rx.ScanPasses >= before + 2, 6), "the scan stalled waiting for the retune");
+        rx.Stop();
     }
 }

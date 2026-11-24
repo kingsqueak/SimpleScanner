@@ -123,6 +123,8 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isMini;
     [ObservableProperty] private double _squelchDb;
     [ObservableProperty] private bool _squelchOn;
+    /// <summary>The squelch also stays shut on noise above its level.</summary>
+    [ObservableProperty] private bool _autoSquelch;
     [ObservableProperty] private bool _autoGain;
     [ObservableProperty] private double _gainStep;
     [ObservableProperty] private double _maxGainStep = 27;
@@ -178,6 +180,7 @@ public sealed partial class MainViewModel : ObservableObject
         Volume = settings.Volume * 100;
         SquelchDb = settings.SquelchOn ? Math.Max(settings.SquelchDb, SquelchOffDb) : SquelchOffDb;
         SquelchOn = SquelchDb > SquelchOffDb;
+        AutoSquelch = settings.AutoSquelch;
         StereoOn = settings.Stereo;
         AutoGain = settings.AutoGain;
         GainStep = settings.GainStep;
@@ -193,6 +196,7 @@ public sealed partial class MainViewModel : ObservableObject
         _isMini = settings.Mini;
         _rx.SquelchDb = SquelchDb;
         _rx.SquelchEnabled = SquelchOn;
+        _rx.AutoSquelch = AutoSquelch;
         _rx.LevelOffsetDb = settings.LevelOffsetDb;
         ApplyFrequency(settings.BandwidthHz);
         RefreshMemories(settings.Groups ?? (settings.Group is { } g && g != AllGroups ? [g] : []));
@@ -770,6 +774,15 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ToggleAutoSquelch() => AutoSquelch = !AutoSquelch;
+
+    partial void OnAutoSquelchChanged(bool value)
+    {
+        _rx.AutoSquelch = value;
+        _dirty = true;
+    }
+
+    [RelayCommand]
     private void ToggleStereo() => StereoOn = !StereoOn;
 
     partial void OnSquelchOnChanged(bool value)
@@ -917,6 +930,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.Volume = Volume / 100;
         _settings.SquelchDb = SquelchDb;
         _settings.SquelchOn = SquelchOn;
+        _settings.AutoSquelch = AutoSquelch;
         _settings.Stereo = StereoOn;
         _settings.AutoGain = AutoGain;
         _settings.GainStep = (int)Math.Round(GainStep);

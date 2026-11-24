@@ -3,11 +3,15 @@
 //   rsp-bench                          sample throughput and retune times
 //   rsp-bench listen <MHz> [seconds] [squelch dB] [file]
 //                                      run the receiver on a frequency and print its level each second;
-//                                      the file takes the audio as raw 48 kHz 32-bit float, stereo
+//                                      the file takes the audio as raw 48 kHz 32-bit float, stereo;
+//                                      the word "auto" anywhere switches the auto (noise) squelch on
 using System.Diagnostics;
 using SimpleScanner;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio.SdrPlay;
+
+bool autoSquelch = args.Contains("auto"), fast = args.Contains("fast");
+args = args.Where(a => a != "auto" && a != "fast").ToArray();
 
 if (args.Length >= 2 && args[0] == "listen")
 {
@@ -18,6 +22,7 @@ if (args.Length >= 2 && args[0] == "listen")
     rx.SetMode(band.Mode, band.BandwidthHz);
     rx.FrequencyHz = mhz * 1e6;
     rx.SquelchDb = args.Length > 3 ? double.Parse(args[3]) : -200;
+    rx.AutoSquelch = autoSquelch;
     rx.Volume = 1;
     // A fifth argument names a file to take the audio as raw 48 kHz 32-bit float.
     using var capture = args.Length > 4 ? File.Create(args[4]) : null;
@@ -26,11 +31,12 @@ if (args.Length >= 2 && args[0] == "listen")
     rx.Start();
     Console.WriteLine($"sound devices: {string.Join(" | ", SimpleScanner.Audio.AudioOut.Devices())}");
     Console.WriteLine($"{rx.Source.Description}: {mhz} MHz, {band.Name}, {band.Mode} {band.BandwidthHz / 1000} kHz");
-    for (int s = 0; s < seconds; s++)
+    // "fast": ten reports a second, with how many times the squelch shut in between.
+    for (int s = 0; s < seconds * (fast ? 10 : 1); s++)
     {
-        Thread.Sleep(1000);
+        Thread.Sleep(fast ? 100 : 1000);
         var src = rx.Source;
-        Console.WriteLine($"  level {rx.LevelDb,7:F1} dB  squelch {(rx.SquelchOpen ? "open  " : "closed")}  LNA {src.ActiveGainStep}/{src.MaxGainStep}  gain {src.GainDb:F1} dB  overload {src.Overloaded}  underruns {rx.AudioUnderruns}{(rx.Stereo ? "  STEREO" : "")}");
+        Console.WriteLine($"  level {rx.LevelDb,7:F1} dB  squelch {(rx.SquelchOpen ? "open  " : "closed")}  roughness {rx.Roughness,7:G4} (limit {rx.RoughnessLimit:G4})  LNA {src.ActiveGainStep}/{src.MaxGainStep}  gain {src.GainDb:F1} dB  overload {src.Overloaded}  underruns {rx.AudioUnderruns}{(rx.Stereo ? "  STEREO" : "")}");
     }
     rx.Stop();
     return;
@@ -89,11 +95,14 @@ if (args.Length >= 3 && args[0] == "hunt")
 
 if (args.Length >= 1 && args[0] == "scan")
 {
-    // rsp-bench scan [seconds] [squelch dB]: scan the ticked stored channels and report.
+    // rsp-bench scan [seconds] [squelch dB] [from MHz] [to MHz]: scan the ticked stored channels
+    // (those in the range, if one is given) and report.
+    double scanLo = args.Length > 4 ? double.Parse(args[3]) * 1e6 : 0, scanHi = args.Length > 4 ? double.Parse(args[4]) * 1e6 : double.MaxValue;
     int seconds = args.Length > 1 ? int.Parse(args[1]) : 10;
     using var rx = new Receiver(new SdrPlaySource(), playAudio: false);
     rx.SquelchDb = args.Length > 2 ? double.Parse(args[2]) : -95;
-    var list = MemoryStore.Load().Channels.Where(c => c.Scan).Select(c =>
+    rx.AutoSquelch = autoSquelch;
+    var list = MemoryStore.Load().Channels.Where(c => c.Scan && c.FrequencyHz >= scanLo && c.FrequencyHz <= scanHi).Select(c =>
     {
         var band = BandPlan.Find(c.FrequencyHz);
         return new ScanChannel(c.Name, c.FrequencyHz, c.Mode ?? band.Mode, c.BandwidthHz ?? band.BandwidthHz);
@@ -101,7 +110,7 @@ if (args.Length >= 1 && args[0] == "scan")
     rx.Start();
     Thread.Sleep(1500);                      // let the gain settle
     rx.StartScan(list);
-    Console.WriteLine($"{rx.Source.Description} at {rx.SampleRate / 1e6} MS/s: {list.Count} channels in {rx.ScanWindows} windows, squelch {rx.SquelchDb} dB");
+    Console.WriteLine($"{rx.Source.Description} at {rx.SampleRate / 1e6} MS/s: {list.Count} channels in {rx.ScanWindows} windows, squelch {rx.SquelchDb} dB{(autoSquelch ? ", auto" : "")}");
     var sw = Stopwatch.StartNew();
     string last = "";
     long lastPasses = 0;

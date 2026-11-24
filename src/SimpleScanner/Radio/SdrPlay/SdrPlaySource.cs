@@ -339,8 +339,8 @@ public sealed unsafe class SdrPlaySource : IIqSource
             _i[k] = xi[k] * scale;
             _q[k] = xq[k] * scale;
         }
-        bool retuned = _announceRetune;
-        _announceRetune = false;
+        // In one step: another thread may set it between a read and a clear, and it would be lost.
+        bool retuned = Interlocked.Exchange(ref _announceRetune, false);
         Samples?.Invoke(_i.AsSpan(0, n), _q.AsSpan(0, n), retuned);
     }
 

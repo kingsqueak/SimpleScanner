@@ -25,6 +25,8 @@ public sealed class Settings
     public double Volume { get; set; } = 0.5;
     public double SquelchDb { get; set; } = -100;
     public bool SquelchOn { get; set; } = true;
+    /// <summary>Keep the squelch shut on noise that is above its level (the Auto button).</summary>
+    public bool AutoSquelch { get; set; }
     /// <summary>Decode stereo on broadcast FM stations that send it.</summary>
     public bool Stereo { get; set; } = true;
     public bool AutoGain { get; set; } = true;

@@ -55,6 +55,9 @@ public sealed class Receiver : IDisposable
     private double _frequencyHz = 162_400_000, _offsetHz = ScanPlan.SingleOffsetHz, _volume = 0.5, _level = -140;
     private bool _blocked, _squelchOpen;
     private volatile bool _flushUntilRetuned;
+    private bool _retunedUnsaid;            // on the radio's thread only
+    private double _flushedSeconds;
+    private const double FlushLongestSeconds = 0.8;
     private float _gain;
     private float[] _left = [], _right = [], _frames = [];
     private static readonly float[] Silence = new float[2 * Cushion];
@@ -185,6 +188,27 @@ public sealed class Receiver : IDisposable
         set => _squelch.Enabled = value;
     }
 
+    /// <summary>
+    /// Noise squelch on top of the level: stay shut on noise that is above the squelch level, as
+    /// on a noisy band. Works in narrow FM (digital voice included) and AM; broadcast FM goes by level alone.
+    /// </summary>
+    public bool AutoSquelch
+    {
+        get => _squelch.Auto;
+        set => _squelch.Auto = value;
+    }
+
+    /// <summary>What the auto squelch goes by, and the most it lets through: see <see cref="ChannelReceiver.Roughness"/>.</summary>
+    public double Roughness => _channel.Roughness;
+    public double RoughnessLimit => _channel.RoughnessLimit;
+
+    // The channel moved: what the squelch and the noise measure have seen is of the old one.
+    private void ResetSquelch()
+    {
+        _squelch.Reset();
+        _channel.ResetRoughness();
+    }
+
     /// <summary>A broadcast FM station is being received in stereo.</summary>
     public bool Stereo => _channel.Stereo;
 
@@ -236,7 +260,7 @@ public sealed class Receiver : IDisposable
         if (mode == _channel.Mode && bandwidthHz == _channel.BandwidthHz) return;
         _channel.Configure(mode, bandwidthHz);
         _blocked = BandPlan.IsBlocked(_frequencyHz, bandwidthHz);
-        _squelch.Reset();
+        ResetSquelch();
         ResetDigitalLocked();
     }
 
@@ -259,7 +283,7 @@ public sealed class Receiver : IDisposable
     {
         _frequencyHz = hz;
         _blocked = BandPlan.IsBlocked(hz, _channel.BandwidthHz);
-        _squelch.Reset();
+        ResetSquelch();
         ResetDigitalLocked();
         double offset = hz - _source.CenterHz;
         if (IsRunning && ScanPlan.Fits(offset, _channel.BandwidthHz, _source.UsableBandwidthHz))
@@ -493,7 +517,7 @@ public sealed class Receiver : IDisposable
         _blocked = false;
         _offsetHz = ch.FrequencyHz - _source.CenterHz;
         _channel.SetOffset(_offsetHz);
-        _squelch.Reset();
+        ResetSquelch();
         ResetDigitalLocked();
         _scan = ScanState.Settle;
         _scanTimer = 0;
@@ -512,7 +536,7 @@ public sealed class Receiver : IDisposable
                 {
                     _scan = ScanState.Look;
                     _scanTimer = 0;
-                    _squelch.Reset();
+                    ResetSquelch();
                 }
                 return false;
             case ScanState.Look:
@@ -525,8 +549,8 @@ public sealed class Receiver : IDisposable
                     _scanHeardVoice = false;
                     return true;
                 }
-                // Nothing there after all: move on. Something there: give the squelch time to make up its mind.
-                if (_scanTimer >= (_scanSawSignal ? LookLongestSeconds : LookSeconds)) NextCandidateLocked();
+                // Nothing there after all, or only noise: move on. Something there: give the squelch time to make up its mind.
+                if (_scanTimer >= (_scanSawSignal && !_squelch.Noisy ? LookLongestSeconds : LookSeconds)) NextCandidateLocked();
                 return false;
             case ScanState.Listen:
                 // A digital signal with nothing to listen to (a control channel, a repeater sending idle bursts,
@@ -568,7 +592,7 @@ public sealed class Receiver : IDisposable
             _offsetHz = ScanPlan.SingleOffsetHz;
             _channel.SetOffset(_offsetHz);
             _flushUntilRetuned = false;
-            _squelch.Reset();
+            ResetSquelch();
             _source.Start(_rate, _frequencyHz - _offsetHz);
         }
         catch
@@ -616,11 +640,15 @@ public sealed class Receiver : IDisposable
         float[] data = ArrayPool<float>.Shared.Rent(2 * n);
         i.CopyTo(data);
         q.CopyTo(data.AsSpan(n));
-        try
-        {
-            if (!queue.TryAdd(new Block(data, n, retuned))) ArrayPool<float>.Shared.Return(data);
-        }
-        catch (InvalidOperationException) { ArrayPool<float>.Shared.Return(data); }
+        // A block that finds the queue full is dropped. If it was the one that says the radio has
+        // retuned, the next one says so in its place: lose that and the DSP thread, which throws
+        // blocks away until it sees it, would wait for ever.
+        retuned |= _retunedUnsaid;
+        bool added = false;
+        try { added = queue.TryAdd(new Block(data, n, retuned)); }
+        catch (InvalidOperationException) { }
+        _retunedUnsaid = retuned && !added;
+        if (!added) ArrayPool<float>.Shared.Return(data);
     }
 
     private void Run(BlockingCollection<Block> queue)
@@ -680,9 +708,19 @@ public sealed class Receiver : IDisposable
             if (block.Retuned)
             {
                 _flushUntilRetuned = false;
-                _squelch.Reset();
+                _flushedSeconds = 0;
+                ResetSquelch();
             }
-            else if (_flushUntilRetuned) return;
+            else if (_flushUntilRetuned)
+            {
+                // The radio answers in milliseconds (and gives up by itself in half a second). If
+                // word of the retune has not come by now it was lost: carry on rather than stall.
+                _flushedSeconds += block.Count / _rate;
+                if (_flushedSeconds < FlushLongestSeconds) return;
+                _flushUntilRetuned = false;
+                _flushedSeconds = 0;
+                ResetSquelch();
+            }
 
             int n = block.Count;
             double seconds = n / _rate;
@@ -706,7 +744,7 @@ public sealed class Receiver : IDisposable
             // The meter falls slowly and rises at once, like a scanner's bar.
             double shown = Volatile.Read(ref _level);
             Volatile.Write(ref _level, level > shown ? level : shown + 0.1 * (level - shown));
-            open = _squelch.Update(level, seconds) && !_blocked;
+            open = _squelch.Update(level, seconds, _channel.Roughness, _channel.RoughnessLimit) && !_blocked;
             if (_scan != ScanState.Off) open = ScanStepLocked(level, open, seconds);
             _squelchOpen = open;
             if ((_p25 is not null || _dmr is not null || _nxdn is not null || _dstar is not null || _ysf is not null) && count > 0) DigitalLocked(open, count);

@@ -199,7 +199,8 @@
                             ToolTip.Tip="Silence the speaker without touching the volume. Press again for sound." />
                   </StackPanel>
                 </WrapPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <!-- Pulled up: a slider keeps room above and below itself for tick marks it does not have -->
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,-22,0,0">
                   <TextBlock Text="Squelch" Classes="label" Classes.off="{Binding !SquelchOn}" />
                   <Slider Minimum="-140" Maximum="-40" Value="{Binding SquelchDb}" Width="200"
                           ToolTip.Tip="Squelch level: set the green mark just above the bar's resting level. All the way left is squelch off." />

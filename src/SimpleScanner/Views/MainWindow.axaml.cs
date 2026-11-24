@@ -96,6 +96,12 @@ public partial class MainWindow : Window
     {
         // Lists and choosers inside the tabs send this event up too.
         if (!ReferenceEquals(e.Source, Tabs)) return;
+        if (ReferenceEquals(Tabs.SelectedItem, HelpTab))
+        {
+            Tabs.SelectedIndex = _tab;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => OpenHelp());
+            return;
+        }
         if (!ReferenceEquals(Tabs.SelectedItem, MemoryTab))
         {
             _tab = Tabs.SelectedIndex;
@@ -106,6 +112,21 @@ public partial class MainWindow : Window
         Tabs.SelectedIndex = _tab;
         // After the click is over, so the main window does not take the focus back from the editor.
         Avalonia.Threading.Dispatcher.UIThread.Post(OpenChannels);
+    }
+
+    private HelpWindow? _help;
+
+    /// <summary>Open the Help, or bring it forward if it is already open; at this section, when one is named.</summary>
+    public void OpenHelp(string? section = null)
+    {
+        if (_help is null)
+        {
+            _help = new HelpWindow();
+            _help.Closed += (_, _) => _help = null;
+            _help.Show(this);
+        }
+        else _help.Activate();
+        if (section is not null) _help.Show(section);
     }
 
     /// <summary>Open the channel editor, or bring it forward if it is already open.</summary>

@@ -46,6 +46,9 @@ digital voice modes, and several radios at once.
   repeater) and the digital group ID. A transmission can be joined at any frame
 - Encrypted calls are shown and stay silent
 - Cellular telephone bands are blocked
+- A Help window (the Help tab, or the application menu on macOS): getting started, every tab, the two
+  ways of loading from RadioReference, several radios, and the hardware. Its text is
+  `src/SimpleScanner/Assets/help.md`
 
 Not yet: trunk following, P25 Phase 2. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
 the scan stops on. Trunked-system frequencies in a download are stored unticked.

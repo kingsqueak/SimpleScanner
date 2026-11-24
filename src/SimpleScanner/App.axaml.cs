@@ -10,7 +10,12 @@ namespace SimpleScanner;
 
 public partial class App : Application
 {
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        // The name macOS shows in the menu bar and in "Hide" and "Quit"; without it, "Avalonia Application".
+        Name = AppInfo.Title;
+        AvaloniaXamlLoader.Load(this);
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -39,6 +44,12 @@ public partial class App : Application
             var window = new MainWindow { DataContext = vm };
             window.RestorePlace();
             desktop.MainWindow = window;
+            // The application's own menu on macOS, in place of "About Avalonia".
+            var about = new NativeMenuItem($"About {AppInfo.Name}");
+            about.Click += (_, _) => window.OpenHelp("About");
+            var help = new NativeMenuItem($"{AppInfo.Name} Help");
+            help.Click += (_, _) => window.OpenHelp();
+            NativeMenu.SetMenu(this, new NativeMenu { Items = { about, help } });
             desktop.ShutdownRequested += (_, _) =>
             {
                 window.KeepPlace();

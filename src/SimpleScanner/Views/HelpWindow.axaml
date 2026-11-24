@@ -1,0 +1,28 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SimpleScanner.Views.HelpWindow"
+        Icon="avares://SimpleScanner/Assets/icon.png"
+        Title="SimpleScanner Help" Width="900" Height="680" MinWidth="620" MinHeight="380"
+        WindowStartupLocation="CenterOwner">
+  <DockPanel Margin="12">
+    <!-- The sections, and under them which version this is -->
+    <DockPanel DockPanel.Dock="Left" Width="200" Margin="0,0,12,0">
+      <TextBlock x:Name="VersionText" DockPanel.Dock="Bottom" Classes="label" Margin="4,8,0,0" />
+      <ListBox x:Name="Sections" Background="{DynamicResource PanelBg}" CornerRadius="8" SelectionChanged="OnSectionChanged">
+        <ListBox.Styles>
+          <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+          </Style>
+        </ListBox.Styles>
+      </ListBox>
+    </DockPanel>
+    <!-- The section chosen -->
+    <Border Background="{DynamicResource PanelBg}" CornerRadius="8">
+      <ScrollViewer x:Name="Scroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel x:Name="Body" Margin="22,16,26,22" Spacing="8" MaxWidth="720" HorizontalAlignment="Left" />
+      </ScrollViewer>
+    </Border>
+  </DockPanel>
+</Window>

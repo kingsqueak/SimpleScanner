@@ -426,6 +426,10 @@
           </StackPanel>
         </Grid>
       </TabItem>
+
+      <!-- Not a page either: choosing it opens the Help window -->
+      <TabItem x:Name="HelpTab" Header="Help"
+               ToolTip.Tip="Open the Help: getting started, every tab explained, RadioReference, several radios and the hardware" />
     </TabControl>
     </Panel>
   </DockPanel>

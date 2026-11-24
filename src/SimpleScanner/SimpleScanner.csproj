@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Product>SimpleScanner</Product>
     <ApplicationIcon>Assets/icon.ico</ApplicationIcon>
   </PropertyGroup>
@@ -23,6 +23,8 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/icon.png" />
+    <!-- The Help text, read by Help.Load -->
+    <EmbeddedResource Include="Assets/help.md" LogicalName="SimpleScanner.help.md" />
   </ItemGroup>
 
   <ItemGroup>

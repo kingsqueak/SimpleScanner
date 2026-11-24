@@ -167,6 +167,9 @@
                     ToolTip.Tip="Scan the ticked channels of the groups shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
             <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}"
                     IsEnabled="{Binding IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
+            <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}"
+                    IsEnabled="{Binding IsScanning}"
+                    ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings. Closing the app clears every avoid." />
           </WrapPanel>
           </Grid>
 
@@ -262,7 +265,7 @@
       </TabItem>
 
       <TabItem Header="Settings">
-        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="44,*" Margin="2,12,0,0" RowSpacing="12" ColumnSpacing="12">
+        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="44,*" Margin="2,12,0,0" RowSpacing="12" ColumnSpacing="12">
           <!-- Sound device and radio -->
           <TextBlock Grid.Row="0" Grid.Column="0" Text="Output" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
           <WrapPanel Grid.Row="0" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
@@ -284,6 +287,14 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
               <TextBlock Text="Antenna" Classes="label" Margin="14,0,0,0" />
               <ComboBox ItemsSource="{Binding Antennas}" SelectedItem="{Binding SelectedAntenna}" Width="130" />
+            </StackPanel>
+          </WrapPanel>
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+          <WrapPanel Grid.Row="2" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="Avoid Timer" Classes="label" />
+              <ComboBox ItemsSource="{Binding AvoidTimes}" SelectedItem="{Binding SelectedAvoidTime}" Width="130"
+                        ToolTip.Tip="How long the Avoid button keeps a frequency out of the scan. Full session is until the app is closed. A change applies to frequencies avoided from then on." />
             </StackPanel>
           </WrapPanel>
         </Grid>

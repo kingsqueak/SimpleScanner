@@ -169,6 +169,37 @@ public class ScanTests
         rx.Stop();
     }
 
+    [Fact]
+    public void AnAvoidedChannelStaysOutOfLaterScansUntilItsTimeIsUp()
+    {
+        var source = new FakeSource { CarrierHz = 121.75e6 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60 };
+        ScanChannel[] list = [new("a", 121.65e6, Mode.Am, BandPlan.AmAir), new("b", 121.75e6, Mode.Am, BandPlan.AmAir)];
+        rx.Start();
+        rx.StartScan(list);
+        Assert.True(Wait(() => rx.ScanListening, 2));
+        Assert.Equal("b", rx.AvoidChannel()?.Name);
+        Assert.Equal(1, rx.AvoidedCount);
+        Thread.Sleep(300);
+        Assert.False(rx.ScanListening);
+        // A skip is forgotten when the scan is started again; an avoid is not.
+        rx.StopScan();
+        rx.StartScan(list);
+        Thread.Sleep(300);
+        Assert.False(rx.ScanListening);
+        Assert.True(rx.Scanning);
+        // With a short timer the channel comes back by itself.
+        rx.ClearAvoided();
+        Assert.True(Wait(() => rx.ScanListening, 2));
+        rx.AvoidTime = TimeSpan.FromSeconds(0.5);
+        Assert.NotNull(rx.AvoidChannel());
+        Thread.Sleep(200);
+        Assert.False(rx.ScanListening);
+        Assert.True(Wait(() => rx.ScanListening, 2));
+        Assert.Equal(0, rx.AvoidedCount);
+        rx.Stop();
+    }
+
     private static readonly double[] Airband =
     [
         118.25, 120.6, 121.3, 121.65, 121.75, 121.9, 124.725, 124.9, 127.2, 128.8, 132.225, 133.0, 134.75, 135.9,

@@ -83,6 +83,9 @@ public sealed partial class MainViewModel : ObservableObject
         new("10 kHz", 10000), new("12.5 kHz", 12500), new("25 kHz", 25000), new("100 kHz", 100000), new("1 MHz", 1e6),
     ];
 
+    /// <summary>How long Avoid keeps a frequency out of the scan, in minutes; 0 is until the app is closed.</summary>
+    public IReadOnlyList<Choice> AvoidTimes { get; } = [new("30 min", 30), new("1 hr", 60), new("Full session", 0)];
+
     private static readonly Choice[] AmWidths = [new("8.33 kHz channel", BandPlan.AmAir833), new("25 kHz channel", BandPlan.AmAir)];
     private static readonly Choice[] NfmWidths = [new("12.5 kHz channel", BandPlan.NfmNarrow), new("25 kHz channel", BandPlan.NfmWide)];
     private static readonly Choice[] WfmWidths = [new("Broadcast", BandPlan.Wfm)];
@@ -120,6 +123,7 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private IReadOnlyList<Choice> _widths = NfmWidths;
     [ObservableProperty] private Choice? _selectedWidth;
     [ObservableProperty] private Choice _selectedStep;
+    [ObservableProperty] private Choice _selectedAvoidTime;
     [ObservableProperty] private IReadOnlyList<string> _antennas;
     [ObservableProperty] private string _selectedAntenna;
     [ObservableProperty] private bool _isScanning;
@@ -142,7 +146,7 @@ public sealed partial class MainViewModel : ObservableObject
     public System.Collections.ObjectModel.ObservableCollection<GroupRow> AutoGroupRows { get; } = [];
     [ObservableProperty] private bool _hasUserGroups;
     [ObservableProperty] private bool _hasAutoGroups;
-    public string ScanText => IsScanning ? "Stop scan" : "Scan";
+    public string ScanText => IsScanning ? "Stop" : "Scan";
 
     public bool IsAm => !AutoMode && Mode == Mode.Am;
     public bool IsNfm => !AutoMode && Mode == Mode.Nfm;
@@ -158,6 +162,8 @@ public sealed partial class MainViewModel : ObservableObject
         _antennas = _rx.Source.Antennas;
         _selectedAntenna = _antennas.Contains(settings.Antenna) ? settings.Antenna : _antennas[0];
         _selectedStep = Steps.FirstOrDefault(s => Math.Abs(s.Value - settings.StepHz) < 0.5) ?? Steps[0];
+        _selectedAvoidTime = AvoidTimes.FirstOrDefault(a => (int)a.Value == settings.AvoidMinutes) ?? AvoidTimes[0];
+        _rx.AvoidTime = AvoidSpan(_selectedAvoidTime);
         Volume = settings.Volume * 100;
         SquelchDb = settings.SquelchDb;
         SquelchOn = settings.SquelchOn;
@@ -555,6 +561,27 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SkipChannel() => _rx.SkipChannel();
 
+    /// <summary>
+    /// Leave the channel the scan has stopped on and keep its frequency out of scans and searches
+    /// for the Avoid Timer chosen in Settings. Nothing is stored: closing the app clears them all.
+    /// </summary>
+    [RelayCommand]
+    private void AvoidChannel()
+    {
+        if (_rx.AvoidChannel() is not { } ch) return;
+        string howLong = SelectedAvoidTime.Value > 0 ? $"for {SelectedAvoidTime.Label}" : "until the app is closed";
+        Status = $"Avoiding {(ch.FrequencyHz / 1e6).ToString("0.0000", CultureInfo.InvariantCulture)} MHz {howLong} ({_rx.AvoidedCount} avoided)";
+    }
+
+    private static TimeSpan? AvoidSpan(Choice choice) => choice.Value > 0 ? TimeSpan.FromMinutes(choice.Value) : null;
+
+    /// <summary>A change of timer applies to what is avoided from now on; those already avoided keep the time they had.</summary>
+    partial void OnSelectedAvoidTimeChanged(Choice value)
+    {
+        _rx.AvoidTime = AvoidSpan(value);
+        _dirty = true;
+    }
+
     /// <summary>Show what the receiver is on now, without tuning it: the scan moves it, not us.</summary>
     private void ShowTuned()
     {
@@ -813,6 +840,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.Mode = Mode;
         _settings.BandwidthHz = SelectedWidth?.Value ?? _settings.BandwidthHz;
         _settings.StepHz = SelectedStep.Value;
+        _settings.AvoidMinutes = (int)SelectedAvoidTime.Value;
         _settings.Volume = Volume / 100;
         _settings.SquelchDb = SquelchDb;
         _settings.SquelchOn = SquelchOn;

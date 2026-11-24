@@ -31,6 +31,8 @@ public sealed class Settings
     public string? AudioDevice { get; set; }
     /// <summary>Widths of the channel editor's columns that the user has changed, by column key.</summary>
     public Dictionary<string, double>? ChannelColumns { get; set; }
+    /// <summary>Minutes an avoided frequency stays out of the scan; 0 is until the app is closed.</summary>
+    public int AvoidMinutes { get; set; } = 30;
     public double SearchFromMHz { get; set; } = 144;
     public double SearchToMHz { get; set; } = 148;
 

@@ -76,6 +76,10 @@ public sealed class Receiver : IDisposable
     private IReadOnlyList<ScanChannel> _scanList = [];
     private List<ScanWindow> _plan = [];
     private double[] _skipUntil = [];
+    // Frequencies the user has asked to avoid (in units of 100 Hz), and when each comes back, by
+    // Environment.TickCount64. Kept from one scan to the next, and gone when the app closes.
+    private readonly Dictionary<long, long> _avoided = [];
+    private long[] _avoidUntil = [];
     private readonly Queue<int> _candidates = new();
     private ScanState _scan;
     private int _window, _scanIndex = -1, _surveySkip, _fftFill, _surveyCount;
@@ -283,6 +287,17 @@ public sealed class Receiver : IDisposable
     public double SilentDigitalLookSeconds { get; set; } = 0.4;
     /// <summary>How long a skipped channel is passed by.</summary>
     public double ScanSkipSeconds { get; set; } = 10;
+    /// <summary>How long an avoided frequency is left out of scans and searches; null is until the app closes.</summary>
+    public TimeSpan? AvoidTime { get; set; } = TimeSpan.FromMinutes(30);
+    /// <summary>Frequencies being avoided now.</summary>
+    public int AvoidedCount
+    {
+        get
+        {
+            long now = Environment.TickCount64;
+            lock (_cfg) return _avoided.Values.Count(until => until > now);
+        }
+    }
     public bool Scanning => _scan != ScanState.Off;
     /// <summary>The scan is stopped on an active channel.</summary>
     public bool ScanListening => _scan == ScanState.Listen;
@@ -316,6 +331,9 @@ public sealed class Receiver : IDisposable
             if (_scanList.Count == 0) return;
             _plan = ScanPlan.Build(_scanList, _source.UsableBandwidthHz);
             _skipUntil = new double[_scanList.Count];
+            _avoidUntil = new long[_scanList.Count];
+            for (int i = 0; i < _scanList.Count; i++)
+                _avoided.TryGetValue(AvoidKey(_scanList[i].FrequencyHz), out _avoidUntil[i]);
             _acc = new double[_scanList.Count];
             _squelch.Enabled = true;
             _scanClock = 0;
@@ -341,6 +359,36 @@ public sealed class Receiver : IDisposable
             NextCandidateLocked();
         }
     }
+
+    /// <summary>
+    /// Leave the channel the scan has stopped on, and keep it out of this scan and later ones
+    /// for <see cref="AvoidTime"/>. Returns the channel avoided, or null if the scan was not on one.
+    /// </summary>
+    public ScanChannel? AvoidChannel()
+    {
+        lock (_cfg)
+        {
+            if (_scan is ScanState.Off or ScanState.Survey || _scanIndex < 0) return null;
+            var ch = _scanList[_scanIndex];
+            long until = AvoidTime is { } t ? Environment.TickCount64 + (long)t.TotalMilliseconds : long.MaxValue;
+            _avoided[AvoidKey(ch.FrequencyHz)] = until;
+            _avoidUntil[_scanIndex] = until;
+            NextCandidateLocked();
+            return ch;
+        }
+    }
+
+    /// <summary>Put every avoided frequency back in the scan.</summary>
+    public void ClearAvoided()
+    {
+        lock (_cfg)
+        {
+            _avoided.Clear();
+            Array.Clear(_avoidUntil);
+        }
+    }
+
+    private static long AvoidKey(double frequencyHz) => (long)Math.Round(frequencyHz / 100);
 
     private void NextWindowLocked()
     {
@@ -406,12 +454,13 @@ public sealed class Receiver : IDisposable
 
             // Which channels are above the squelch level? Strongest first.
             double gain = _source.GainDb, best = -140;
+            long now = Environment.TickCount64;
             var found = new List<(double level, int index)>();
             foreach (int c in w.Channels)
             {
                 double level = 10 * Math.Log10(_acc[c] / (SurveyFrames * _fftNorm) + 1e-14) - gain + LevelOffsetDb;
                 best = Math.Max(best, level);
-                if (level >= _squelch.ThresholdDb && _scanClock >= _skipUntil[c]) found.Add((level, c));
+                if (level >= _squelch.ThresholdDb && _scanClock >= _skipUntil[c] && now >= _avoidUntil[c]) found.Add((level, c));
             }
             double shown = Volatile.Read(ref _level);
             Volatile.Write(ref _level, best > shown ? best : shown + 0.3 * (best - shown));

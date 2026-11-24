@@ -88,6 +88,10 @@ public partial class MainWindow : Window
     private int _tab;
 
     /// <summary>The Memory Mgr tab is a button in the tab strip: it opens the channel editor and the tab that was showing comes back.</summary>
+    // Operate's right-hand column: the user groups have up to half of it, so the active frequencies under them stay in view.
+    private void OnGroupsColumnSized(object? sender, SizeChangedEventArgs e) =>
+        GroupsScroll.MaxHeight = Math.Max(60, e.NewSize.Height * 0.5 - 20);
+
     private void OnTabChanged(object? sender, SelectionChangedEventArgs e)
     {
         // Lists and choosers inside the tabs send this event up too.

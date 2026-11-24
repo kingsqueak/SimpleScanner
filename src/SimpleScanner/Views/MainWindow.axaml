@@ -96,11 +96,12 @@
         <DockPanel>
           <!-- The user groups again, at the right: the same rows as on Scan Groups, so a tick here is a tick there -->
           <Border DockPanel.Dock="Right" Width="230" Margin="12,10,0,0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
-            <DockPanel>
-              <TextBlock DockPanel.Dock="Top" Text="{Binding GroupsTitle}" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
+            <!-- The groups take what they need, up to half the column (set in the code behind); the frequencies have the rest -->
+            <Grid x:Name="GroupsColumn" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" SizeChanged="OnGroupsColumnSized">
+              <TextBlock Text="{Binding GroupsTitle}" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
                          ToolTip.Tip="The groups you made. Tick one or several to show and scan; with none ticked on Scan Groups, all are. With several radios each has its own ticks: these are those of the radio selected, and a group ticked for more than one radio is shared out between them." />
-              <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
-              <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <Border Grid.Row="1" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
+              <ScrollViewer x:Name="GroupsScroll" Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <ItemsControl ItemsSource="{Binding UserGroupRows}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:GroupRow">
@@ -109,7 +110,32 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
               </ScrollViewer>
-            </DockPanel>
+              <!-- What the radio selected scans: the ticked channels of its groups, or its share while it scans -->
+              <TextBlock Grid.Row="3" Text="{Binding ActiveTitle}" Classes="label" FontWeight="SemiBold" Margin="2,10,0,2"
+                         ToolTip.Tip="The frequencies of this radio's groups (every group ticked on Scan Groups counts, not only the user groups). Untick one to leave it out of the scan: it is the channel's Scan tick, the same one as on Scan Groups, so it is left out for every radio. A change takes effect at once. While this radio scans alongside another that has some of the same channels, the ticked ones that went to the other are not listed." />
+              <Border Grid.Row="4" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
+              <ScrollViewer Grid.Row="5" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <!-- Only the lines in view are made: with no group ticked this is every stored channel -->
+                <ItemsControl ItemsSource="{Binding ActiveFrequencies}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ActiveFrequency">
+                      <CheckBox IsChecked="{Binding Scan}" MinHeight="0" Height="26" Padding="6,0,0,0" Margin="0,0,10,0"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <Grid ColumnDefinitions="62,*" ColumnSpacing="8">
+                          <TextBlock Text="{Binding Frequency}" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Text="{Binding Name}" Classes="label" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                      </CheckBox>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Grid>
           </Border>
           <Grid DockPanel.Dock="Bottom" ColumnDefinitions="44,*" Margin="2,8,0,0" ColumnSpacing="12">
           <!-- Scan the stored channels: kept at the foot of the tab -->

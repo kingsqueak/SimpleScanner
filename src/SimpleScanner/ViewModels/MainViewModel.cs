@@ -36,6 +36,38 @@ public sealed partial class MemoryRow(MemoryChannel channel, Action changed) : O
     }
 }
 
+/// <summary>
+/// A frequency of the selected radio's groups, as a line under the user groups on Operate. Its tick is
+/// the Scan tick of the stored channels on that frequency.
+/// </summary>
+public sealed class ActiveFrequency(double place, string frequency, string name, bool scan, Action<ActiveFrequency> changed) : ObservableObject
+{
+    /// <summary>The frequency in steps of 100 Hz: stored channels with the same one are one line.</summary>
+    public double Place { get; } = place;
+    public string Frequency { get; } = frequency;
+    public string Name { get; } = name;
+
+    public bool Scan
+    {
+        get => scan;
+        set
+        {
+            if (scan == value) return;
+            scan = value;
+            OnPropertyChanged();
+            changed(this);
+        }
+    }
+
+    /// <summary>Show a tick that was changed elsewhere, without passing it on.</summary>
+    public void Show(bool value)
+    {
+        if (scan == value) return;
+        scan = value;
+        OnPropertyChanged(nameof(Scan));
+    }
+}
+
 /// <summary>A memory group as a tick box in the group selector.</summary>
 public sealed partial class GroupRow(string name, bool selected, Action changed) : ObservableObject
 {
@@ -305,6 +337,58 @@ public sealed partial class MainViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsScanning));
         OnPropertyChanged(nameof(ScanText));
+        RefreshActive();
+    }
+
+    /// <summary>
+    /// The frequencies of the selected radio's groups, for the list under the user groups on Operate, each
+    /// with the Scan tick of its stored channels. While the radio scans alongside another, the ticked
+    /// frequencies that went to the other radio are left out.
+    /// </summary>
+    [ObservableProperty] private IReadOnlyList<ActiveFrequency> _activeFrequencies = [];
+    [ObservableProperty] private string _activeTitle = "Active Frequencies";
+
+    private static double Place(double hz) => Math.Round(hz / 100);
+
+    private void RefreshActive()
+    {
+        // A frequency shared by several stored channels is one line, as it is visited once: ticked if any of them is.
+        var lines = Memories.GroupBy(m => Place(m.Channel.FrequencyHz))
+            .Select(g => (Place: g.Key, Hz: g.First().Channel.FrequencyHz, (g.FirstOrDefault(m => m.Scan) ?? g.First()).Name, Scan: g.Any(m => m.Scan)))
+            .OrderBy(l => l.Hz).ToList();
+        var radio = Radio;
+        if (radio.IsScanning && !radio.IsSearching && _shares.TryGetValue(radio, out var share))
+        {
+            var mine = share.Select(c => Place(c.FrequencyHz)).ToHashSet();
+            lines = lines.Where(l => !l.Scan || mine.Contains(l.Place)).ToList();
+        }
+        // The same lines as before: only the ticks are brought up to date, so the list stays where it was scrolled to.
+        if (lines.Select(l => (l.Place, l.Name)).SequenceEqual(ActiveFrequencies.Select(a => (a.Place, a.Name))))
+            for (int i = 0; i < lines.Count; i++) ActiveFrequencies[i].Show(lines[i].Scan);
+        else
+            ActiveFrequencies = lines.Select(l => new ActiveFrequency(l.Place, (l.Hz / 1e6).ToString("0.0000", CultureInfo.InvariantCulture),
+                l.Name, l.Scan, ActiveTicked)).ToList();
+        ActiveTitle = $"Active Frequencies ({lines.Count(l => l.Scan)})";
+    }
+
+    private bool _ticking;
+
+    // A frequency was ticked or unticked in the list on Operate: every stored channel shown on it takes the tick.
+    private void ActiveTicked(ActiveFrequency line)
+    {
+        _ticking = true;
+        foreach (var m in Memories.Where(m => Place(m.Channel.FrequencyHz) == line.Place)) m.Scan = line.Scan;
+        _ticking = false;
+        ScanTicksChanged();
+    }
+
+    // A channel's Scan tick has changed, here or in the list on Scan Groups: the radios that are scanning take it up at once.
+    private void ScanTicksChanged()
+    {
+        if (_ticking) return;
+        _memories.Save();
+        ShareAgain();
+        RefreshActive();
     }
 
     /// <summary>The radio the controls work is scanning or searching: the Scan button stops it.</summary>
@@ -356,8 +440,9 @@ public sealed partial class MainViewModel : ObservableObject
             (shown.Count == 0 ? c.Groups : shown.Where(g => MemoryStore.InGroup(c, g))).Order().FirstOrDefault() ?? "";
         foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || shown.Any(g => MemoryStore.InGroup(c, g)))
                      .OrderBy(First).ThenBy(c => c.FrequencyHz))
-            Memories.Add(new MemoryRow(c, () => _memories.Save()));
+            Memories.Add(new MemoryRow(c, ScanTicksChanged));
         _loading = false;
+        RefreshActive();
     }
 
     /// <summary>The stored channels, for the channel editor.</summary>
@@ -585,7 +670,8 @@ public sealed partial class MainViewModel : ObservableObject
             radio.Status = "Start the radio first";
             return;
         }
-        var on = Scanners.Append(radio).ToList();
+        // Always in the order of the radios, so that sharing out again gives each the part it had.
+        var on = RadioList.Where(r => r == radio || Scanners.Contains(r)).ToList();
         if (Shares(on) is not { } shares) return;
         for (int r = 0; r < on.Count; r++)
         {
@@ -598,6 +684,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
             else Give(on[r], members, share);
         }
+        RefreshActive();
     }
 
     /// <summary>The Scan button on a radio's own display: select that radio, then start or stop its scan as the Scan button on Operate does.</summary>
@@ -612,7 +699,17 @@ public sealed partial class MainViewModel : ObservableObject
     private void ShareAgain()
     {
         var on = Scanners.ToList();
-        if (on.Count == 0 || Shares(on) is not { } shares) return;
+        if (on.Count == 0) return;
+        if (Shares(on) is not { } shares)
+        {
+            // The last channel was unticked: there is nothing left to scan.
+            foreach (var r in on)
+            {
+                r.StopScan();
+                r.Status = "No channels are ticked for scanning";
+            }
+            return;
+        }
         for (int r = 0; r < on.Count; r++) Give(on[r], shares[r].Members, shares[r].Share);
     }
 
@@ -627,6 +724,7 @@ public sealed partial class MainViewModel : ObservableObject
             radio.StopScan();
             radio.Status = "Nothing to scan on this radio: every channel went to another";
         }
+        if (radio == Radio) RefreshActive();
     }
 
     /// <summary>

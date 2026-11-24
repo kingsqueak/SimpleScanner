@@ -14,6 +14,36 @@ namespace SimpleScanner.Radio.SdrPlay;
 /// </summary>
 public sealed unsafe class SdrPlaySource : IIqSource
 {
+    /// <summary>
+    /// The radios plugged in and free now. One that another program (or another source in this
+    /// one) has open is not listed. Throws if the API is not installed or its service is not answering.
+    /// </summary>
+    public static IReadOnlyList<RadioInfo> ListRadios()
+    {
+        EnsureApi();
+        var devices = stackalloc DeviceT[16];
+        uint count = 0;
+        var found = new List<RadioInfo>();
+        Native.LockDeviceApi();
+        try
+        {
+            if (Native.GetDevices(devices, &count, 16) != Err.Success) return found;
+            for (int k = 0; k < count; k++)
+                if (devices[k].Valid != 0)
+                    found.Add(new RadioInfo(ModelName(devices[k].HwVer), SerialOf(&devices[k])));
+        }
+        finally { Native.UnlockDeviceApi(); }
+        return found;
+    }
+
+    /// <summary>
+    /// The serial number of the radio to open at the next <see cref="Start"/>. With none, or when
+    /// that radio is not there, the first RSPdx found is opened, or else the first radio of any model.
+    /// </summary>
+    public string? Serial { get; set; }
+
+    private static string SerialOf(DeviceT* d) => Marshal.PtrToStringUTF8((nint)d->SerNo) ?? "";
+
     private const int AgcSetPointDbfs = -30, AgcMode50Hz = 2, MaxIfGr = 59, MinIfGr = 20;
     private const double RetuneTimeoutMs = 500;
 
@@ -70,11 +100,13 @@ public sealed unsafe class SdrPlaySource : IIqSource
             {
                 Check(Native.GetDevices(devices, &count, 16), "list the radios");
                 int pick = -1;
+                bool dx = false;
                 for (int k = 0; k < count; k++)
                 {
                     if (devices[k].Valid == 0) continue;
+                    if (Serial is { Length: > 0 } wanted && SerialOf(&devices[k]) == wanted) { pick = k; break; }
                     if (pick < 0) pick = k;
-                    if (devices[k].HwVer is Native.HwRspDx or Native.HwRspDxR2) { pick = k; break; }
+                    if (!dx && devices[k].HwVer is Native.HwRspDx or Native.HwRspDxR2) { pick = k; dx = true; }
                 }
                 if (pick < 0)
                     throw new InvalidOperationException("No SDRplay radio found. Check that it is plugged in and that no other program is using it.");
@@ -86,7 +118,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
 
             bool isDx = _device.HwVer is Native.HwRspDx or Native.HwRspDxR2;
             string serial;
-            fixed (byte* s = _device.SerNo) serial = Marshal.PtrToStringUTF8((nint)s) ?? "";
+            fixed (DeviceT* d = &_device) serial = SerialOf(d);
             Description = $"{ModelName(_device.HwVer)} {serial}";
             Antennas = isDx ? ["Antenna A", "Antenna B", "Antenna C"] : ["Antenna"];
             if (!Antennas.Contains(_antenna)) _antenna = Antennas[0];
@@ -510,9 +542,12 @@ public sealed unsafe class SdrPlaySource : IIqSource
         return best;
     }
 
-    /// <summary>The highest LNA state at a frequency (RSPdx tables; other models have fewer, and the API refuses the excess).</summary>
+    /// <summary>The highest LNA state at a frequency, from the gain tables of the API's specification
+    /// (RSPdx as on Antenna A or B). A state the model does not have is refused by the API.</summary>
     private int MaxLnaState(double hz)
     {
+        if (_device.HwVer == Native.HwRsp1) return 3;
+        if (_device.HwVer == Native.HwRsp2) return hz < 420e6 ? 8 : 5;
         if (_device.HwVer is not (Native.HwRspDx or Native.HwRspDxR2))
             return hz < 60e6 ? 6 : hz < 1000e6 ? 9 : 8;
         return hz < 12e6 ? 18 : hz < 50e6 ? 19 : hz < 60e6 ? 24 : hz < 250e6 ? 26 : hz < 420e6 ? 27 : hz < 1000e6 ? 20 : 18;

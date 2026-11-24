@@ -1,0 +1,24 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:r="using:SimpleScanner.Radio"
+        x:Class="SimpleScanner.Views.RadioChooserWindow"
+        Icon="avares://SimpleScanner/Assets/icon.png"
+        Title="SimpleScanner: choose a receiver" Width="380" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="16" Spacing="12">
+    <TextBlock Text="More than one receiver is plugged in. Which one should the scanner use?" TextWrapping="Wrap" />
+    <ListBox x:Name="Radios" Background="{DynamicResource PanelBg}" CornerRadius="8" DoubleTapped="OnUse">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="r:RadioInfo">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Serial}" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding Model}" FontWeight="SemiBold" />
+          </DockPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+    <TextBlock Classes="label" TextWrapping="Wrap"
+               Text="The one used last time is already selected. To change receiver later, close the scanner and start it again." />
+    <Button Classes="seg" Content="Use this receiver" Click="OnUse" IsDefault="True" HorizontalAlignment="Right" />
+  </StackPanel>
+</Window>

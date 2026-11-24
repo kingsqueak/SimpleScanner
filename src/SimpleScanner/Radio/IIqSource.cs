@@ -6,6 +6,9 @@ namespace SimpleScanner.Radio;
 /// </summary>
 public delegate void IqHandler(ReadOnlySpan<float> i, ReadOnlySpan<float> q, bool retuned);
 
+/// <summary>A radio that is plugged in and free to open: its model and serial number.</summary>
+public sealed record RadioInfo(string Model, string Serial);
+
 /// <summary>
 /// A radio as the scanner sees it: a stream of IQ samples round a centre frequency, with a
 /// gain control and a choice of antenna. Each kind of hardware is one implementation.

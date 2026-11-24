@@ -1,6 +1,8 @@
 // rsp-bench: measurements on a real SDRplay RSP, without the window. Receive only.
 //
 //   rsp-bench                          sample throughput and retune times
+//   rsp-bench list                     the radios that are plugged in and free
+//   radio=<serial or model> anywhere   use that radio (otherwise the first RSPdx, or the first of any model)
 //   rsp-bench listen <MHz> [seconds] [squelch dB] [file]
 //                                      run the receiver on a frequency and print its level each second;
 //                                      the file takes the audio as raw 48 kHz 32-bit float, stereo;
@@ -11,13 +13,32 @@ using SimpleScanner.Dsp;
 using SimpleScanner.Radio.SdrPlay;
 
 bool autoSquelch = args.Contains("auto"), fast = args.Contains("fast");
-args = args.Where(a => a != "auto" && a != "fast").ToArray();
+string? radio = args.FirstOrDefault(a => a.StartsWith("radio="))?[6..];
+args = args.Where(a => a != "auto" && a != "fast" && !a.StartsWith("radio=")).ToArray();
+
+if (args.Length >= 1 && args[0] == "list")
+{
+    foreach (var r in SdrPlaySource.ListRadios()) Console.WriteLine($"{r.Model}\t{r.Serial}");
+    return;
+}
+
+// The radio asked for, by serial number or by model name.
+SdrPlaySource NewSource()
+{
+    var s = new SdrPlaySource();
+    if (radio is null) return s;
+    var match = SdrPlaySource.ListRadios().FirstOrDefault(r =>
+        r.Serial == radio || r.Model.Equals(radio, StringComparison.OrdinalIgnoreCase));
+    if (match is null) throw new InvalidOperationException($"No free radio matches \"{radio}\".");
+    s.Serial = match.Serial;
+    return s;
+}
 
 if (args.Length >= 2 && args[0] == "listen")
 {
     double mhz = double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
     int seconds = args.Length > 2 ? int.Parse(args[2]) : 10;
-    using var rx = new Receiver(new SdrPlaySource());
+    using var rx = new Receiver(NewSource());
     var band = BandPlan.Find(mhz * 1e6);
     rx.SetMode(band.Mode, band.BandwidthHz);
     rx.FrequencyHz = mhz * 1e6;
@@ -49,7 +70,7 @@ if (args.Length >= 3 && args[0] == "hunt")
     double lo = double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) * 1e6;
     double hi = double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) * 1e6;
     int seconds = args.Length > 3 ? int.Parse(args[3]) : 30;
-    using var rx = new Receiver(new SdrPlaySource(), playAudio: false) { ScanSkipSeconds = 3600, ScanHangSeconds = 0.3 };
+    using var rx = new Receiver(NewSource(), playAudio: false) { ScanSkipSeconds = 3600, ScanHangSeconds = 0.3 };
     rx.SquelchDb = args.Length > 4 ? double.Parse(args[4]) : -100;
     var list = new List<ScanChannel>();
     for (double f = lo; f <= hi + 1;)
@@ -99,7 +120,7 @@ if (args.Length >= 1 && args[0] == "scan")
     // (those in the range, if one is given) and report.
     double scanLo = args.Length > 4 ? double.Parse(args[3]) * 1e6 : 0, scanHi = args.Length > 4 ? double.Parse(args[4]) * 1e6 : double.MaxValue;
     int seconds = args.Length > 1 ? int.Parse(args[1]) : 10;
-    using var rx = new Receiver(new SdrPlaySource(), playAudio: false);
+    using var rx = new Receiver(NewSource(), playAudio: false);
     rx.SquelchDb = args.Length > 2 ? double.Parse(args[2]) : -95;
     rx.AutoSquelch = autoSquelch;
     var list = MemoryStore.Load().Channels.Where(c => c.Scan && c.FrequencyHz >= scanLo && c.FrequencyHz <= scanHi).Select(c =>
@@ -133,7 +154,7 @@ if (args.Length >= 1 && args[0] == "scan")
     return;
 }
 
-using var source = new SdrPlaySource();
+using var source = NewSource();
 long samples = 0;
 int retunes = 0;
 source.Samples += (i, q, retuned) =>

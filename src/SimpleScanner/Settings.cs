@@ -31,6 +31,8 @@ public sealed class Settings
     public bool Stereo { get; set; } = true;
     public bool AutoGain { get; set; } = true;
     public int GainStep { get; set; }
+    /// <summary>Serial number of the radio last chosen, offered first when more than one is plugged in.</summary>
+    public string? RadioSerial { get; set; }
     public string Antenna { get; set; } = "Antenna A";
     /// <summary>DC on the antenna socket for a preamplifier there (Antenna B on an RSPdx).</summary>
     public bool BiasT { get; set; }

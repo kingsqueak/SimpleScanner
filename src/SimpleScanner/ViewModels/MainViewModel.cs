@@ -981,7 +981,8 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.Stereo = StereoOn;
         _settings.AutoGain = AutoGain;
         _settings.GainStep = (int)Math.Round(GainStep);
-        _settings.Antenna = SelectedAntenna;
+        // A radio with one socket has no choice to keep: leave the one made on a radio that has.
+        if (Antennas.Count > 1) _settings.Antenna = SelectedAntenna;
         _settings.BiasT = BiasT;
         _settings.FmNotch = FmNotch;
         _settings.Ppm = (double)(Ppm ?? 0);

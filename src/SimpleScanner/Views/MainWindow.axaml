@@ -2,75 +2,42 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SimpleScanner.ViewModels"
         xmlns:c="using:SimpleScanner.Controls"
+        xmlns:v="using:SimpleScanner.Views"
         x:Class="SimpleScanner.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Icon="avares://SimpleScanner/Assets/icon.png"
         Title="SimpleScanner" Width="1130" Height="664" MinWidth="700" MinHeight="634"
         WindowStartupLocation="CenterScreen">
-  <DockPanel Margin="12">
+  <Panel Margin="12">
+
+  <!-- The small window: the display, scaled to the window, and one row of buttons under it -->
+  <DockPanel x:Name="MiniView" IsVisible="{Binding IsMini}">
+    <WrapPanel DockPanel.Dock="Bottom" ItemSpacing="8" LineSpacing="6" Margin="0,8,0,0">
+      <Button Classes="seg" Classes.lit="{Binding IsMuted}" Content="Mute" Command="{Binding ToggleMuteCommand}"
+              ToolTip.Tip="Silence the speaker without touching the volume. Press again for sound." />
+      <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
+              Command="{Binding ToggleScanCommand}" MinWidth="82"
+              ToolTip.Tip="Scan the ticked channels of the groups shown" />
+      <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}"
+              IsEnabled="{Binding IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
+      <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}"
+              IsEnabled="{Binding IsScanning}"
+              ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings" />
+    </WrapPanel>
+    <Border Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}"
+            BorderThickness="1" CornerRadius="8" Padding="10,6,10,8">
+      <Viewbox Stretch="Uniform">
+        <v:Display Width="600" />
+      </Viewbox>
+    </Border>
+  </DockPanel>
+
+  <DockPanel x:Name="FullView" IsVisible="{Binding !IsMini}">
 
     <!-- The readout: what a scanner shows on its display -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}"
             BorderThickness="1" CornerRadius="8" Padding="18,12,18,14">
-      <StackPanel Spacing="6">
-        <DockPanel>
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-            <TextBlock Text="OVERLOAD" Foreground="{DynamicResource LcdWarn}" FontSize="13" FontWeight="SemiBold"
-                       IsVisible="{Binding Overloaded}" VerticalAlignment="Center" />
-            <TextBlock Text="ENCRYPTED" Foreground="{DynamicResource LcdWarn}" FontSize="13" FontWeight="SemiBold"
-                       IsVisible="{Binding IsEncrypted}" VerticalAlignment="Center" />
-            <TextBlock Text="STEREO" Foreground="{DynamicResource LcdOpen}" FontSize="13" FontWeight="SemiBold"
-                       IsVisible="{Binding IsStereo}" VerticalAlignment="Center" />
-            <TextBlock Text="{Binding ModeText}" Foreground="{DynamicResource LcdText}" FontSize="20" FontWeight="SemiBold" />
-            <Border CornerRadius="4" Padding="8,2" Background="{DynamicResource LcdOpen}" IsVisible="{Binding SquelchOpen}">
-              <TextBlock Text="RX" Foreground="Black" FontSize="14" FontWeight="Bold" />
-            </Border>
-            <Border CornerRadius="4" Padding="8,2" BorderBrush="{DynamicResource LcdDim}" BorderThickness="1"
-                    IsVisible="{Binding !SquelchOpen}">
-              <TextBlock Text="RX" Foreground="{DynamicResource LcdDim}" FontSize="14" FontWeight="Bold" />
-            </Border>
-          </StackPanel>
-          <TextBlock Text="{Binding BandName}" Foreground="{DynamicResource LcdText}" FontSize="20"
-                     TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-        </DockPanel>
-        <!-- What is stored about the channel: whose it is, then its particulars -->
-        <TextBlock Text="{Binding DetailText}" Foreground="{DynamicResource LcdText}" FontSize="14"
-                   TextTrimming="CharacterEllipsis" MinHeight="18" />
-        <TextBlock Text="{Binding InfoText}" Foreground="{DynamicResource LcdDim}" FontSize="13"
-                   TextTrimming="CharacterEllipsis" MinHeight="17" />
-
-        <!-- The power button at the left, the frequency in the middle -->
-        <Panel>
-          <Button Classes="power" Classes.lit="{Binding IsOn}" Command="{Binding TogglePowerCommand}"
-                  HorizontalAlignment="Left" VerticalAlignment="Center"
-                  ToolTip.Tip="Start or stop the radio. Green when it is running.">
-            <Path Width="24" Height="24" StrokeThickness="2.4" StrokeLineCap="Round"
-                  Data="M 12,3 L 12,11.5 M 7.5,5.6 A 8,8 0 1 0 16.5,5.6" />
-          </Button>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-          <c:FrequencyReadout FrequencyHz="{Binding FrequencyHz}" FontSize="64"
-                              Foreground="{DynamicResource LcdText}" DimForeground="{DynamicResource LcdDim}"
-                              ToolTip.Tip="Roll the mouse wheel over a digit to tune by that digit; click its top or bottom half to step it" />
-          <TextBlock Text="MHz" Foreground="{DynamicResource LcdDim}" FontSize="18" VerticalAlignment="Bottom" Margin="8,0,0,14" />
-        </StackPanel>
-        </Panel>
-
-        <!-- What a digital signal says about itself -->
-        <TextBlock Text="{Binding DigitalText}" Foreground="{DynamicResource LcdOpen}" FontSize="15" FontWeight="SemiBold"
-                   HorizontalAlignment="Center" MinHeight="20" />
-
-        <DockPanel>
-          <TextBlock DockPanel.Dock="Right" Text="{Binding LevelText}" Foreground="{DynamicResource LcdText}" FontSize="13"
-                     Width="62" TextAlignment="Right" VerticalAlignment="Center" />
-          <c:LevelBar Height="12" Value="{Binding Level}" Marker="{Binding SquelchDb}" ShowMarker="{Binding SquelchOn}"
-                      Fill="{DynamicResource LcdText}" Track="{DynamicResource MeterTrack}" MarkerBrush="{DynamicResource LcdOpen}"
-                      ToolTip.Tip="Signal level on the channel. The green mark is where the squelch opens." />
-        </DockPanel>
-        <DockPanel>
-          <TextBlock DockPanel.Dock="Right" Text="{Binding DeviceText}" Foreground="{DynamicResource LcdDim}" FontSize="12" />
-          <TextBlock Text="{Binding GainText}" Foreground="{DynamicResource LcdDim}" FontSize="12" />
-        </DockPanel>
-      </StackPanel>
+      <v:Display />
     </Border>
 
     <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
@@ -175,7 +142,7 @@
 
           <!-- The rows wrap when the window is narrow (a label stays with its control); if they then need more height than there is, they scroll -->
           <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="44,*" Margin="2,12,0,4" RowSpacing="12" ColumnSpacing="12">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="44,*" Margin="2,12,0,4" RowSpacing="12" ColumnSpacing="12">
 
               <!-- Tuning: the frequency, and under it the step buttons (the power button is on the display) -->
               <TextBlock Grid.Row="0" Grid.Column="0" Text="Tune" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
@@ -202,10 +169,9 @@
                 </WrapPanel>
               </StackPanel>
 
-              <!-- Mode, and under it the filter -->
+              <!-- Mode, with the Stereo button at the end of the row -->
               <TextBlock Grid.Row="1" Grid.Column="0" Text="Mode" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
-              <StackPanel Grid.Row="1" Grid.Column="1" Spacing="6">
-                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                <WrapPanel Grid.Row="1" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
                   <Button Classes="seg" Classes.lit="{Binding AutoMode}" Content="Auto" Command="{Binding SetAutoModeCommand}"
                           ToolTip.Tip="Choose the mode and filter from the band: AM on airband, FM elsewhere" />
                   <Button Classes="seg" Classes.lit="{Binding IsAm}" Content="AM" Command="{Binding SetModeCommand}" CommandParameter="AM" />
@@ -213,30 +179,30 @@
                           ToolTip.Tip="Narrow FM: public service, business, marine, weather and amateur" />
                   <Button Classes="seg" Classes.lit="{Binding IsWfm}" Content="WFM" Command="{Binding SetModeCommand}" CommandParameter="WFM"
                           ToolTip.Tip="Wide FM: broadcast radio" />
+                  <Button Classes="seg" Classes.lit="{Binding StereoOn}" Content="Stereo" Command="{Binding ToggleStereoCommand}"
+                          ToolTip.Tip="Broadcast FM in stereo when the station sends it. Off is mono, which is quieter on a weak station." />
                 </WrapPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBlock Text="Filter" Classes="label" />
-                  <ComboBox ItemsSource="{Binding Widths}" SelectedItem="{Binding SelectedWidth}" Width="170"
-                            ToolTip.Tip="Channel filter. Use the narrow one where channels are 12.5 kHz (FM) or 8.33 kHz (AM) apart." />
-                </StackPanel>
-              </StackPanel>
+              <!-- The filter has a row of its own, close under the mode buttons -->
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Filter" Classes="label" Margin="0,-6,0,0" />
+              <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding Widths}" SelectedItem="{Binding SelectedWidth}" Width="170"
+                        Margin="0,-6,0,0"
+                        ToolTip.Tip="Channel filter. Use the narrow one where channels are 12.5 kHz (FM) or 8.33 kHz (AM) apart." />
 
-              <!-- Audio: volume and stereo, and under them the squelch -->
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="Audio" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
-              <StackPanel Grid.Row="2" Grid.Column="1" Spacing="6">
+              <!-- Audio: volume and mute, and under them the squelch -->
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="Audio" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
+              <StackPanel Grid.Row="3" Grid.Column="1" Spacing="6">
                 <WrapPanel ItemSpacing="8" LineSpacing="6">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="Volume" Classes="label" />
                     <Slider Minimum="0" Maximum="100" Value="{Binding Volume}" Width="170" />
+                    <Button Classes="seg" Classes.lit="{Binding IsMuted}" Content="Mute" Command="{Binding ToggleMuteCommand}"
+                            ToolTip.Tip="Silence the speaker without touching the volume. Press again for sound." />
                   </StackPanel>
-                  <CheckBox Content="Stereo" IsChecked="{Binding StereoOn}" FontSize="12" Margin="6,0,0,0"
-                            ToolTip.Tip="Broadcast FM in stereo when the station sends it. Untick for mono, which is quieter on a weak station." />
                 </WrapPanel>
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                  <CheckBox Content="Squelch" IsChecked="{Binding SquelchOn}" FontSize="12"
-                            ToolTip.Tip="Mute the speaker until a signal is stronger than the mark on the level bar" />
-                  <Slider Minimum="-140" Maximum="-40" Value="{Binding SquelchDb}" Width="200" IsEnabled="{Binding SquelchOn}"
-                          ToolTip.Tip="Squelch level: set the green mark just above the bar's resting level" />
+                  <TextBlock Text="Squelch" Classes="label" Classes.off="{Binding !SquelchOn}" />
+                  <Slider Minimum="-140" Maximum="-40" Value="{Binding SquelchDb}" Width="200"
+                          ToolTip.Tip="Squelch level: set the green mark just above the bar's resting level. All the way left is squelch off." />
                 </StackPanel>
               </StackPanel>
             </Grid>
@@ -308,4 +274,5 @@
       </TabItem>
     </TabControl>
   </DockPanel>
+  </Panel>
 </Window>

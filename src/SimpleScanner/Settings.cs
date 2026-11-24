@@ -10,6 +10,10 @@ public sealed class Settings
     /// <summary>Where the main window was and how big, in screen pixels and in layout units.</summary>
     public sealed record Place(int X, int Y, double Width, double Height);
     public Place? Window { get; set; }
+    /// <summary>The same for the small window, which has a size of its own.</summary>
+    public Place? MiniWindow { get; set; }
+    /// <summary>The small window was showing when the app was closed.</summary>
+    public bool Mini { get; set; }
 
     public double FrequencyHz { get; set; } = 162_400_000;
     /// <summary>Take the mode, filter width and step from the band plan.</summary>

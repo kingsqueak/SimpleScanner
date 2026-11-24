@@ -117,6 +117,10 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isOn;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private double _volume;
+    /// <summary>The speaker is silenced; the volume setting is left as it is. Not kept between runs.</summary>
+    [ObservableProperty] private bool _isMuted;
+    /// <summary>The small window is showing: the display and one row of buttons.</summary>
+    [ObservableProperty] private bool _isMini;
     [ObservableProperty] private double _squelchDb;
     [ObservableProperty] private bool _squelchOn;
     [ObservableProperty] private bool _autoGain;
@@ -172,8 +176,8 @@ public sealed partial class MainViewModel : ObservableObject
         _selectedResumeTime = ResumeTimes.FirstOrDefault(r => (int)r.Value == settings.ResumeSeconds) ?? ResumeTimes[^1];
         _rx.ResumeSeconds = _selectedResumeTime.Value > 0 ? _selectedResumeTime.Value : null;
         Volume = settings.Volume * 100;
-        SquelchDb = settings.SquelchDb;
-        SquelchOn = settings.SquelchOn;
+        SquelchDb = settings.SquelchOn ? Math.Max(settings.SquelchDb, SquelchOffDb) : SquelchOffDb;
+        SquelchOn = SquelchDb > SquelchOffDb;
         StereoOn = settings.Stereo;
         AutoGain = settings.AutoGain;
         GainStep = settings.GainStep;
@@ -186,6 +190,7 @@ public sealed partial class MainViewModel : ObservableObject
         _rx.Source.AutoGain = AutoGain;
         _rx.Source.GainStep = (int)GainStep;
         _rx.Volume = Volume / 100;
+        _isMini = settings.Mini;
         _rx.SquelchDb = SquelchDb;
         _rx.SquelchEnabled = SquelchOn;
         _rx.LevelOffsetDb = settings.LevelOffsetDb;
@@ -343,6 +348,18 @@ public sealed partial class MainViewModel : ObservableObject
         {
             if (value == _settings.Window) return;
             _settings.Window = value;
+            _settings.Save();
+        }
+    }
+
+    /// <summary>Where the small window was and how big, kept with the settings.</summary>
+    public Settings.Place? MiniWindowPlace
+    {
+        get => _settings.MiniWindow;
+        set
+        {
+            if (value == _settings.MiniWindow) return;
+            _settings.MiniWindow = value;
             _settings.Save();
         }
     }
@@ -521,7 +538,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.SearchFromMHz = lo / 1e6;
         _settings.SearchToMHz = hi / 1e6;
         _dirty = true;
-        SquelchOn = true;
+        EnsureSquelch();
         _searching = true;
         _rx.ScanSkipSeconds = 600;
         _rx.StartScan(list);
@@ -560,7 +577,7 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
         Status = "";
-        SquelchOn = true;
+        EnsureSquelch();
         _searching = false;
         _scanMembers = members;
         _picked = null;
@@ -716,15 +733,44 @@ public sealed partial class MainViewModel : ObservableObject
 
     partial void OnVolumeChanged(double value)
     {
-        _rx.Volume = value / 100;
+        _rx.Volume = IsMuted ? 0 : value / 100;
         _dirty = true;
     }
 
+    partial void OnIsMutedChanged(bool value) => _rx.Volume = value ? 0 : Volume / 100;
+
+    [RelayCommand]
+    private void ToggleMute() => IsMuted = !IsMuted;
+
+    /// <summary>Go between the full window and the small one. The window follows <see cref="IsMini"/>.</summary>
+    [RelayCommand]
+    private void ToggleMini() => IsMini = !IsMini;
+
+    partial void OnIsMiniChanged(bool value)
+    {
+        _settings.Mini = value;
+        _dirty = true;
+    }
+
+    /// <summary>The squelch slider's left end, which is squelch off.</summary>
+    public const double SquelchOffDb = -140;
+
+    /// <summary>The squelch is on whenever its slider is off the left end.</summary>
     partial void OnSquelchDbChanged(double value)
     {
         _rx.SquelchDb = value;
+        SquelchOn = value > SquelchOffDb;
         _dirty = true;
     }
+
+    /// <summary>A scan or a search needs the squelch: if it is off, set it to the usual level.</summary>
+    private void EnsureSquelch()
+    {
+        if (!SquelchOn) SquelchDb = new Settings().SquelchDb;
+    }
+
+    [RelayCommand]
+    private void ToggleStereo() => StereoOn = !StereoOn;
 
     partial void OnSquelchOnChanged(bool value)
     {

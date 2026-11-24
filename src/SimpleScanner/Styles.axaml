@@ -32,6 +32,11 @@
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
+  <!-- A label whose control is switched off -->
+  <Style Selector="TextBlock.label.off">
+    <Setter Property="Opacity" Value="0.4" />
+  </Style>
+
   <!-- Flat segmented buttons -->
   <Style Selector="Button.seg">
     <Setter Property="Background" Value="{DynamicResource ControlBg}" />

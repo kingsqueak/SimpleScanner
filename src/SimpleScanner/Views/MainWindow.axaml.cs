@@ -16,22 +16,59 @@ public partial class MainWindow : Window
         Opened += (_, _) => BringOntoAScreen();
     }
 
-    /// <summary>Put the window where it was when it was last closed, at the size it had.</summary>
+    // The full window's and the small window's least and usual sizes.
+    private const double FullMinWidth = 700, FullMinHeight = 634, FullWidth = 1130, FullHeight = 664;
+    private const double MiniMinWidth = 300, MiniMinHeight = 170, MiniWidth = 520, MiniHeight = 262;
+
+    /// <summary>Put the window where it was when it was last closed, at the size it had, full or small as it was.</summary>
     public void RestorePlace()
     {
-        if ((DataContext as MainViewModel)?.WindowPlace is not { } p) return;
-        Width = Math.Max(p.Width, MinWidth);
-        Height = Math.Max(p.Height, MinHeight);
+        if (DataContext is not MainViewModel main) return;
+        main.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.IsMini)) ChangeView(main);
+        };
+        SizeFor(main);
+        if ((main.IsMini ? main.MiniWindowPlace : main.WindowPlace) is not { } p) return;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Position = new PixelPoint(p.X, p.Y);
+    }
+
+    /// <summary>Give the window the limits and the size of the view it is showing: the size it last had, or the usual one.</summary>
+    private void SizeFor(MainViewModel main)
+    {
+        bool mini = main.IsMini;
+        var p = mini ? main.MiniWindowPlace : main.WindowPlace;
+        double minW = mini ? MiniMinWidth : FullMinWidth, minH = mini ? MiniMinHeight : FullMinHeight;
+        // Lower the limits before the size and raise them after, so neither clamps the other on the way.
+        MinWidth = Math.Min(MinWidth, minW);
+        MinHeight = Math.Min(MinHeight, minH);
+        Width = Math.Max(p?.Width ?? (mini ? MiniWidth : FullWidth), minW);
+        Height = Math.Max(p?.Height ?? (mini ? MiniHeight : FullHeight), minH);
+        MinWidth = minW;
+        MinHeight = minH;
+    }
+
+    /// <summary>The view has just changed: remember the size the old one had, and take the new one's. The top left corner stays put.</summary>
+    private void ChangeView(MainViewModel main)
+    {
+        if (WindowState != WindowState.Normal) WindowState = WindowState.Normal;
+        else Keep(main, !main.IsMini);
+        SizeFor(main);
     }
 
     /// <summary>Remember where the window is. A maximised or minimised window keeps the place it had before.</summary>
     public void KeepPlace()
     {
-        if (DataContext is not MainViewModel main || WindowState != WindowState.Normal) return;
+        if (DataContext is MainViewModel main && WindowState == WindowState.Normal) Keep(main, main.IsMini);
+    }
+
+    private void Keep(MainViewModel main, bool mini)
+    {
         if (ClientSize.Width < 1 || ClientSize.Height < 1) return;
-        main.WindowPlace = new Settings.Place(Position.X, Position.Y, ClientSize.Width, ClientSize.Height);
+        var place = new Settings.Place(Position.X, Position.Y, ClientSize.Width, ClientSize.Height);
+        if (mini) main.MiniWindowPlace = place;
+        else main.WindowPlace = place;
     }
 
     /// <summary>If the screen the window was on has gone, so that its title bar cannot be reached, centre it on the main one.</summary>

@@ -4,6 +4,7 @@
         xmlns:c="using:SimpleScanner.Controls"
         x:Class="SimpleScanner.Views.MainWindow"
         x:DataType="vm:MainViewModel"
+        Icon="avares://SimpleScanner/Assets/icon.png"
         Title="SimpleScanner" Width="1130" Height="664" MinWidth="1060" MinHeight="634"
         WindowStartupLocation="CenterScreen">
   <DockPanel Margin="12">

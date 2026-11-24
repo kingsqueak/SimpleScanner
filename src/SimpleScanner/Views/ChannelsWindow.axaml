@@ -3,6 +3,7 @@
         xmlns:vm="using:SimpleScanner.ViewModels"
         x:Class="SimpleScanner.Views.ChannelsWindow"
         x:DataType="vm:ChannelsViewModel"
+        Icon="avares://SimpleScanner/Assets/icon.png"
         Title="SimpleScanner channels" Width="1400" Height="740" MinWidth="1180" MinHeight="520"
         WindowStartupLocation="CenterOwner">
   <DockPanel Margin="12">

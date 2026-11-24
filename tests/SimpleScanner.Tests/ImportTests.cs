@@ -78,28 +78,40 @@ public class ImportTests
     }
 
     [Fact]
-    public void Channels_keep_several_groups_and_their_details_and_old_files_still_load()
+    public void Channels_keep_several_groups_and_their_details_and_old_files_are_taken_in()
     {
-        string path = Path.Combine(Path.GetTempPath(), $"ss-groups-{Guid.NewGuid():N}.json");
+        string path = Path.Combine(Path.GetTempPath(), $"ss-groups-{Guid.NewGuid():N}.db"), old = path + ".json";
         try
         {
-            // As written before a channel could be in several groups.
-            File.WriteAllText(path, """[{"Name":"Tower","FrequencyHz":121300000,"Group":"Manchester (KMHT)","Scan":true}]""");
+            // As written before a channel could be in several groups, and before the database.
+            File.WriteAllText(old, """[{"Name":"Tower","FrequencyHz":121300000,"Group":"Manchester (KMHT)","Scan":true,"Mode":"Am"}]""");
             var store = MemoryStore.Load(path);
+            Assert.Equal(1, store.AddFromJson(old));
             Assert.Equal(["Manchester (KMHT)"], store.Channels[0].Groups);
 
             RadioReferenceCsv.Import(store, RadioReferenceCsv.Parse(Csv), "Hillsborough");
             store.Channels[1].Groups.Add("Fire");
-            store.Save();
+            store.Channels[1].Scan = false;
+            Assert.True(store.Save());
 
             var back = MemoryStore.Load(path);
+            Assert.Equal(store.Channels.Count, back.Channels.Count);
             Assert.Equal(["Manchester (KMHT)"], back.Channels[0].Groups);
+            Assert.Equal(SimpleScanner.Dsp.Mode.Am, back.Channels[0].Mode);
+            Assert.Null(back.Channels[0].Tag);
             Assert.Equal(["Hillsborough", "Fire"], back.Channels[1].Groups);
             Assert.Equal("Fire Dispatch", back.Channels[1].Tag);
+            Assert.False(back.Channels[1].Scan);
+            // Every field comes back as it went in.
+            var json = new System.Text.Json.JsonSerializerOptions();
+            Assert.Equal(System.Text.Json.JsonSerializer.Serialize(store.Channels, json), System.Text.Json.JsonSerializer.Serialize(back.Channels, json));
             Assert.Equal(["Fire", "Hillsborough", "Manchester (KMHT)"], back.GroupNames());
-            Assert.DoesNotContain("\"Group\"", File.ReadAllText(path));
+
+            // The same old file again adds nothing; into an empty store it goes whole.
+            Assert.Equal(0, back.AddFromJson(old));
+            Assert.Equal(0, back.AddFromJson(old + ".missing"));
         }
-        finally { File.Delete(path); }
+        finally { File.Delete(path); File.Delete(old); }
     }
 
     [Fact]
@@ -327,11 +339,6 @@ public class ImportTests
             store.Save();
             Assert.False(store.ReloadIfChangedOnDisk());
 
-            // Half a file is left alone, and what is held stays.
-            File.WriteAllText(path, "[ { \"Name\": \"Thr");
-            Assert.False(store.ReloadIfChangedOnDisk());
-            Assert.Equal(2, store.Channels.Count);
-
             // Another writer's file is taken up, once.
             writer.Channels.Add(new MemoryChannel { Name = "Three", FrequencyHz = 146.58e6, Tag = "Ham" });
             writer.Channels.Add(new MemoryChannel { Name = "Four", FrequencyHz = 146.61e6 });
@@ -345,7 +352,14 @@ public class ImportTests
 
             // The editor shows the new channels and drops what it held of the old ones.
             var vm = new ChannelsViewModel(store);
-            File.WriteAllText(path, "[ { \"Name\": \"Only\", \"FrequencyHz\": 162400000 } ]");
+            // Changed with another tool: one row edited, the rest deleted.
+            using (var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False"))
+            {
+                db.Open();
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = "DELETE FROM channels WHERE name <> 'One'; UPDATE channels SET name = 'Only', frequency_hz = 162400000";
+                cmd.ExecuteNonQuery();
+            }
             Assert.True(store.ReloadIfChangedOnDisk());
             vm.StoreReloaded();
             Assert.Equal(["Only"], vm.Rows.Select(r => r.Channel.Name));

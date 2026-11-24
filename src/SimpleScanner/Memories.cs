@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SimpleScanner.Dsp;
@@ -15,7 +16,7 @@ public sealed class MemoryChannel
     public double FrequencyHz { get; set; }
     /// <summary>The scan groups this channel is in: none, one or several.</summary>
     public List<string> Groups { get; set; } = [];
-    /// <summary>Read only from files written before a channel could be in several groups.</summary>
+    /// <summary>Read only from memories.json files written before a channel could be in several groups.</summary>
     public string? Group
     {
         get => null;
@@ -52,12 +53,14 @@ public sealed class MemoryChannel
     public string? ImportKey { get; set; }
 }
 
-/// <summary>The stored channels, kept as memories.json beside the settings.</summary>
+/// <summary>
+/// The stored channels, kept in the program's database (SQLite, table "channels") beside the
+/// settings: the same file that holds what was fetched from RadioReference.
+/// </summary>
 public sealed class MemoryStore
 {
     private static readonly JsonSerializerOptions Json = new()
     {
-        WriteIndented = true,
         Converters = { new JsonStringEnumConverter() },
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
@@ -67,72 +70,191 @@ public sealed class MemoryStore
     /// <summary>Counts the saves, so a window can tell that another has changed the channels.</summary>
     public int Version { get; private set; }
 
-    public MemoryStore(string? path = null) => _path = path ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SimpleScanner", "memories.json");
+    public MemoryStore(string? path = null) => _path = path ?? AppFiles.Database;
 
     public static MemoryStore Load(string? path = null)
     {
         var store = new MemoryStore(path);
-        store._stamp = Stamp(store._path);
-        try { store.Channels = JsonSerializer.Deserialize<List<MemoryChannel>>(File.ReadAllText(store._path), Json) ?? []; }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
+        try
+        {
+            if (!File.Exists(store._path)) return store;
+            using var db = store.Open();
+            store.Channels = Read(db);
+            store._stamp = Changes(db);
+        }
+        catch (Exception e) when (e is SqliteException or IOException or UnauthorizedAccessException) { }
         return store;
     }
 
-    public void Save()
+    /// <returns>True when the channels are in the database.</returns>
+    public bool Save()
     {
         Version++;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            // Written beside the file and then put in its place, so that nothing reading it finds half a file.
-            string part = _path + ".part";
-            File.WriteAllText(part, JsonSerializer.Serialize(Channels, Json));
-            File.Move(part, _path, overwrite: true);
-            _stamp = Stamp(_path);
+            using var db = Open();
+            using var all = db.BeginTransaction();
+            using (var clear = db.CreateCommand())
+            {
+                clear.CommandText = "DELETE FROM channels";
+                clear.ExecuteNonQuery();
+            }
+            using (var add = db.CreateCommand())
+            {
+                string[] names = Columns.Split(", ");
+                add.CommandText = $"INSERT INTO channels (id, {Columns}) VALUES ($id, {string.Join(", ", names.Select(n => "$" + n))})";
+                var id = add.Parameters.Add("$id", SqliteType.Integer);
+                var values = names.Select(n => add.Parameters.Add("$" + n, SqliteType.Text)).ToArray();
+                int n = 0;
+                foreach (var c in Channels)
+                {
+                    // The row number keeps the channels in the order they are held in.
+                    id.Value = ++n;
+                    object?[] row =
+                    [
+                        c.Name, c.FrequencyHz, c.Scan ? 1 : 0, JsonSerializer.Serialize(c.Groups, Json), c.Mode?.ToString(), c.BandwidthHz,
+                        c.Agency, c.Description, c.Tag, c.Format, c.Tone, c.Callsign, c.InputHz, c.StationClass, c.Location, c.ImportKey,
+                    ];
+                    for (int i = 0; i < row.Length; i++)
+                    {
+                        values[i].ResetSqliteType();
+                        values[i].Value = row[i] ?? DBNull.Value;
+                    }
+                    add.ExecuteNonQuery();
+                }
+            }
+            long stamp = Changes(db);
+            all.Commit();
+            _stamp = stamp;
+            return true;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        catch (Exception e) when (e is SqliteException or IOException or UnauthorizedAccessException) { return false; }
     }
 
-    // ---- the file changed by something else ---------------------------------------------------
+    // ---- the database -------------------------------------------------------------------------
 
-    // The file as it was when last read or written here: when it was changed, and its length.
-    private (DateTime Changed, long Length) _stamp;
-    /// <summary>Counts the times the channels were read again from a file something else had changed.
+    private const string Columns =
+        "name, frequency_hz, scan, groups, mode, bandwidth_hz, agency, description, tag, format, tone, callsign, input_hz, station_class, location, import_key";
+
+    // One row per channel; its groups are a JSON list of names. Every change to the table, by this
+    // program or by anything else (the sqlite3 tool), counts up "channels_changes" in meta, which
+    // is how a change made elsewhere is noticed.
+    private const string Schema = """
+        CREATE TABLE IF NOT EXISTS channels (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, frequency_hz REAL NOT NULL, scan INTEGER NOT NULL DEFAULT 1,
+            groups TEXT NOT NULL DEFAULT '[]', mode TEXT, bandwidth_hz REAL, agency TEXT, description TEXT, tag TEXT,
+            format TEXT, tone TEXT, callsign TEXT, input_hz REAL, station_class TEXT, location TEXT, import_key TEXT);
+        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        INSERT OR IGNORE INTO meta (key, value) VALUES ('channels_changes', 0);
+        CREATE TRIGGER IF NOT EXISTS channels_added AFTER INSERT ON channels
+            BEGIN UPDATE meta SET value = value + 1 WHERE key = 'channels_changes'; END;
+        CREATE TRIGGER IF NOT EXISTS channels_edited AFTER UPDATE ON channels
+            BEGIN UPDATE meta SET value = value + 1 WHERE key = 'channels_changes'; END;
+        CREATE TRIGGER IF NOT EXISTS channels_removed AFTER DELETE ON channels
+            BEGIN UPDATE meta SET value = value + 1 WHERE key = 'channels_changes'; END;
+        """;
+
+    // Opened for each piece of work and closed after it: the RadioReference browser has the same file open.
+    private SqliteConnection Open()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false }.ToString());
+        try
+        {
+            db.Open();
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = Schema;
+            cmd.ExecuteNonQuery();
+            return db;
+        }
+        catch
+        {
+            db.Dispose();
+            throw;
+        }
+    }
+
+    private static long Changes(SqliteConnection db)
+    {
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT value FROM meta WHERE key = 'channels_changes'";
+        return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static List<MemoryChannel> Read(SqliteConnection db)
+    {
+        var list = new List<MemoryChannel>();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = $"SELECT {Columns} FROM channels ORDER BY id";
+        using var r = cmd.ExecuteReader();
+        string? Text(int i) => r.IsDBNull(i) ? null : r.GetString(i);
+        double? Number(int i) => r.IsDBNull(i) ? null : r.GetDouble(i);
+        while (r.Read())
+        {
+            List<string> groups;
+            try { groups = JsonSerializer.Deserialize<List<string>>(Text(3) ?? "[]", Json) ?? []; }
+            catch (JsonException) { groups = []; }
+            list.Add(new MemoryChannel
+            {
+                Name = Text(0) ?? "", FrequencyHz = r.GetDouble(1), Scan = r.GetInt64(2) != 0, Groups = groups,
+                Mode = Enum.TryParse(Text(4), ignoreCase: true, out Mode mode) ? mode : null, BandwidthHz = Number(5),
+                Agency = Text(6), Description = Text(7), Tag = Text(8), Format = Text(9), Tone = Text(10), Callsign = Text(11),
+                InputHz = Number(12), StationClass = Text(13), Location = Text(14), ImportKey = Text(15),
+            });
+        }
+        return list;
+    }
+
+    // ---- channels from a memories.json of an earlier version ----------------------------------
+
+    /// <summary>
+    /// Add the channels of a memories.json file, as earlier versions kept them. One already held is
+    /// left as it is: the same imported row, or the same frequency, name and description. Not saved here.
+    /// </summary>
+    /// <returns>How many were added.</returns>
+    public int AddFromJson(string file)
+    {
+        List<MemoryChannel>? read;
+        try { read = JsonSerializer.Deserialize<List<MemoryChannel>>(File.ReadAllText(file), Json); }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return 0; }
+        if (read is null) return 0;
+        // Into an empty store they go as they are, twins and all.
+        if (Channels.Count > 0)
+        {
+            var keys = Channels.Where(c => c.ImportKey is not null).Select(c => c.ImportKey!).ToHashSet();
+            var rows = Channels.Select(RadioReference.RrImport.Row).ToHashSet();
+            read = read.Where(c => !(c.ImportKey is not null && keys.Contains(c.ImportKey)) && !rows.Contains(RadioReference.RrImport.Row(c))).ToList();
+        }
+        Channels.AddRange(read);
+        return read.Count;
+    }
+
+    // ---- the channels changed by something else -----------------------------------------------
+
+    // The count of changes to the table as it was when last read or written here.
+    private long _stamp;
+    /// <summary>Counts the times the channels were read again after something else had changed them.
     /// Every channel is then a new object: whatever holds the old ones must let them go.</summary>
     public int Reloads { get; private set; }
 
-    private static (DateTime, long) Stamp(string path)
-    {
-        try
-        {
-            var file = new FileInfo(path);
-            return file.Exists ? (file.LastWriteTimeUtc, file.Length) : default;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return default; }
-    }
-
     /// <summary>
-    /// Read the channels again if the file is not as this program left it: edited by hand, written by
-    /// another tool, or by another copy of the program. Cheap enough to ask every second. A file
-    /// that cannot be read yet (half written) is left for the next time; one that has gone changes nothing.
+    /// Read the channels again if the table is not as this program left it: edited with another tool,
+    /// or by another copy of the program. Cheap enough to ask every second. A database that cannot be
+    /// read just now is left for the next time; one that has gone changes nothing.
     /// </summary>
     /// <returns>True when the channels have been replaced.</returns>
     public bool ReloadIfChangedOnDisk()
     {
-        var now = Stamp(_path);
-        if (now == _stamp) return false;
-        if (now == default)
+        try
         {
+            if (!File.Exists(_path)) return false;
+            using var db = Open();
+            long now = Changes(db);
+            if (now == _stamp) return false;
+            Channels = Read(db);
             _stamp = now;
-            return false;
         }
-        List<MemoryChannel>? read;
-        try { read = JsonSerializer.Deserialize<List<MemoryChannel>>(File.ReadAllText(_path), Json); }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return false; }
-        if (read is null) return false;
-        Channels = read;
-        _stamp = now;
+        catch (Exception e) when (e is SqliteException or IOException or UnauthorizedAccessException) { return false; }
         Version++;
         Reloads++;
         return true;

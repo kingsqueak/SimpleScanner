@@ -3,7 +3,8 @@ using Microsoft.Data.Sqlite;
 namespace SimpleScanner.RadioReference;
 
 /// <summary>
-/// What has been fetched from RadioReference, kept in a SQLite file beside the settings so that a
+/// What has been fetched from RadioReference, kept in the program's database (SQLite, table
+/// "answers", the file that also holds the stored channels) beside the settings so that a
 /// county looked at once opens at once the next time, and the service is not asked twice for the
 /// same thing. The answers are kept as they came (the XML), one row per question; the user's
 /// account is in the question as it is sent but not in the key here, and never in an answer.
@@ -16,8 +17,7 @@ public sealed class RrCache : IDisposable
     /// <summary>The file in the program's own folder; <paramref name="path"/> is for tests (":memory:" keeps nothing).</summary>
     public RrCache(string? path = null)
     {
-        path ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SimpleScanner", "radioreference.db");
+        path ??= AppFiles.Database;
         try
         {
             if (path != ":memory:") Directory.CreateDirectory(Path.GetDirectoryName(path)!);

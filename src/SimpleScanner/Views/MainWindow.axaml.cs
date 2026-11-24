@@ -85,8 +85,25 @@ public partial class MainWindow : Window
             area.Y + Math.Max(0, (area.Height - (int)(ClientSize.Height * screen.Scaling)) / 2));
     }
 
+    private int _tab;
+
+    /// <summary>The Memory Mgr tab is a button in the tab strip: it opens the channel editor and the tab that was showing comes back.</summary>
+    private void OnTabChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // Lists and choosers inside the tabs send this event up too.
+        if (!ReferenceEquals(e.Source, Tabs)) return;
+        if (!ReferenceEquals(Tabs.SelectedItem, MemoryTab))
+        {
+            _tab = Tabs.SelectedIndex;
+            return;
+        }
+        Tabs.SelectedIndex = _tab;
+        // After the click is over, so the main window does not take the focus back from the editor.
+        Avalonia.Threading.Dispatcher.UIThread.Post(OpenChannels);
+    }
+
     /// <summary>Open the channel editor, or bring it forward if it is already open.</summary>
-    private void OnChannelsClick(object? sender, RoutedEventArgs e)
+    private void OpenChannels()
     {
         if (DataContext is not MainViewModel main) return;
         if (_channels is not null)

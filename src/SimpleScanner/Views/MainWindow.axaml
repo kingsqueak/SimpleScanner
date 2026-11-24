@@ -43,98 +43,11 @@
     <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
                TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" />
 
-    <!-- The controls, in three tabs under the readout -->
-    <TabControl Margin="0,8,0,0" Padding="0">
+    <!-- The controls, in tabs under the readout -->
+    <TabControl x:Name="Tabs" Margin="0,8,0,0" Padding="0" SelectionChanged="OnTabChanged">
 
       <TabItem Header="Operate">
         <DockPanel>
-          <!-- Stored channels and their groups, at the right of the tab -->
-          <Border DockPanel.Dock="Right" Width="290" Margin="12,10,0,0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
-            <DockPanel>
-              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                <Button Classes="seg" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                        ToolTip.Tip="Which groups of stored channels to show and scan. Tick one or several; with none ticked, all are shown.">
-                  <DockPanel>
-                    <TextBlock DockPanel.Dock="Right" Text="▾" Margin="6,0,0,0" />
-                    <TextBlock Text="{Binding GroupsText}" TextTrimming="CharacterEllipsis" />
-                  </DockPanel>
-                  <Button.Flyout>
-                    <Flyout Placement="BottomEdgeAlignedLeft">
-                      <StackPanel Spacing="4" MinWidth="220">
-                        <Button Classes="seg" Content="All groups" Command="{Binding ShowAllGroupsCommand}" HorizontalAlignment="Stretch"
-                                ToolTip.Tip="Untick every group: all of them are shown and scanned" />
-                        <ScrollViewer MaxHeight="360">
-                          <StackPanel>
-                            <TextBlock Text="User Groups" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasUserGroups}"
-                                       ToolTip.Tip="The groups you made, in the channel editor or by importing" />
-                            <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasUserGroups}" />
-                            <ItemsControl ItemsSource="{Binding UserGroupRows}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:GroupRow">
-                                  <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <TextBlock Text="Auto Groups · Location" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasPlaceGroups}"
-                                       ToolTip.Tip="One group for each location in use, made by the program: a town, a county, or statewide and nationwide users. Channels loaded from RadioReference online have a location; it can be typed for any channel in the channel editor" />
-                            <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasPlaceGroups}" />
-                            <ItemsControl ItemsSource="{Binding PlaceGroupRows}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:GroupRow">
-                                  <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <TextBlock Text="Auto Groups · Tag" Classes="label" FontWeight="SemiBold" Margin="2,6,0,2" IsVisible="{Binding HasAutoGroups}"
-                                       ToolTip.Tip="One group for each tag in use, made by the program: its channels are those with that tag, however the tag is written" />
-                            <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,2" IsVisible="{Binding HasAutoGroups}" />
-                            <ItemsControl ItemsSource="{Binding AutoGroupRows}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:GroupRow">
-                                  <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                          </StackPanel>
-                        </ScrollViewer>
-                      </StackPanel>
-                    </Flyout>
-                  </Button.Flyout>
-                </Button>
-              </DockPanel>
-              <Button DockPanel.Dock="Bottom" Classes="seg" Content="Channels, groups and import…" Click="OnChannelsClick"
-                      HorizontalAlignment="Stretch" Margin="0,8,0,0"
-                      ToolTip.Tip="Open the channel editor: edit what is stored about each channel, put channels in groups, and load RadioReference CSV downloads" />
-              <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-                <Button DockPanel.Dock="Right" Classes="seg" Content="Delete" Command="{Binding DeleteChannelCommand}" Margin="6,0,0,0"
-                        ToolTip.Tip="Remove the selected channel" />
-                <Button DockPanel.Dock="Right" Classes="seg" Content="Store" Command="{Binding StoreChannelCommand}" Margin="6,0,0,0"
-                        ToolTip.Tip="Store the frequency on the display under this name. With one group shown it goes in that group; otherwise in &quot;My channels&quot;, or where it already was" />
-                <TextBox Text="{Binding NewName}" PlaceholderText="Name for this frequency" />
-              </DockPanel>
-              <ListBox ItemsSource="{Binding Memories}" SelectedItem="{Binding SelectedMemory}" Background="Transparent">
-                <ListBox.Styles>
-                  <Style Selector="ListBoxItem">
-                    <Setter Property="Padding" Value="8,2" />
-                    <Setter Property="MinHeight" Value="0" />
-                  </Style>
-                </ListBox.Styles>
-                <ListBox.ItemTemplate>
-                  <DataTemplate x:DataType="vm:MemoryRow">
-                    <DockPanel>
-                      <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Scan}" MinWidth="0" Margin="0,0,6,0"
-                                ToolTip.Tip="Include this channel when scanning" />
-                      <StackPanel>
-                        <TextBlock Text="{Binding Name}" FontSize="13" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding Detail}" Classes="label" />
-                      </StackPanel>
-                    </DockPanel>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </DockPanel>
-          </Border>
-
           <Grid DockPanel.Dock="Bottom" ColumnDefinitions="44,*" Margin="2,8,0,0" ColumnSpacing="12">
           <!-- Scan the stored channels: kept at the foot of the tab -->
           <TextBlock Grid.Row="0" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
@@ -222,6 +135,110 @@
           </ScrollViewer>
         </DockPanel>
       </TabItem>
+
+      <!-- Which groups of stored channels are shown on Operate and scanned -->
+      <TabItem Header="Scan Groups">
+        <DockPanel Margin="2,10,0,0">
+          <!-- The stored channels of the groups ticked, at the right of the tab: tick to scan, select to tune, store and delete -->
+          <Border DockPanel.Dock="Right" Width="290" Margin="12,0,0,0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
+            <DockPanel>
+              <DockPanel DockPanel.Dock="Top" Margin="2,0,0,8"
+                         ToolTip.Tip="The groups of stored channels shown here and scanned: those ticked at the left">
+                <TextBlock DockPanel.Dock="Left" Text="Groups" Classes="label" Margin="0,0,8,0" />
+                <TextBlock Text="{Binding GroupsText}" FontSize="13" TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+              <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                <Button DockPanel.Dock="Right" Classes="seg" Content="Delete" Command="{Binding DeleteChannelCommand}" Margin="6,0,0,0"
+                        ToolTip.Tip="Remove the selected channel" />
+                <Button DockPanel.Dock="Right" Classes="seg" Content="Store" Command="{Binding StoreChannelCommand}" Margin="6,0,0,0"
+                        ToolTip.Tip="Store the frequency on the display under this name. With one group shown it goes in that group; otherwise in &quot;My channels&quot;, or where it already was" />
+                <TextBox Text="{Binding NewName}" PlaceholderText="Name for this frequency" />
+              </DockPanel>
+              <ListBox ItemsSource="{Binding Memories}" SelectedItem="{Binding SelectedMemory}" Background="Transparent">
+                <ListBox.Styles>
+                  <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="8,2" />
+                    <Setter Property="MinHeight" Value="0" />
+                  </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:MemoryRow">
+                    <DockPanel>
+                      <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Scan}" MinWidth="0" Margin="0,0,6,0"
+                                ToolTip.Tip="Include this channel when scanning" />
+                      <StackPanel>
+                        <TextBlock Text="{Binding Name}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Detail}" Classes="label" />
+                      </StackPanel>
+                    </DockPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+          </Border>
+
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <Button DockPanel.Dock="Left" Classes="seg" Content="All groups" Command="{Binding ShowAllGroupsCommand}"
+                    ToolTip.Tip="Untick every group: all of them are shown and scanned" />
+            <TextBlock Text="Tick one or several groups to show and scan; with none ticked, all are."
+                       Classes="label" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+          </DockPanel>
+          <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
+            <Border Grid.Column="0" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="User Groups" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
+                           ToolTip.Tip="The groups you made, in the channel editor or by importing" />
+                <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                  <ItemsControl ItemsSource="{Binding UserGroupRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:GroupRow">
+                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+            <Border Grid.Column="1" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Auto Groups · Location" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
+                           ToolTip.Tip="One group for each location in use, made by the program: a town, a county, or statewide and nationwide users. Channels loaded from RadioReference online have a location; it can be typed for any channel in the channel editor" />
+                <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                  <ItemsControl ItemsSource="{Binding PlaceGroupRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:GroupRow">
+                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+            <Border Grid.Column="2" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Auto Groups · Tag" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
+                           ToolTip.Tip="One group for each tag in use, made by the program: its channels are those with that tag, however the tag is written" />
+                <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                  <ItemsControl ItemsSource="{Binding AutoGroupRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:GroupRow">
+                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+          </Grid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- Not a page: choosing it opens the channel editor and the tab that was showing stays -->
+      <TabItem x:Name="MemoryTab" Header="Memory Mgr"
+               ToolTip.Tip="Open the channel editor: edit what is stored about each channel, put channels in groups, and load RadioReference CSV downloads" />
 
       <TabItem Header="Search">
         <Grid RowDefinitions="Auto" ColumnDefinitions="44,*" Margin="2,12,0,0" RowSpacing="12" ColumnSpacing="12">

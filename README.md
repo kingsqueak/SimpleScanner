@@ -55,8 +55,10 @@ issues to a program's author. The key is not in this repository. A build takes i
 `radioreference.key` at the top of the repository (git ignores it); a copy built without one says so
 and can be given a key in the environment variable `RADIOREFERENCE_KEY` or in a file
 `radioreference.key` beside the settings. The password is kept only if asked, in the macOS login
-keychain; on other systems it is asked for at each run. Answers are kept in `radioreference.db`
-(SQLite) beside the settings.
+keychain; on other systems it is asked for at each run. Answers are kept in the program's database,
+`simplescanner.db` (SQLite) beside the settings: the same file that holds the stored channels (table
+`channels`), whether or not a RadioReference account is used. A `memories.json` from an earlier
+version is read into it at the first start and put aside as `memories.json.moved-into-database`.
 
 ### The AMBE speech codecs
 

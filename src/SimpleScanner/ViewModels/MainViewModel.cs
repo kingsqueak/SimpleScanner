@@ -343,7 +343,7 @@ public sealed partial class MainViewModel : ObservableObject
             (shown.Count == 0 ? c.Groups : shown.Where(g => MemoryStore.InGroup(c, g))).Order().FirstOrDefault() ?? "";
         foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || shown.Any(g => MemoryStore.InGroup(c, g)))
                      .OrderBy(First).ThenBy(c => c.FrequencyHz))
-            Memories.Add(new MemoryRow(c, _memories.Save));
+            Memories.Add(new MemoryRow(c, () => _memories.Save()));
         _loading = false;
     }
 

@@ -15,7 +15,9 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var vm = new MainViewModel(Settings.Load(), new Receiver(new SdrPlaySource()), MemoryStore.Load());
+            var store = AppFiles.OpenStore();
+            FillLocations(store);
+            var vm = new MainViewModel(Settings.Load(), new Receiver(new SdrPlaySource()), store);
             var window = new MainWindow { DataContext = vm };
             window.RestorePlace();
             desktop.MainWindow = window;
@@ -28,5 +30,16 @@ public partial class App : Application
             if ((desktop.Args ?? []).Contains("--start")) vm.TogglePowerCommand.Execute(null);
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// Channels stored before locations were kept, or from a CSV file, get theirs from what was
+    /// fetched from RadioReference before, so the location groups are there without opening its browser.
+    /// </summary>
+    private static void FillLocations(MemoryStore store)
+    {
+        if (!store.Channels.Any(c => c.Location is null && c.ImportKey is not null)) return;
+        using var cache = new RadioReference.RrCache();
+        if (RadioReference.RrPlaces.FillFromCache(store, cache) > 0) store.Save();
     }
 }

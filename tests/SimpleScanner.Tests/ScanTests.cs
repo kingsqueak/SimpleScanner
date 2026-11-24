@@ -15,6 +15,9 @@ internal sealed class FakeSource : IIqSource
     public int Tunes;
 
     public string Description => "fake";
+    public IReadOnlyList<RadioInfo> Radios() => [];
+    public RadioInfo? Radio => null;
+    public string? Serial { get; set; }
     public double SampleRate { get; private set; }
     public double CenterHz => Volatile.Read(ref _center);
     public bool IsRunning => _run;

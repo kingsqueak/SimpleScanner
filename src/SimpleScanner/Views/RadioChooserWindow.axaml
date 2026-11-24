@@ -18,7 +18,7 @@
       </ListBox.ItemTemplate>
     </ListBox>
     <TextBlock Classes="label" TextWrapping="Wrap"
-               Text="The one used last time is already selected. To change receiver later, close the scanner and start it again." />
+               Text="To change to another later, use Receiver on the Settings tab." />
     <Button Classes="seg" Content="Use this receiver" Click="OnUse" IsDefault="True" HorizontalAlignment="Right" />
   </StackPanel>
 </Window>

@@ -95,6 +95,8 @@ public partial class MainWindow : Window
         if (!ReferenceEquals(Tabs.SelectedItem, MemoryTab))
         {
             _tab = Tabs.SelectedIndex;
+            // Settings lists the radios: look for them as it is shown, so one just plugged in is there.
+            if (Tabs.SelectedItem is TabItem { Header: "Settings" } && DataContext is MainViewModel main) main.RefreshRadios();
             return;
         }
         Tabs.SelectedIndex = _tab;

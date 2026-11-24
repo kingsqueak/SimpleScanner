@@ -33,6 +33,7 @@ public partial class App : Application
             window.Opened += async (_, _) =>
             {
                 await ChooseRadio(window, source, settings);
+                vm.RefreshRadios();
                 // --start: switch the receiver on at launch.
                 if (start) vm.TogglePowerCommand.Execute(null);
             };
@@ -41,15 +42,16 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// With more than one radio plugged in, ask which to use, offering the one used last time.
-    /// With one, or none, or no API to ask, nothing is shown and the source finds its own.
+    /// With more than one radio plugged in and the one used last time not among them (or none used
+    /// yet), ask which to use. Otherwise nothing is shown: the last one is opened, or the source
+    /// finds its own. The Receiver box in Settings changes it afterwards.
     /// </summary>
     private static async Task ChooseRadio(Window owner, SdrPlaySource source, Settings settings)
     {
         IReadOnlyList<Radio.RadioInfo> radios;
         try { radios = SdrPlaySource.ListRadios(); }
         catch (InvalidOperationException) { return; }      // said when the receiver is switched on
-        if (radios.Count < 2) return;
+        if (radios.Count < 2 || radios.Any(r => r.Serial == settings.RadioSerial)) return;
         var chooser = new RadioChooserWindow(radios, settings.RadioSerial);
         await chooser.ShowDialog(owner);
         if (chooser.Chosen is not { } radio) return;

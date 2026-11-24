@@ -1,3 +1,4 @@
+using SimpleScanner.Radio;
 using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -137,6 +138,9 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private Choice _selectedStep;
     [ObservableProperty] private Choice _selectedAvoidTime;
     [ObservableProperty] private Choice _selectedResumeTime;
+    /// <summary>The radios that can be chosen: the free ones and the one in use.</summary>
+    [ObservableProperty] private IReadOnlyList<RadioInfo> _radios = [];
+    [ObservableProperty] private RadioInfo? _selectedRadio;
     [ObservableProperty] private IReadOnlyList<string> _antennas;
     [ObservableProperty] private string _selectedAntenna;
     [ObservableProperty] private bool _biasT;
@@ -834,6 +838,68 @@ public sealed partial class MainViewModel : ObservableObject
         _dirty = true;
     }
 
+    /// <summary>Look again for radios, and show as chosen the one in use, or else the one that will be opened.</summary>
+    public void RefreshRadios()
+    {
+        IReadOnlyList<RadioInfo> found;
+        try { found = _rx.Source.Radios(); }
+        catch (InvalidOperationException) { found = []; }     // said when the receiver is switched on
+        string? serial = IsOn ? _rx.Source.Radio?.Serial : _rx.Source.Serial;
+        _loading = true;
+        Radios = found;
+        SelectedRadio = found.FirstOrDefault(r => r.Serial == serial);
+        _loading = false;
+    }
+
+    /// <summary>Another radio was chosen: remember it and, if the receiver is on, change over to it now.</summary>
+    partial void OnSelectedRadioChanged(RadioInfo? value)
+    {
+        if (_loading || value is null || value.Serial == _rx.Source.Serial && !IsOn) return;
+        _rx.Source.Serial = value.Serial;
+        _settings.RadioSerial = value.Serial;
+        _dirty = true;
+        if (IsOn && !IsBusy && _rx.Source.Radio?.Serial != value.Serial) _ = ChangeRadio();
+    }
+
+    private async Task ChangeRadio()
+    {
+        IsBusy = true;
+        try
+        {
+            Status = "Changing receiver…";
+            await Task.Run(_rx.Stop);
+            IsScanning = false;
+            await StartRadio();
+        }
+        catch (Exception e)
+        {
+            IsOn = false;
+            DeviceText = "Off";
+            Status = e.Message;
+        }
+        finally { IsBusy = false; }
+        RefreshRadios();
+    }
+
+    /// <summary>Switch the radio on and take up what this one has: its name, its antenna sockets, its bias T.</summary>
+    private async Task StartRadio()
+    {
+        if (Status.Length == 0) Status = "Starting the radio…";
+        await Task.Run(_rx.Start);
+        IsOn = true;
+        Status = "";
+        DeviceText = _rx.Source.Description;
+        HasBiasT = _rx.Source.HasBiasT;   // the FM notch is on the same models
+        var antennas = _rx.Source.Antennas;
+        if (!antennas.SequenceEqual(Antennas))
+        {
+            _loading = true;
+            Antennas = antennas;
+            SelectedAntenna = _rx.Source.Antenna;
+            _loading = false;
+        }
+    }
+
     partial void OnSelectedAntennaChanged(string value)
     {
         if (_loading || value is null) return;
@@ -883,20 +949,8 @@ public sealed partial class MainViewModel : ObservableObject
             }
             else
             {
-                Status = "Starting the radio…";
-                await Task.Run(_rx.Start);
-                IsOn = true;
                 Status = "";
-                DeviceText = _rx.Source.Description;
-                HasBiasT = _rx.Source.HasBiasT;   // the FM notch is on the same models
-                var antennas = _rx.Source.Antennas;
-                if (!antennas.SequenceEqual(Antennas))
-                {
-                    _loading = true;
-                    Antennas = antennas;
-                    SelectedAntenna = _rx.Source.Antenna;
-                    _loading = false;
-                }
+                await StartRadio();
             }
         }
         catch (Exception e)
@@ -906,6 +960,7 @@ public sealed partial class MainViewModel : ObservableObject
             Status = e.Message;
         }
         finally { IsBusy = false; }
+        RefreshRadios();
     }
 
     private void Tick()

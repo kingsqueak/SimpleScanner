@@ -4,7 +4,8 @@ using SimpleScanner.Radio;
 
 namespace SimpleScanner.Views;
 
-/// <summary>Asked at start when more than one radio is plugged in: which one to use. Closing the
+/// <summary>Asked at start when more than one radio is plugged in and the one used last time is
+/// not among them (or none has been used yet): which one to use. Closing the
 /// window without choosing takes the one that was selected when it opened.</summary>
 public partial class RadioChooserWindow : Window
 {

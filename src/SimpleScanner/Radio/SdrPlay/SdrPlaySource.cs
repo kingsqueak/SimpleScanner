@@ -42,6 +42,16 @@ public sealed unsafe class SdrPlaySource : IIqSource
     /// </summary>
     public string? Serial { get; set; }
 
+    public RadioInfo? Radio { get; private set; }
+
+    public IReadOnlyList<RadioInfo> Radios()
+    {
+        var free = ListRadios();
+        // The API leaves out a radio that is open, ours included.
+        if (_running && Radio is { } mine && !free.Contains(mine)) return [mine, .. free];
+        return free;
+    }
+
     private static string SerialOf(DeviceT* d) => Marshal.PtrToStringUTF8((nint)d->SerNo) ?? "";
 
     private const int AgcSetPointDbfs = -30, AgcMode50Hz = 2, MaxIfGr = 59, MinIfGr = 20;
@@ -120,6 +130,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
             string serial;
             fixed (DeviceT* d = &_device) serial = SerialOf(d);
             Description = $"{ModelName(_device.HwVer)} {serial}";
+            Radio = new RadioInfo(ModelName(_device.HwVer), serial);
             Antennas = isDx ? ["Antenna A", "Antenna B", "Antenna C"] : ["Antenna"];
             if (!Antennas.Contains(_antenna)) _antenna = Antennas[0];
 

@@ -7,7 +7,10 @@ namespace SimpleScanner.Radio;
 public delegate void IqHandler(ReadOnlySpan<float> i, ReadOnlySpan<float> q, bool retuned);
 
 /// <summary>A radio that is plugged in and free to open: its model and serial number.</summary>
-public sealed record RadioInfo(string Model, string Serial);
+public sealed record RadioInfo(string Model, string Serial)
+{
+    public string Label => $"{Model}  {Serial}";
+}
 
 /// <summary>
 /// A radio as the scanner sees it: a stream of IQ samples round a centre frequency, with a
@@ -17,6 +20,14 @@ public interface IIqSource : IDisposable
 {
     /// <summary>Model and serial number, once started.</summary>
     string Description { get; }
+    /// <summary>The radios that can be chosen now: those that are free, and the one this source has open.
+    /// Throws <see cref="InvalidOperationException"/> when the radio's software is missing or not answering.</summary>
+    IReadOnlyList<RadioInfo> Radios();
+    /// <summary>The radio open now, or the one last open; null before the first start.</summary>
+    RadioInfo? Radio { get; }
+    /// <summary>The serial number of the radio to open at the next <see cref="Start"/>. With none, or when
+    /// that radio is not there, the source picks one itself.</summary>
+    string? Serial { get; set; }
     double SampleRate { get; }
     double CenterHz { get; }
     /// <summary>The width round the centre over which the radio's response is flat, at the present sample rate.</summary>

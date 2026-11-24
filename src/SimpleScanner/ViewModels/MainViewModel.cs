@@ -60,31 +60,25 @@ public sealed partial class GroupRow(string name, bool selected, Action changed)
     }
 }
 
-/// <summary>The scanner's front panel: what the display shows and what the controls do.</summary>
+/// <summary>
+/// The scanner's front panel: the radios running, which of them the controls work, and what they
+/// share: the stored channels and their groups, the timers, the sound device, the window.
+/// </summary>
 public sealed partial class MainViewModel : ObservableObject
 {
-    public const double MinHz = 100_000, MaxHz = 2_000_000_000;
+    public const double MinHz = RadioViewModel.MinHz, MaxHz = RadioViewModel.MaxHz;
 
     private readonly Settings _settings;
-    private readonly IReceiver _rx;
     private readonly MemoryStore _memories;
     private const string AllGroups = "All groups", DefaultDevice = "System default";
-    private long _lastPasses;
-    private double _passRate;
-    private bool _searching;
-    // The stored channels the scan in progress was made from, and the one last picked by hand:
-    // they decide whose details are shown where several channels share a frequency.
-    private List<MemoryChannel> _scanMembers = [];
-    private MemoryChannel? _picked;
     private readonly DispatcherTimer _timer;
     private bool _loading, _dirty;
     private int _ticks;
 
-    public IReadOnlyList<Choice> Steps { get; } =
-    [
-        new("Auto", 0), new("5 kHz", 5000), new("6.25 kHz", 6250), new("7.5 kHz", 7500), new("8.33 kHz", 25000.0 / 3),
-        new("10 kHz", 10000), new("12.5 kHz", 12500), new("25 kHz", 25000), new("100 kHz", 100000), new("1 MHz", 1e6),
-    ];
+    /// <summary>The radios running, the window's own first; each further one is in a helper program.</summary>
+    public IReadOnlyList<RadioViewModel> RadioList { get; }
+    /// <summary>The radio the display shows and the controls work.</summary>
+    [ObservableProperty] private RadioViewModel _radio;
 
     /// <summary>How long Avoid keeps a frequency out of the scan, in minutes; 0 is until the app is closed.</summary>
     public IReadOnlyList<Choice> AvoidTimes { get; } = [new("30 min", 30), new("1 hr", 60), new("Full session", 0)];
@@ -93,63 +87,10 @@ public sealed partial class MainViewModel : ObservableObject
     public IReadOnlyList<Choice> ResumeTimes { get; } =
         [new("15s", 15), new("30s", 30), new("1min", 60), new("3min", 180), new("5min", 300), new("10min", 600), new("Hold", 0)];
 
-    private static readonly Choice[] AmWidths = [new("8.33 kHz channel", BandPlan.AmAir833), new("25 kHz channel", BandPlan.AmAir)];
-    private static readonly Choice[] NfmWidths = [new("12.5 kHz channel", BandPlan.NfmNarrow), new("25 kHz channel", BandPlan.NfmWide)];
-    private static readonly Choice[] WfmWidths = [new("Broadcast", BandPlan.Wfm)];
-
-    [ObservableProperty] private double _frequencyHz;
-    [ObservableProperty] private string _bandName = "";
-    /// <summary>Whose channel this is: the stored channel's agency and description.</summary>
-    [ObservableProperty] private string _detailText = "";
-    /// <summary>The stored channel's particulars: tag, signal type, tone, station class, input, callsign.</summary>
-    [ObservableProperty] private string _infoText = "";
-    [ObservableProperty] private string _modeText = "";
-    [ObservableProperty] private string _entryText = "";
-    [ObservableProperty] private string _status = "";
-    [ObservableProperty] private string _deviceText = "Off";
-    [ObservableProperty] private string _gainText = "";
-    [ObservableProperty] private string _levelText = "";
-    [ObservableProperty] private double _level = -140;
-    [ObservableProperty] private bool _squelchOpen;
-    [ObservableProperty] private bool _overloaded;
-    [ObservableProperty] private bool _isStereo;
-    [ObservableProperty] private string _digitalText = "";
-    [ObservableProperty] private bool _isEncrypted;
-    [ObservableProperty] private bool _stereoOn;
-    [ObservableProperty] private bool _blocked;
-    [ObservableProperty] private bool _isOn;
-    [ObservableProperty] private bool _isBusy;
-    [ObservableProperty] private double _volume;
-    /// <summary>The speaker is silenced; the volume setting is left as it is. Not kept between runs.</summary>
-    [ObservableProperty] private bool _isMuted;
     /// <summary>The small window is showing: the display and one row of buttons.</summary>
     [ObservableProperty] private bool _isMini;
-    [ObservableProperty] private double _squelchDb;
-    [ObservableProperty] private bool _squelchOn;
-    /// <summary>The squelch also stays shut on noise above its level.</summary>
-    [ObservableProperty] private bool _autoSquelch;
-    [ObservableProperty] private bool _autoGain;
-    [ObservableProperty] private double _gainStep;
-    [ObservableProperty] private double _maxGainStep = 27;
-    [ObservableProperty] private bool _autoMode;
-    [ObservableProperty] private Mode _mode;
-    [ObservableProperty] private IReadOnlyList<Choice> _widths = NfmWidths;
-    [ObservableProperty] private Choice? _selectedWidth;
-    [ObservableProperty] private Choice _selectedStep;
     [ObservableProperty] private Choice _selectedAvoidTime;
     [ObservableProperty] private Choice _selectedResumeTime;
-    /// <summary>The radios that can be chosen: the free ones and the one in use.</summary>
-    [ObservableProperty] private IReadOnlyList<RadioInfo> _radios = [];
-    [ObservableProperty] private RadioInfo? _selectedRadio;
-    [ObservableProperty] private IReadOnlyList<string> _antennas;
-    [ObservableProperty] private string _selectedAntenna;
-    [ObservableProperty] private bool _biasT;
-    [ObservableProperty] private bool _fmNotch;
-    /// <summary>Frequency correction in parts per million; null while the box is empty.</summary>
-    [ObservableProperty] private decimal? _ppm = 0;
-    /// <summary>The radio in use has a bias T (not known until it has been started once).</summary>
-    [ObservableProperty] private bool _hasBiasT = true;
-    [ObservableProperty] private bool _isScanning;
     /// <summary>What the group selector's button says: the groups ticked, or that all are shown.</summary>
     [ObservableProperty] private string _groupsText = AllGroups;
     [ObservableProperty] private MemoryRow? _selectedMemory;
@@ -158,8 +99,6 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _selectedAudioDevice = DefaultDevice;
     [ObservableProperty] private string _searchFrom = "144";
     [ObservableProperty] private string _searchTo = "148";
-    [ObservableProperty] private bool _isSearching;
-    public string SearchText => IsSearching ? "Stop search" : "Search";
 
     public System.Collections.ObjectModel.ObservableCollection<MemoryRow> Memories { get; } = [];
     /// <summary>Every memory group with its tick. None ticked means all groups are shown and scanned.</summary>
@@ -171,155 +110,57 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _hasUserGroups;
     [ObservableProperty] private bool _hasAutoGroups;
     [ObservableProperty] private bool _hasPlaceGroups;
-    public string ScanText => IsScanning ? "Stop" : "Scan";
 
-    public bool IsAm => !AutoMode && Mode == Mode.Am;
-    public bool IsNfm => !AutoMode && Mode == Mode.Nfm;
-    public bool IsWfm => !AutoMode && Mode == Mode.Wfm;
-    public string PowerText => IsOn ? "Stop" : "Start";
-
-    public MainViewModel(Settings settings, IReceiver receiver, MemoryStore memories)
+    /// <param name="receivers">One for each radio to run, the window's own first. The first takes the settings of
+    /// the radio it will open, or those last used; each other takes the settings kept under its serial number.</param>
+    public MainViewModel(Settings settings, IReadOnlyList<IReceiver> receivers, MemoryStore memories)
     {
         _settings = settings;
-        _rx = receiver;
         _memories = memories;
+        var radios = new List<RadioViewModel>();
+        foreach (var rx in receivers)
+        {
+            var kept = radios.Count == 0 ? settings.ForFirstRadio(rx.Source.Serial)
+                : rx.Source.Serial is { } serial ? settings.Entry(serial) : new RadioSettings();
+            var radio = new RadioViewModel(rx, kept, memories);
+            radio.IsTaken = s => radios.Any(o => o != radio && o.Serial == s);
+            radios.Add(radio);
+        }
+        RadioList = radios;
+        _radio = radios[0];
         _loading = true;
-        _antennas = _rx.Source.Antennas;
-        _selectedAntenna = _antennas.Contains(settings.Antenna) ? settings.Antenna : _antennas[0];
-        _selectedStep = Steps.FirstOrDefault(s => Math.Abs(s.Value - settings.StepHz) < 0.5) ?? Steps[0];
         _selectedAvoidTime = AvoidTimes.FirstOrDefault(a => (int)a.Value == settings.AvoidMinutes) ?? AvoidTimes[0];
-        _rx.AvoidTime = AvoidSpan(_selectedAvoidTime);
         _selectedResumeTime = ResumeTimes.FirstOrDefault(r => (int)r.Value == settings.ResumeSeconds) ?? ResumeTimes[^1];
-        _rx.ResumeSeconds = _selectedResumeTime.Value > 0 ? _selectedResumeTime.Value : null;
-        Volume = settings.Volume * 100;
-        SquelchDb = settings.SquelchOn ? Math.Max(settings.SquelchDb, SquelchOffDb) : SquelchOffDb;
-        SquelchOn = SquelchDb > SquelchOffDb;
-        AutoSquelch = settings.AutoSquelch;
-        StereoOn = settings.Stereo;
-        AutoGain = settings.AutoGain;
-        BiasT = settings.BiasT;
-        FmNotch = settings.FmNotch;
-        Ppm = (decimal)Math.Clamp(double.IsFinite(settings.Ppm) ? settings.Ppm : 0, -MaxPpm, MaxPpm);
-        GainStep = settings.GainStep;
-        AutoMode = settings.AutoMode;
-        Mode = settings.Mode;
-        FrequencyHz = Math.Clamp(settings.FrequencyHz, MinHz, MaxHz);
-        _loading = false;
-
-        _rx.Source.Antenna = _selectedAntenna;
-        _rx.Source.BiasT = BiasT;
-        _rx.Source.FmNotch = FmNotch;
-        _rx.Source.Ppm = (double)(Ppm ?? 0);
-        _rx.Source.AutoGain = AutoGain;
-        _rx.Source.GainStep = (int)GainStep;
-        _rx.Volume = Volume / 100;
         _isMini = settings.Mini;
-        _rx.SquelchDb = SquelchDb;
-        _rx.SquelchEnabled = SquelchOn;
-        _rx.AutoSquelch = AutoSquelch;
-        _rx.LevelOffsetDb = settings.LevelOffsetDb;
-        ApplyFrequency(settings.BandwidthHz);
+        _loading = false;
+        foreach (var r in radios)
+        {
+            r.SetAvoidTime(_selectedAvoidTime);
+            r.SetResumeTime(_selectedResumeTime);
+        }
         RefreshMemories(settings.Groups ?? (settings.Group is { } g && g != AllGroups ? [g] : []));
         _loading = true;
         SearchFrom = settings.SearchFromMHz.ToString("0.####", CultureInfo.InvariantCulture);
         SearchTo = settings.SearchToMHz.ToString("0.####", CultureInfo.InvariantCulture);
         RefreshAudioDevices(settings.AudioDevice);
         _loading = false;
-        _rx.AudioDevice = SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice;
-        _rx.Failed += why => Dispatcher.UIThread.Post(() =>
-        {
-            IsOn = false;
-            DeviceText = "Off";
-            Status = why;
-        });
+        foreach (var r in radios) r.SetAudioDevice(SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice);
 
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(50), DispatcherPriority.Background, (_, _) => Tick());
         _timer.Start();
     }
 
-    // ---- tuning ---------------------------------------------------------------------------
-
-    partial void OnFrequencyHzChanged(double value)
+    /// <summary>Switch on every radio that is off, one after another.</summary>
+    public async Task StartAll()
     {
-        double clamped = Math.Clamp(Math.Round(value / 10) * 10, MinHz, MaxHz);
-        if (clamped != value)
-        {
-            FrequencyHz = clamped;
-            return;
-        }
-        if (_loading) return;
-        IsScanning = false;
-        ApplyFrequency();
+        foreach (var r in RadioList)
+            if (!r.IsOn) await r.TogglePowerCommand.ExecuteAsync(null);
     }
 
-    /// <summary>Tune the receiver and, in automatic mode, take the mode and width from the band plan.</summary>
-    private void ApplyFrequency(double? keepWidth = null)
+    /// <summary>Look again for radios, for the Receiver box.</summary>
+    public void RefreshRadios()
     {
-        var band = BandPlan.Find(FrequencyHz);
-        ShowLabel();
-        if (AutoMode)
-        {
-            _loading = true;
-            Mode = band.Mode;
-            _loading = false;
-            SetWidths(band.Mode, band.BandwidthHz);
-        }
-        else SetWidths(Mode, keepWidth ?? SelectedWidth?.Value ?? 0);
-        _rx.FrequencyHz = FrequencyHz;
-        Blocked = _rx.Blocked;
-        EntryText = (FrequencyHz / 1e6).ToString("0.#####", CultureInfo.InvariantCulture);
-        _dirty = true;
-    }
-
-    private void SetWidths(Mode mode, double preferred)
-    {
-        var list = mode switch { Mode.Am => AmWidths, Mode.Wfm => WfmWidths, _ => NfmWidths };
-        var pick = list.FirstOrDefault(w => w.Value == preferred) ?? list[^1];
-        _loading = true;
-        Widths = list;
-        SelectedWidth = pick;
-        _loading = false;
-        _rx.SetMode(mode, pick.Value);
-        Blocked = _rx.Blocked;
-        string width = mode == Mode.Wfm ? "" : pick.Value < 9000 || (mode == Mode.Nfm && pick.Value < 13000)
-            ? (mode == Mode.Am ? " 8.33k" : " 12.5k") : " 25k";
-        ModeText = (mode switch { Mode.Am => "AM", Mode.Wfm => "WFM", _ => "NFM" }) + width;
-        OnPropertyChanged(nameof(IsAm));
-        OnPropertyChanged(nameof(IsNfm));
-        OnPropertyChanged(nameof(IsWfm));
-        _dirty = true;
-    }
-
-    partial void OnSelectedWidthChanged(Choice? value)
-    {
-        if (_loading || value is null) return;
-        // Choosing a width by hand is choosing the mode by hand.
-        _loading = true;
-        AutoMode = false;
-        _loading = false;
-        SetWidths(Mode, value.Value);
-    }
-
-    partial void OnAutoModeChanged(bool value)
-    {
-        if (_loading) return;
-        ApplyFrequency();
-    }
-
-    [RelayCommand]
-    private void SetAutoMode() => AutoMode = true;
-
-    [RelayCommand]
-    private void SetMode(string name)
-    {
-        var mode = name switch { "AM" => Mode.Am, "WFM" => Mode.Wfm, _ => Mode.Nfm };
-        _loading = true;
-        AutoMode = false;
-        Mode = mode;
-        _loading = false;
-        // Keep the band's own width when the band uses this mode; otherwise the wider choice.
-        var band = BandPlan.Find(FrequencyHz);
-        SetWidths(mode, band.Mode == mode ? band.BandwidthHz : 0);
+        foreach (var r in RadioList) r.RefreshRadios();
     }
 
     // ---- memories and scanning --------------------------------------------------------------
@@ -410,7 +251,7 @@ public sealed partial class MainViewModel : ObservableObject
     public void MemoriesEdited()
     {
         RefreshMemories();
-        if (!IsScanning) ShowLabel();
+        foreach (var r in RadioList) r.StoreChanged();
     }
 
     private int _diskTicks;
@@ -421,11 +262,9 @@ public sealed partial class MainViewModel : ObservableObject
     // program. Every channel is a new object. A scan in progress goes on with the channels it began with.
     private void MemoriesReloaded()
     {
-        if (_picked is { } was)
-            _picked = _memories.FindAll(was.FrequencyHz).FirstOrDefault(c => c.Name == was.Name);
         RefreshMemories();
-        if (!IsScanning) ShowLabel();
-        Status = IsScanning
+        foreach (var r in RadioList) r.StoreReloaded();
+        Radio.Status = RadioList.Any(r => r.IsScanning)
             ? "The stored channels were changed outside the program and read again; the scan goes on with the ones it began with"
             : "The stored channels were changed outside the program and read again";
         Reloaded?.Invoke();
@@ -435,46 +274,20 @@ public sealed partial class MainViewModel : ObservableObject
     public void GroupRenamed(string old, string name) =>
         RefreshMemories(SelectedGroups.Select(g => g == old ? name : g).Distinct().ToList());
 
-    /// <summary>Tune to a stored channel (and end a scan), as picking it in the list does.</summary>
-    public void Tune(MemoryChannel c)
-    {
-        if (IsScanning) StopScan();
-        _picked = c;
-        if (c.Mode is Mode mode)
-        {
-            _loading = true;
-            AutoMode = false;
-            Mode = mode;
-            _loading = false;
-            SetWidths(mode, c.BandwidthHz ?? 0);
-        }
-        else if (!AutoMode) AutoMode = true;
-        if (FrequencyHz == c.FrequencyHz) ApplyFrequency();
-        else FrequencyHz = c.FrequencyHz;
-    }
+    /// <summary>Tune the radio the controls work to a stored channel (and end its scan), as picking it in the list does.</summary>
+    public void Tune(MemoryChannel c) => Radio.Tune(c);
 
-    /// <summary>
-    /// Put on the display what is stored about the frequency it shows: the name, whose it is
-    /// and the particulars. Where nothing is stored the band's name stands in.
-    /// </summary>
-    private void ShowLabel()
+    private void StopScans()
     {
-        // In a scan only the channels being scanned speak for the frequency; otherwise all stored ones.
-        var here = (IsScanning && !_searching ? _scanMembers : _memories.Channels)
-            .Where(c => Math.Abs(c.FrequencyHz - FrequencyHz) < 100).ToList();
-        if (_picked is not null && here.Remove(_picked)) here.Insert(0, _picked);
-        var label = ChannelLabel.For(here);
-        var band = BandPlan.Find(FrequencyHz);
-        BandName = label.Title ?? (band.Name.Length > 0 ? band.Name : "—");
-        DetailText = label.Detail;
-        InfoText = label.Info;
+        foreach (var r in RadioList)
+            if (r.IsScanning) r.StopScan();
     }
 
     // A group was ticked or unticked in the selector.
     private void OnGroupsChanged()
     {
         if (_loading) return;
-        if (IsScanning) StopScan();
+        StopScans();
         RefreshMemories();
         _dirty = true;
     }
@@ -484,7 +297,7 @@ public sealed partial class MainViewModel : ObservableObject
     private void ShowAllGroups()
     {
         if (SelectedGroups.Count == 0) return;
-        if (IsScanning) StopScan();
+        StopScans();
         RefreshMemories([]);
         _dirty = true;
     }
@@ -516,7 +329,7 @@ public sealed partial class MainViewModel : ObservableObject
     partial void OnSelectedAudioDeviceChanged(string value)
     {
         if (_loading || value is null) return;
-        _rx.AudioDevice = value == DefaultDevice ? null : value;
+        foreach (var r in RadioList) r.SetAudioDevice(value == DefaultDevice ? null : value);
         _dirty = true;
     }
 
@@ -536,19 +349,20 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ToggleSearch()
     {
-        if (IsScanning)
+        var radio = Radio;
+        if (radio.IsScanning)
         {
-            StopScan();
+            radio.StopScan();
             return;
         }
         if (!TryMHz(SearchFrom, out double lo) || !TryMHz(SearchTo, out double hi) || hi <= lo)
         {
-            Status = "Enter the search range in MHz, such as 144 to 148";
+            radio.Status = "Enter the search range in MHz, such as 144 to 148";
             return;
         }
-        if (!IsOn)
+        if (!radio.IsOn)
         {
-            Status = "Start the radio first";
+            radio.Status = "Start the radio first";
             return;
         }
         var list = new List<ScanChannel>();
@@ -557,7 +371,7 @@ public sealed partial class MainViewModel : ObservableObject
             // Channels sit on whole multiples of the step (154.935 MHz is 20658 x 7.5 kHz), so the
             // raster is counted from zero, not from where the search happens to start.
             var band = BandPlan.Find(f);
-            double step = SelectedStep.Value > 0 ? SelectedStep.Value : band.StepHz;
+            double step = radio.SelectedStep.Value > 0 ? radio.SelectedStep.Value : band.StepHz;
             double channel = Math.Ceiling(f / step - 1e-6) * step;
             if (channel > hi + 1) break;
             band = BandPlan.Find(channel);
@@ -565,16 +379,10 @@ public sealed partial class MainViewModel : ObservableObject
             f = channel + step;
         }
         if (list.Count == 0) return;
-        Status = "";
         _settings.SearchFromMHz = lo / 1e6;
         _settings.SearchToMHz = hi / 1e6;
         _dirty = true;
-        EnsureSquelch();
-        _searching = true;
-        _rx.ScanSkipSeconds = 600;
-        _rx.StartScan(list);
-        IsScanning = _rx.Scanning;
-        IsSearching = IsScanning;
+        radio.StartSearch(list);
     }
 
     private static bool TryMHz(string text, out double hz)
@@ -588,9 +396,10 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ToggleScan()
     {
-        if (IsScanning)
+        var radio = Radio;
+        if (radio.IsScanning)
         {
-            StopScan();
+            radio.StopScan();
             return;
         }
         // A frequency shared by several stored channels is visited once.
@@ -599,179 +408,73 @@ public sealed partial class MainViewModel : ObservableObject
             .OrderBy(c => c.FrequencyHz).ToList();
         if (list.Count == 0)
         {
-            Status = "No channels are ticked for scanning in the groups shown";
+            radio.Status = "No channels are ticked for scanning in the groups shown";
             return;
         }
-        if (!IsOn)
-        {
-            Status = "Start the radio first";
-            return;
-        }
-        Status = "";
-        EnsureSquelch();
-        _searching = false;
-        _scanMembers = members;
-        _picked = null;
-        _rx.ScanSkipSeconds = 10;
-        _rx.StartScan(list);
-        IsScanning = _rx.Scanning;
+        radio.StartScan(members, list);
     }
-
-    private void StopScan()
-    {
-        _rx.StopScan();
-        IsScanning = false;
-        ShowTuned();
-    }
-
-    /// <summary>Leave the channel the scan has stopped on.</summary>
-    [RelayCommand]
-    private void SkipChannel() => _rx.SkipChannel();
-
-    /// <summary>
-    /// Leave the channel the scan has stopped on and keep its frequency out of scans and searches
-    /// for the Avoid Timer chosen in Settings. Nothing is stored: closing the app clears them all.
-    /// </summary>
-    [RelayCommand]
-    private void AvoidChannel()
-    {
-        if (_rx.AvoidChannel() is not { } ch) return;
-        string howLong = SelectedAvoidTime.Value > 0 ? $"for {SelectedAvoidTime.Label}" : "until the app is closed";
-        Status = $"Avoiding {(ch.FrequencyHz / 1e6).ToString("0.0000", CultureInfo.InvariantCulture)} MHz {howLong} ({_rx.AvoidedCount} avoided)";
-    }
-
-    private static TimeSpan? AvoidSpan(Choice choice) => choice.Value > 0 ? TimeSpan.FromMinutes(choice.Value) : null;
 
     /// <summary>Takes effect at once, on the channel the scan is stopped on as well.</summary>
     partial void OnSelectedResumeTimeChanged(Choice value)
     {
-        _rx.ResumeSeconds = value.Value > 0 ? value.Value : null;
+        if (_loading) return;
+        foreach (var r in RadioList) r.SetResumeTime(value);
         _dirty = true;
     }
 
     /// <summary>A change of timer applies to what is avoided from now on; those already avoided keep the time they had.</summary>
     partial void OnSelectedAvoidTimeChanged(Choice value)
     {
-        _rx.AvoidTime = AvoidSpan(value);
+        if (_loading) return;
+        foreach (var r in RadioList) r.SetAvoidTime(value);
         _dirty = true;
-    }
-
-    /// <summary>Show what the receiver is on now, without tuning it: the scan moves it, not us.</summary>
-    private void ShowTuned()
-    {
-        _loading = true;
-        FrequencyHz = _rx.FrequencyHz;
-        Mode = _rx.Mode;
-        _loading = false;
-        ShowLabel();
-        bool narrow = _rx.BandwidthHz < 9000 || (_rx.Mode == Mode.Nfm && _rx.BandwidthHz < 13000);
-        ModeText = _rx.Mode switch { Mode.Am => narrow ? "AM 8.33k" : "AM 25k", Mode.Wfm => "WFM", _ => narrow ? "NFM 12.5k" : "NFM 25k" };
-        EntryText = (FrequencyHz / 1e6).ToString("0.#####", CultureInfo.InvariantCulture);
-        Blocked = _rx.Blocked;
     }
 
     /// <summary>Store the present frequency under the name typed, in the group shown.</summary>
     [RelayCommand]
     private void StoreChannel()
     {
+        var radio = Radio;
         string name = NewName.Trim();
         if (name.Length == 0)
         {
-            Status = "Type a name for the channel first";
+            radio.Status = "Type a name for the channel first";
             return;
         }
         // A channel already stored here is renamed and keeps what else is known about it.
-        var all = _memories.FindAll(FrequencyHz);
-        var channel = _picked is not null && all.Contains(_picked) ? _picked : all.FirstOrDefault();
+        var all = _memories.FindAll(radio.FrequencyHz);
+        var channel = radio.Picked is not null && all.Contains(radio.Picked) ? radio.Picked : all.FirstOrDefault();
         if (channel is null)
         {
-            channel = new MemoryChannel { FrequencyHz = FrequencyHz };
+            channel = new MemoryChannel { FrequencyHz = radio.FrequencyHz };
             _memories.Channels.Add(channel);
         }
         channel.Name = name;
-        channel.Mode = AutoMode ? null : Mode;
-        channel.BandwidthHz = AutoMode ? null : SelectedWidth?.Value;
+        channel.Mode = radio.AutoMode ? null : radio.Mode;
+        channel.BandwidthHz = radio.AutoMode ? null : radio.SelectedWidth?.Value;
         // One group shown: it goes there (unless it is a tag's group, which nothing can be put in).
         // Otherwise it stays where it was, or goes in "My channels".
         string? group = SelectedGroups is [var only] && !MemoryStore.IsAutoGroup(only) ? only : channel.Groups.Count == 0 ? "My channels" : null;
         if (group is not null && !channel.Groups.Contains(group)) channel.Groups.Add(group);
-        _picked = channel;
+        radio.Picked = channel;
         _memories.Save();
         NewName = "";
-        Status = "";
+        radio.Status = "";
         RefreshMemories();
-        if (!IsScanning) ShowLabel();
+        foreach (var r in RadioList) r.StoreChanged();
     }
 
     [RelayCommand]
     private void DeleteChannel()
     {
         if (SelectedMemory is null) return;
-        if (IsScanning) StopScan();
+        StopScans();
         _memories.Channels.Remove(SelectedMemory.Channel);
         _memories.Save();
         RefreshMemories();
     }
 
-    partial void OnIsScanningChanged(bool value)
-    {
-        if (!value) IsSearching = false;
-        OnPropertyChanged(nameof(ScanText));
-    }
-
-    partial void OnIsSearchingChanged(bool value) => OnPropertyChanged(nameof(SearchText));
-
-    private double StepHz => SelectedStep.Value > 0 ? SelectedStep.Value : BandPlan.Find(FrequencyHz).StepHz;
-
-    [RelayCommand]
-    private void StepUp() => StepBy(1);
-
-    [RelayCommand]
-    private void StepDown() => StepBy(-1);
-
-    private void StepBy(int direction)
-    {
-        double step = StepHz;
-        // Land on the step's own raster, so a stray frequency snaps to a channel first.
-        double channel = FrequencyHz / step;
-        double next = direction > 0 ? Math.Floor(channel + 1e-6) + 1 : Math.Ceiling(channel - 1e-6) - 1;
-        FrequencyHz = next * step;
-    }
-
-    partial void OnSelectedStepChanged(Choice value) => _dirty = true;
-
-    /// <summary>Direct entry in MHz ("162.55"); a number too large for MHz is taken as kHz ("146520").</summary>
-    [RelayCommand]
-    private void EnterFrequency()
-    {
-        string text = EntryText.Trim().Replace(',', '.');
-        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) || v <= 0)
-        {
-            Status = "Enter a frequency in MHz, such as 162.55";
-            return;
-        }
-        double hz = v > 2000 ? v * 1e3 : v * 1e6;
-        if (hz is < MinHz or > MaxHz)
-        {
-            Status = "The receiver covers 0.1 MHz to 2000 MHz";
-            return;
-        }
-        Status = "";
-        FrequencyHz = hz;
-    }
-
-    // ---- controls -------------------------------------------------------------------------
-
-    partial void OnVolumeChanged(double value)
-    {
-        _rx.Volume = IsMuted ? 0 : value / 100;
-        _dirty = true;
-    }
-
-    partial void OnIsMutedChanged(bool value) => _rx.Volume = value ? 0 : Volume / 100;
-
-    [RelayCommand]
-    private void ToggleMute() => IsMuted = !IsMuted;
+    // ---- the window -------------------------------------------------------------------------
 
     /// <summary>Go between the full window and the small one. The window follows <see cref="IsMini"/>.</summary>
     [RelayCommand]
@@ -783,186 +486,6 @@ public sealed partial class MainViewModel : ObservableObject
         _dirty = true;
     }
 
-    /// <summary>The squelch slider's left end, which is squelch off.</summary>
-    public const double SquelchOffDb = -140;
-
-    /// <summary>The squelch is on whenever its slider is off the left end.</summary>
-    partial void OnSquelchDbChanged(double value)
-    {
-        _rx.SquelchDb = value;
-        SquelchOn = value > SquelchOffDb;
-        _dirty = true;
-    }
-
-    /// <summary>A scan or a search needs the squelch: if it is off, set it to the usual level.</summary>
-    private void EnsureSquelch()
-    {
-        if (!SquelchOn) SquelchDb = new Settings().SquelchDb;
-    }
-
-    [RelayCommand]
-    private void ToggleAutoSquelch() => AutoSquelch = !AutoSquelch;
-
-    partial void OnAutoSquelchChanged(bool value)
-    {
-        _rx.AutoSquelch = value;
-        _dirty = true;
-    }
-
-    [RelayCommand]
-    private void ToggleStereo() => StereoOn = !StereoOn;
-
-    partial void OnSquelchOnChanged(bool value)
-    {
-        _rx.SquelchEnabled = value;
-        _dirty = true;
-    }
-
-    partial void OnStereoOnChanged(bool value)
-    {
-        _rx.StereoEnabled = value;
-        _dirty = true;
-    }
-
-    partial void OnAutoGainChanged(bool value)
-    {
-        if (_loading) return;
-        _rx.Source.AutoGain = value;
-        _dirty = true;
-    }
-
-    partial void OnGainStepChanged(double value)
-    {
-        if (_loading) return;
-        _rx.Source.GainStep = (int)Math.Round(value);
-        _dirty = true;
-    }
-
-    /// <summary>Look again for radios, and show as chosen the one in use, or else the one that will be opened.</summary>
-    public void RefreshRadios()
-    {
-        IReadOnlyList<RadioInfo> found;
-        try { found = _rx.Source.Radios(); }
-        catch (InvalidOperationException) { found = []; }     // said when the receiver is switched on
-        string? serial = IsOn ? _rx.Source.Radio?.Serial : _rx.Source.Serial;
-        _loading = true;
-        Radios = found;
-        SelectedRadio = found.FirstOrDefault(r => r.Serial == serial);
-        _loading = false;
-    }
-
-    /// <summary>Another radio was chosen: remember it and, if the receiver is on, change over to it now.</summary>
-    partial void OnSelectedRadioChanged(RadioInfo? value)
-    {
-        if (_loading || value is null || value.Serial == _rx.Source.Serial && !IsOn) return;
-        _rx.Source.Serial = value.Serial;
-        _settings.RadioSerial = value.Serial;
-        _dirty = true;
-        if (IsOn && !IsBusy && _rx.Source.Radio?.Serial != value.Serial) _ = ChangeRadio();
-    }
-
-    private async Task ChangeRadio()
-    {
-        IsBusy = true;
-        try
-        {
-            Status = "Changing receiver…";
-            await Task.Run(_rx.Stop);
-            IsScanning = false;
-            await StartRadio();
-        }
-        catch (Exception e)
-        {
-            IsOn = false;
-            DeviceText = "Off";
-            Status = e.Message;
-        }
-        finally { IsBusy = false; }
-        RefreshRadios();
-    }
-
-    /// <summary>Switch the radio on and take up what this one has: its name, its antenna sockets, its bias T.</summary>
-    private async Task StartRadio()
-    {
-        if (Status.Length == 0) Status = "Starting the radio…";
-        await Task.Run(_rx.Start);
-        IsOn = true;
-        Status = "";
-        DeviceText = _rx.Source.Description;
-        HasBiasT = _rx.Source.HasBiasT;   // the FM notch is on the same models
-        var antennas = _rx.Source.Antennas;
-        if (!antennas.SequenceEqual(Antennas))
-        {
-            _loading = true;
-            Antennas = antennas;
-            SelectedAntenna = _rx.Source.Antenna;
-            _loading = false;
-        }
-    }
-
-    partial void OnSelectedAntennaChanged(string value)
-    {
-        if (_loading || value is null) return;
-        _rx.Source.Antenna = value;
-        _dirty = true;
-    }
-
-    public const double MaxPpm = 100;
-
-    partial void OnFmNotchChanged(bool value)
-    {
-        if (_loading) return;
-        _rx.Source.FmNotch = value;
-        _dirty = true;
-    }
-
-    partial void OnPpmChanged(decimal? value)
-    {
-        if (_loading || value is null) return;
-        _rx.Source.Ppm = Math.Clamp((double)value.Value, -MaxPpm, MaxPpm);
-        _dirty = true;
-    }
-
-    partial void OnBiasTChanged(bool value)
-    {
-        if (_loading) return;
-        _rx.Source.BiasT = value;
-        _dirty = true;
-    }
-
-    partial void OnIsOnChanged(bool value) => OnPropertyChanged(nameof(PowerText));
-
-    [RelayCommand]
-    private async Task TogglePower()
-    {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
-        {
-            if (IsOn)
-            {
-                await Task.Run(_rx.Stop);
-                IsOn = false;
-                IsScanning = false;
-                DeviceText = "Off";
-                Status = "";
-            }
-            else
-            {
-                Status = "";
-                await StartRadio();
-            }
-        }
-        catch (Exception e)
-        {
-            IsOn = false;
-            DeviceText = "Off";
-            Status = e.Message;
-        }
-        finally { IsBusy = false; }
-        RefreshRadios();
-    }
-
     private void Tick()
     {
         if (++_diskTicks >= 20)     // once a second
@@ -970,77 +493,26 @@ public sealed partial class MainViewModel : ObservableObject
             _diskTicks = 0;
             if (_memories.ReloadIfChangedOnDisk()) MemoriesReloaded();
         }
-        if (IsOn)
-        {
-            var src = _rx.Source;
-            Level = _rx.LevelDb;
-            SquelchOpen = _rx.SquelchOpen;
-            // The scan ends by itself when something else tunes the receiver.
-            if (IsScanning && !_rx.Scanning) IsScanning = false;
-            if (IsScanning)
-            {
-                // Between channels there is nothing to show but that it is scanning, and how fast.
-                if (_ticks % 20 == 0)
-                {
-                    long passes = _rx.ScanPasses;
-                    _passRate = Math.Max(0, passes - _lastPasses);
-                    _lastPasses = passes;
-                }
-                if (_rx.ScanChannel is not null)
-                {
-                    if (_rx.FrequencyHz != FrequencyHz || BandName.StartsWith("Scanning") || BandName.StartsWith("Searching")) ShowTuned();
-                }
-                else
-                {
-                    BandName = $"{(_searching ? "Searching" : "Scanning")} · {_passRate:F0} passes/s";
-                    DetailText = InfoText = "";
-                }
-            }
-            Overloaded = src.Overloaded;
-            IsStereo = _rx.Stereo;
-            var digital = _rx.Digital;
-            DigitalText = digital?.ToString() ?? "";
-            IsEncrypted = digital is { Encrypted: true };
-            MaxGainStep = src.MaxGainStep;
-            LevelText = Blocked ? "" : $"{Level:F0} dB";
-            GainText = $"LNA {src.ActiveGainStep}/{src.MaxGainStep} · gain {src.GainDb:F0} dB · retune {src.LastRetuneMs:F0} ms";
-        }
-        else
-        {
-            Level = -140;
-            SquelchOpen = false;
-            Overloaded = false;
-            IsStereo = false;
-            DigitalText = "";
-            IsEncrypted = false;
-            LevelText = "";
-            GainText = "";
-        }
-        if (++_ticks % 100 == 0 && _dirty) Save();
+        foreach (var r in RadioList) r.Tick();
+        if (++_ticks % 100 == 0 && (_dirty || RadioList.Any(r => r.Dirty))) Save();
     }
 
     private void Save()
     {
         _dirty = false;
-        _settings.FrequencyHz = FrequencyHz;
-        _settings.AutoMode = AutoMode;
-        _settings.Mode = Mode;
-        _settings.BandwidthHz = SelectedWidth?.Value ?? _settings.BandwidthHz;
-        _settings.StepHz = SelectedStep.Value;
+        foreach (var r in RadioList)
+        {
+            r.Dirty = false;
+            if (r.Serial is { Length: > 0 } serial) r.WriteTo(_settings.Entry(serial));
+        }
+        // What the window's own radio has goes in the one-radio fields too, for a build from before.
+        var first = RadioList[0];
+        var flat = _settings.Flat();
+        first.WriteTo(flat);
+        _settings.SetFlat(flat);
+        if (first.ChosenSerial is { Length: > 0 } chosen) _settings.RadioSerial = chosen;
         _settings.AvoidMinutes = (int)SelectedAvoidTime.Value;
         _settings.ResumeSeconds = (int)SelectedResumeTime.Value;
-        _settings.Volume = Volume / 100;
-        _settings.SquelchDb = SquelchDb;
-        _settings.SquelchOn = SquelchOn;
-        _settings.AutoSquelch = AutoSquelch;
-        _settings.Stereo = StereoOn;
-        _settings.AutoGain = AutoGain;
-        _settings.GainStep = (int)Math.Round(GainStep);
-        // A radio with one socket has no choice to keep: leave the one made on a radio that has.
-        if (Antennas.Count > 1) _settings.Antenna = SelectedAntenna;
-        _settings.BiasT = BiasT;
-        _settings.FmNotch = FmNotch;
-        _settings.Ppm = (double)(Ppm ?? 0);
         _settings.Groups = SelectedGroups;
         _settings.Group = null;
         _settings.AudioDevice = SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice;
@@ -1051,6 +523,6 @@ public sealed partial class MainViewModel : ObservableObject
     {
         _timer.Stop();
         Save();
-        _rx.Dispose();
+        foreach (var r in RadioList) r.Dispose();
     }
 }

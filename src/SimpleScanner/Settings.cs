@@ -3,6 +3,32 @@ using SimpleScanner.Dsp;
 
 namespace SimpleScanner;
 
+/// <summary>What is kept for one radio, by its serial number: how it is set up and where it was last tuned.</summary>
+public sealed class RadioSettings
+{
+    /// <summary>Run this radio when it is plugged in. With several marked, each runs at once.</summary>
+    public bool Use { get; set; }
+    public string Antenna { get; set; } = "Antenna A";
+    public bool BiasT { get; set; }
+    public bool FmNotch { get; set; }
+    public double Ppm { get; set; }
+    public bool AutoGain { get; set; } = true;
+    public int GainStep { get; set; }
+    public double LevelOffsetDb { get; set; }
+    public double SquelchDb { get; set; } = -100;
+    public bool SquelchOn { get; set; } = true;
+    public bool AutoSquelch { get; set; }
+    public double Volume { get; set; } = 0.5;
+    /// <summary>Where this radio's sound sits between the left (-1) and the right (1) speaker.</summary>
+    public double Pan { get; set; }
+    public double FrequencyHz { get; set; } = 162_400_000;
+    public bool AutoMode { get; set; } = true;
+    public Mode Mode { get; set; } = Mode.Nfm;
+    public double BandwidthHz { get; set; } = BandPlan.NfmWide;
+    public double StepHz { get; set; }
+    public bool Stereo { get; set; } = true;
+}
+
 /// <summary>What is kept between runs, in Application Support (macOS), ~/.local/share (Linux)
 /// or %LOCALAPPDATA% (Windows).</summary>
 public sealed class Settings
@@ -10,6 +36,10 @@ public sealed class Settings
     /// <summary>Where the main window was and how big, in screen pixels and in layout units.</summary>
     public sealed record Place(int X, int Y, double Width, double Height);
     public Place? Window { get; set; }
+
+    // The fields of one radio from here to LevelOffsetDb are from when there was one radio only.
+    // What is used now is in Radios, by serial number. These are still written, with what the first
+    // radio has, so that a build from before can open the file.
     /// <summary>The same for the small window, which has a size of its own.</summary>
     public Place? MiniWindow { get; set; }
     /// <summary>The small window was showing when the app was closed.</summary>
@@ -41,6 +71,10 @@ public sealed class Settings
     /// <summary>Correction for the radio's reference oscillator, in parts per million.</summary>
     public double Ppm { get; set; }
     public double LevelOffsetDb { get; set; }
+    /// <summary>Each radio's own settings, by its serial number.</summary>
+    public Dictionary<string, RadioSettings> Radios { get; set; } = [];
+    /// <summary>The radio a scan group is given to: group name to serial number. A group not here goes to any radio.</summary>
+    public Dictionary<string, string> GroupRadio { get; set; } = [];
     /// <summary>The memory group shown, which is also the one scanned.</summary>
     public string? Group { get; set; }
     /// <summary>The memory groups shown and scanned; empty or null is all of them. Replaces <see cref="Group"/>.</summary>
@@ -69,22 +103,68 @@ public sealed class Settings
     public double SearchFromMHz { get; set; } = 144;
     public double SearchToMHz { get; set; } = 148;
 
+    /// <summary>The one-radio fields as a radio's settings.</summary>
+    public RadioSettings Flat() => new()
+    {
+        Antenna = Antenna, BiasT = BiasT, FmNotch = FmNotch, Ppm = Ppm, AutoGain = AutoGain, GainStep = GainStep,
+        LevelOffsetDb = LevelOffsetDb, SquelchDb = SquelchDb, SquelchOn = SquelchOn, AutoSquelch = AutoSquelch,
+        Volume = Volume, FrequencyHz = FrequencyHz, AutoMode = AutoMode, Mode = Mode, BandwidthHz = BandwidthHz,
+        StepHz = StepHz, Stereo = Stereo,
+    };
+
+    /// <summary>Write a radio's settings to the one-radio fields, for a build from before.</summary>
+    public void SetFlat(RadioSettings r)
+    {
+        Antenna = r.Antenna; BiasT = r.BiasT; FmNotch = r.FmNotch; Ppm = r.Ppm; AutoGain = r.AutoGain; GainStep = r.GainStep;
+        LevelOffsetDb = r.LevelOffsetDb; SquelchDb = r.SquelchDb; SquelchOn = r.SquelchOn; AutoSquelch = r.AutoSquelch;
+        Volume = r.Volume; FrequencyHz = r.FrequencyHz; AutoMode = r.AutoMode; Mode = r.Mode; BandwidthHz = r.BandwidthHz;
+        StepHz = r.StepHz; Stereo = r.Stereo;
+    }
+
+    /// <summary>
+    /// The settings for the radio the window itself runs: its own if it has been used before; otherwise
+    /// those of the radio used last, which is what a file from before several radios holds.
+    /// </summary>
+    public RadioSettings ForFirstRadio(string? serial) =>
+        serial is not null && Radios.TryGetValue(serial, out var r) ? r : Flat();
+
+    /// <summary>The entry for that radio, made if there is none.</summary>
+    public RadioSettings Entry(string serial)
+    {
+        if (!Radios.TryGetValue(serial, out var r)) Radios[serial] = r = new RadioSettings();
+        return r;
+    }
+
+    // A file from before several radios: what it holds belongs to the radio last used.
+    private void Lift()
+    {
+        Radios ??= [];
+        GroupRadio ??= [];
+        if (Radios.Count == 0 && RadioSerial is { Length: > 0 } serial) Radios[serial] = Flat();
+    }
+
     private static string Folder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SimpleScanner");
     private static string FilePath => Path.Combine(Folder, "settings.json");
+    private string _path = FilePath;
 
-    public static Settings Load()
+    /// <param name="path">The file, when it is not the usual one (for trying things on a copy).</param>
+    public static Settings Load(string? path = null)
     {
-        try { return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new(); }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new(); }
+        Settings s;
+        try { s = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path ?? FilePath)) ?? new(); }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { s = new(); }
+        s._path = path ?? FilePath;
+        s.Lift();
+        return s;
     }
 
     public void Save()
     {
         try
         {
-            Directory.CreateDirectory(Folder);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            if (Path.GetDirectoryName(_path) is { Length: > 0 } folder) Directory.CreateDirectory(folder);
+            File.WriteAllText(_path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }

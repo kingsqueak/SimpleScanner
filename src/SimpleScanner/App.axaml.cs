@@ -19,26 +19,52 @@ public partial class App : Application
             var store = AppFiles.OpenStore();
             FillLocations(store);
             var settings = Settings.Load();
-            var source = new SdrPlaySource { Serial = settings.RadioSerial };
-            var vm = new MainViewModel(settings, new Receiver(source), store);
+            // The radios marked for use that are plugged in. The window runs the first itself (the one used
+            // last, if it is among them); each other gets a helper program, because the SDRplay software
+            // lets one program open one radio only. With none marked it is as it was with one radio.
+            var inUse = RadiosInUse(settings);
+            var source = new SdrPlaySource { Serial = inUse.Count > 0 ? inUse[0].Serial : settings.RadioSerial };
+            var receivers = new List<IReceiver> { new Receiver(source) };
+            string trouble = "";
+            foreach (var radio in inUse.Skip(1))
+            {
+                try { receivers.Add(Remote.RemoteReceiver.Launch(radio.Serial, SdrPlaySource.ListRadios)); }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    trouble = $"{radio.Label}: {e.Message}";
+                }
+            }
+            var vm = new MainViewModel(settings, receivers, store);
+            if (trouble.Length > 0) vm.Radio.Status = trouble;
             var window = new MainWindow { DataContext = vm };
             window.RestorePlace();
             desktop.MainWindow = window;
             desktop.ShutdownRequested += (_, _) =>
             {
                 window.KeepPlace();
-                vm.Shutdown();
+                vm.Shutdown();      // stops the radios and ends the helper programs
             };
             bool start = (desktop.Args ?? []).Contains("--start");
             window.Opened += async (_, _) =>
             {
-                await ChooseRadio(window, source, settings);
+                if (inUse.Count == 0) await ChooseRadio(window, source, settings);
                 vm.RefreshRadios();
-                // --start: switch the receiver on at launch.
-                if (start) vm.TogglePowerCommand.Execute(null);
+                // --start: switch the receivers on at launch.
+                if (start) await vm.StartAll();
             };
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>The radios marked for use in the settings that are plugged in and free, the one used last first.</summary>
+    private static List<Radio.RadioInfo> RadiosInUse(Settings settings)
+    {
+        if (!settings.Radios.Values.Any(r => r.Use)) return [];
+        IReadOnlyList<Radio.RadioInfo> present;
+        try { present = SdrPlaySource.ListRadios(); }
+        catch (InvalidOperationException) { return []; }    // the radio's software is missing: said when the receiver is switched on
+        return present.Where(r => settings.Radios.TryGetValue(r.Serial, out var kept) && kept.Use)
+            .OrderBy(r => r.Serial == settings.RadioSerial ? 0 : 1).ToList();
     }
 
     /// <summary>

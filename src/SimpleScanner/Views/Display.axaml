@@ -3,8 +3,9 @@
              xmlns:vm="using:SimpleScanner.ViewModels"
              xmlns:c="using:SimpleScanner.Controls"
              x:Class="SimpleScanner.Views.Display"
-             x:DataType="vm:MainViewModel">
-  <!-- What a scanner shows on its display. The full window shows it at its own size; the small window scales it. -->
+             x:DataType="vm:RadioViewModel">
+  <!-- One radio's display; its DataContext is that radio. The small-window button belongs to the window, so it is bound there.
+       What a scanner shows on its display. The full window shows it at its own size; the small window scales it. -->
   <StackPanel Spacing="6">
     <DockPanel>
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
@@ -42,13 +43,13 @@
         <Path Width="24" Height="24" StrokeThickness="2.4" StrokeLineCap="Round"
               Data="M 12,3 L 12,11.5 M 7.5,5.6 A 8,8 0 1 0 16.5,5.6" />
       </Button>
-      <Button Classes="power" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding !IsMini}"
+      <Button Classes="power" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleMiniCommand}" IsVisible="{Binding !$parent[Window].((vm:MainViewModel)DataContext).IsMini}"
               HorizontalAlignment="Right" VerticalAlignment="Center"
               ToolTip.Tip="Small window: only the display, with Mute, Scan, Skip and Avoid under it">
         <Path Width="24" Height="24" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round"
               Data="M 20,4 L 14,10 M 14,5 L 14,10 L 19,10 M 4,20 L 10,14 M 5,14 L 10,14 L 10,19" />
       </Button>
-      <Button Classes="power" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding IsMini}"
+      <Button Classes="power" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleMiniCommand}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsMini}"
               HorizontalAlignment="Right" VerticalAlignment="Center"
               ToolTip.Tip="Back to the full window">
         <Path Width="24" Height="24" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round"

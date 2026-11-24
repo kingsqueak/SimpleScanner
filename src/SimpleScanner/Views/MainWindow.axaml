@@ -14,21 +14,21 @@
   <!-- The small window: the display, scaled to the window, and one row of buttons under it -->
   <DockPanel x:Name="MiniView" IsVisible="{Binding IsMini}">
     <WrapPanel DockPanel.Dock="Bottom" ItemSpacing="8" LineSpacing="6" Margin="0,8,0,0">
-      <Button Classes="seg" Classes.lit="{Binding IsMuted}" Content="Mute" Command="{Binding ToggleMuteCommand}"
+      <Button Classes="seg" Classes.lit="{Binding Radio.IsMuted}" Content="Mute" Command="{Binding Radio.ToggleMuteCommand}"
               ToolTip.Tip="Silence the speaker without touching the volume. Press again for sound." />
-      <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
+      <Button Classes="seg" Classes.lit="{Binding Radio.IsScanning}" Content="{Binding Radio.ScanText}"
               Command="{Binding ToggleScanCommand}" MinWidth="82"
               ToolTip.Tip="Scan the ticked channels of the groups shown" />
-      <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}"
-              IsEnabled="{Binding IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
-      <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}"
-              IsEnabled="{Binding IsScanning}"
+      <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
+              IsEnabled="{Binding Radio.IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
+      <Button Classes="seg" Content="Avoid" Command="{Binding Radio.AvoidChannelCommand}"
+              IsEnabled="{Binding Radio.IsScanning}"
               ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings" />
     </WrapPanel>
     <Border Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}"
             BorderThickness="1" CornerRadius="8" Padding="10,6,10,8">
       <Viewbox Stretch="Uniform">
-        <v:Display Width="600" />
+        <v:Display Width="600" DataContext="{Binding Radio}" />
       </Viewbox>
     </Border>
   </DockPanel>
@@ -38,10 +38,10 @@
     <!-- The readout: what a scanner shows on its display -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource LcdBg}" BorderBrush="{DynamicResource LcdBorder}"
             BorderThickness="1" CornerRadius="8" Padding="18,12,18,14">
-      <v:Display />
+      <v:Display DataContext="{Binding Radio}" />
     </Border>
 
-    <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
+    <TextBlock DockPanel.Dock="Bottom" Text="{Binding Radio.Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
                TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" />
 
     <!-- The controls, in tabs under the readout -->
@@ -70,13 +70,13 @@
           <!-- Scan the stored channels: kept at the foot of the tab -->
           <TextBlock Grid.Row="0" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
           <WrapPanel Grid.Row="0" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
-            <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
+            <Button Classes="seg" Classes.lit="{Binding Radio.IsScanning}" Content="{Binding Radio.ScanText}"
                     Command="{Binding ToggleScanCommand}" MinWidth="82"
                     ToolTip.Tip="Scan the ticked channels of the groups shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
-            <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}"
-                    IsEnabled="{Binding IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
-            <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}"
-                    IsEnabled="{Binding IsScanning}"
+            <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
+                    IsEnabled="{Binding Radio.IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
+            <Button Classes="seg" Content="Avoid" Command="{Binding Radio.AvoidChannelCommand}"
+                    IsEnabled="{Binding Radio.IsScanning}"
                     ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings. Closing the app clears every avoid." />
           </WrapPanel>
           </Grid>
@@ -89,22 +89,22 @@
               <TextBlock Grid.Row="0" Grid.Column="0" Text="Tune" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
               <StackPanel Grid.Row="0" Grid.Column="1" Spacing="6">
                 <WrapPanel ItemSpacing="8" LineSpacing="6">
-                  <TextBox Text="{Binding EntryText}" Width="120" PlaceholderText="MHz"
+                  <TextBox Text="{Binding Radio.EntryText}" Width="120" PlaceholderText="MHz"
                            ToolTip.Tip="Type a frequency in MHz and press Enter">
                     <TextBox.KeyBindings>
-                      <KeyBinding Gesture="Enter" Command="{Binding EnterFrequencyCommand}" />
+                      <KeyBinding Gesture="Enter" Command="{Binding Radio.EnterFrequencyCommand}" />
                     </TextBox.KeyBindings>
                   </TextBox>
-                  <Button Classes="seg" Content="Go" Command="{Binding EnterFrequencyCommand}" />
+                  <Button Classes="seg" Content="Go" Command="{Binding Radio.EnterFrequencyCommand}" />
                 </WrapPanel>
                 <WrapPanel ItemSpacing="8" LineSpacing="6">
                   <StackPanel Orientation="Horizontal" Spacing="4">
-                    <Button Classes="seg" Content="◀" Command="{Binding StepDownCommand}" ToolTip.Tip="One step down" />
-                    <Button Classes="seg" Content="▶" Command="{Binding StepUpCommand}" ToolTip.Tip="One step up" />
+                    <Button Classes="seg" Content="◀" Command="{Binding Radio.StepDownCommand}" ToolTip.Tip="One step down" />
+                    <Button Classes="seg" Content="▶" Command="{Binding Radio.StepUpCommand}" ToolTip.Tip="One step up" />
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="Step" Classes="label" Margin="6,0,0,0" />
-                    <ComboBox ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}" Width="116"
+                    <ComboBox ItemsSource="{Binding Radio.Steps}" SelectedItem="{Binding Radio.SelectedStep}" Width="116"
                               ToolTip.Tip="Tuning step for the arrow buttons. Auto uses the usual channel spacing of the band." />
                   </StackPanel>
                 </WrapPanel>
@@ -113,19 +113,19 @@
               <!-- Mode, with the Stereo button at the end of the row -->
               <TextBlock Grid.Row="1" Grid.Column="0" Text="Mode" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
                 <WrapPanel Grid.Row="1" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
-                  <Button Classes="seg" Classes.lit="{Binding AutoMode}" Content="Auto" Command="{Binding SetAutoModeCommand}"
+                  <Button Classes="seg" Classes.lit="{Binding Radio.AutoMode}" Content="Auto" Command="{Binding Radio.SetAutoModeCommand}"
                           ToolTip.Tip="Choose the mode and filter from the band: AM on airband, FM elsewhere" />
-                  <Button Classes="seg" Classes.lit="{Binding IsAm}" Content="AM" Command="{Binding SetModeCommand}" CommandParameter="AM" />
-                  <Button Classes="seg" Classes.lit="{Binding IsNfm}" Content="NFM" Command="{Binding SetModeCommand}" CommandParameter="NFM"
+                  <Button Classes="seg" Classes.lit="{Binding Radio.IsAm}" Content="AM" Command="{Binding Radio.SetModeCommand}" CommandParameter="AM" />
+                  <Button Classes="seg" Classes.lit="{Binding Radio.IsNfm}" Content="NFM" Command="{Binding Radio.SetModeCommand}" CommandParameter="NFM"
                           ToolTip.Tip="Narrow FM: public service, business, marine, weather and amateur" />
-                  <Button Classes="seg" Classes.lit="{Binding IsWfm}" Content="WFM" Command="{Binding SetModeCommand}" CommandParameter="WFM"
+                  <Button Classes="seg" Classes.lit="{Binding Radio.IsWfm}" Content="WFM" Command="{Binding Radio.SetModeCommand}" CommandParameter="WFM"
                           ToolTip.Tip="Wide FM: broadcast radio" />
-                  <Button Classes="seg" Classes.lit="{Binding StereoOn}" Content="Stereo" Command="{Binding ToggleStereoCommand}"
+                  <Button Classes="seg" Classes.lit="{Binding Radio.StereoOn}" Content="Stereo" Command="{Binding Radio.ToggleStereoCommand}"
                           ToolTip.Tip="Broadcast FM in stereo when the station sends it. Off is mono, which is quieter on a weak station." />
                 </WrapPanel>
               <!-- The filter has a row of its own, close under the mode buttons -->
               <TextBlock Grid.Row="2" Grid.Column="0" Text="Filter" Classes="label" Margin="0,-6,0,0" />
-              <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding Widths}" SelectedItem="{Binding SelectedWidth}" Width="170"
+              <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding Radio.Widths}" SelectedItem="{Binding Radio.SelectedWidth}" Width="170"
                         Margin="0,-6,0,0"
                         ToolTip.Tip="Channel filter. Use the narrow one where channels are 12.5 kHz (FM) or 8.33 kHz (AM) apart." />
 
@@ -135,17 +135,17 @@
                 <WrapPanel ItemSpacing="8" LineSpacing="6">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="Volume" Classes="label" />
-                    <Slider Minimum="0" Maximum="100" Value="{Binding Volume}" Width="170" />
-                    <Button Classes="seg" Classes.lit="{Binding IsMuted}" Content="Mute" Command="{Binding ToggleMuteCommand}"
+                    <Slider Minimum="0" Maximum="100" Value="{Binding Radio.Volume}" Width="170" />
+                    <Button Classes="seg" Classes.lit="{Binding Radio.IsMuted}" Content="Mute" Command="{Binding Radio.ToggleMuteCommand}"
                             ToolTip.Tip="Silence the speaker without touching the volume. Press again for sound." />
                   </StackPanel>
                 </WrapPanel>
                 <!-- Pulled up: a slider keeps room above and below itself for tick marks it does not have -->
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,-22,0,0">
-                  <TextBlock Text="Squelch" Classes="label" Classes.off="{Binding !SquelchOn}" />
-                  <Slider Minimum="-140" Maximum="-40" Value="{Binding SquelchDb}" Width="162"
+                  <TextBlock Text="Squelch" Classes="label" Classes.off="{Binding !Radio.SquelchOn}" />
+                  <Slider Minimum="-140" Maximum="-40" Value="{Binding Radio.SquelchDb}" Width="162"
                           ToolTip.Tip="Squelch level: set the green mark just above the bar's resting level. All the way left is squelch off." />
-                  <Button Classes="seg" Classes.lit="{Binding AutoSquelch}" Content="Auto" Command="{Binding ToggleAutoSquelchCommand}"
+                  <Button Classes="seg" Classes.lit="{Binding Radio.AutoSquelch}" Content="Auto" Command="{Binding Radio.ToggleAutoSquelchCommand}"
                           ToolTip.Tip="Auto squelch: also stay shut on noise, however strong. A channel must be above the squelch mark and carry a clean signal, so a noisy band does not open at a level set for quiet ones. FM (digital too) and AM." />
                 </StackPanel>
               </StackPanel>
@@ -269,10 +269,10 @@
               <TextBox Text="{Binding SearchTo}" Width="90" ToolTip.Tip="Highest frequency to search, in MHz" />
               <TextBlock Text="MHz" Classes="label" />
             </StackPanel>
-            <Button Classes="seg" Classes.lit="{Binding IsSearching}" Content="{Binding SearchText}" Command="{Binding ToggleSearchCommand}"
+            <Button Classes="seg" Classes.lit="{Binding Radio.IsSearching}" Content="{Binding Radio.SearchText}" Command="{Binding ToggleSearchCommand}"
                     MinWidth="96" Margin="6,0,0,0"
                     ToolTip.Tip="Look through this range for anything above the squelch mark and stop on it. Uses the band's usual channel spacing unless a step is chosen. Skip leaves a frequency out for ten minutes; Store keeps it." />
-            <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
+            <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}" IsEnabled="{Binding Radio.IsScanning}"
                     ToolTip.Tip="Leave the frequency the search has stopped on and carry on" />
           </WrapPanel>
         </Grid>
@@ -291,18 +291,18 @@
           <TextBlock Grid.Row="1" Grid.Column="0" Text="Radio" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
           <StackPanel Grid.Row="1" Grid.Column="1" Spacing="6">
           <WrapPanel ItemSpacing="8" LineSpacing="6">
-            <CheckBox Content="Auto gain" IsChecked="{Binding AutoGain}" FontSize="12"
+            <CheckBox Content="Auto gain" IsChecked="{Binding Radio.AutoGain}" FontSize="12"
                       ToolTip.Tip="Let the scanner step the radio's front-end attenuation: up on overload, back down when it clears" />
             <StackPanel Orientation="Horizontal" Spacing="8">
               <TextBlock Text="LNA step" Classes="label" Margin="6,0,0,0" />
-              <Slider Minimum="0" Maximum="{Binding MaxGainStep}" Value="{Binding GainStep}" Width="170"
+              <Slider Minimum="0" Maximum="{Binding Radio.MaxGainStep}" Value="{Binding Radio.GainStep}" Width="170"
                       TickFrequency="1" IsSnapToTickEnabled="True"
                       ToolTip.Tip="Front-end attenuation: 0 is the most gain. With Auto gain on, this is the most gain the scanner may use." />
             </StackPanel>
           </WrapPanel>
             <StackPanel Orientation="Horizontal" Spacing="8">
               <TextBlock Text="Receiver" Classes="label" Width="84" />
-              <ComboBox ItemsSource="{Binding Radios}" SelectedItem="{Binding SelectedRadio}" Width="190" PlaceholderText="None found"
+              <ComboBox ItemsSource="{Binding Radio.Radios}" SelectedItem="{Binding Radio.SelectedRadio}" Width="190" PlaceholderText="None found"
                         ToolTip.Tip="The radio to use, when more than one is plugged in. Choosing another while the receiver is on changes over to it at once. A radio that another program is using is not listed.">
                 <ComboBox.ItemTemplate>
                   <DataTemplate x:DataType="r:RadioInfo">
@@ -312,17 +312,17 @@
               </ComboBox>
               <!-- On the receiver's line: the tab has no room for another line at the window's least height -->
               <TextBlock Text="Antenna" Classes="label" Margin="12,0,0,0" />
-              <ComboBox ItemsSource="{Binding Antennas}" SelectedItem="{Binding SelectedAntenna}" Width="130" />
+              <ComboBox ItemsSource="{Binding Radio.Antennas}" SelectedItem="{Binding Radio.SelectedAntenna}" Width="130" />
             </StackPanel>
-            <CheckBox Content="FM broadcast notch" IsChecked="{Binding FmNotch}" IsEnabled="{Binding HasBiasT}" FontSize="12"
+            <CheckBox Content="FM broadcast notch" IsChecked="{Binding Radio.FmNotch}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12"
                       ToolTip.Tip="Switch in the radio's filter that cuts the FM broadcast band (88 to 108 MHz), so strong stations there cannot overload it while it listens elsewhere. Turn it off to listen to broadcast FM." />
             <StackPanel Orientation="Horizontal" Spacing="8">
               <TextBlock Text="Correction" Classes="label" Width="84" />
-              <NumericUpDown Value="{Binding Ppm}" Minimum="-100" Maximum="100" Increment="0.1" FormatString="0.0" Width="130"
+              <NumericUpDown Value="{Binding Radio.Ppm}" Minimum="-100" Maximum="100" Increment="0.1" FormatString="0.0" Width="130"
                              ToolTip.Tip="Frequency correction for the radio's reference oscillator, in parts per million. 0 unless signals on known frequencies all read off by the same proportion." />
               <TextBlock Text="ppm" Classes="label" />
             </StackPanel>
-            <CheckBox Content="Enable bias T" IsChecked="{Binding BiasT}" IsEnabled="{Binding HasBiasT}" FontSize="12"
+            <CheckBox Content="Enable bias T" IsChecked="{Binding Radio.BiasT}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12"
                       ToolTip.Tip="Put DC (about 4.7 V) on the antenna socket to power a masthead preamplifier or an active antenna. On an RSPdx it is on Antenna B only. Leave it off unless something on that socket needs the power." />
           </StackPanel>
           <TextBlock Grid.Row="2" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />

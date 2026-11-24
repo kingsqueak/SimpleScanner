@@ -1,42 +1,13 @@
 namespace SimpleScanner;
 
 /// <summary>
-/// Shares a scan list among the radios that are on. A channel of a group given to one of those radios
-/// goes to that radio. The rest, in frequency order, are cut into one run for each radio, so that a radio
+/// Shares a scan list among radios. A channel that only one of the radios is to scan goes to that
+/// radio. The rest, in frequency order, are cut into one run for each radio, so that a radio
 /// keeps to its own part of the spectrum, with the cuts placed so that no radio has more tunings to go
 /// round (its own channels included) than it must.
 /// </summary>
 public static class ScanSplit
 {
-    /// <summary>
-    /// The radio a channel is given to: that of the first of its groups (in the order given) that has one
-    /// among the radios that are on. A group given to a radio that is not on counts as given to none.
-    /// </summary>
-    /// <param name="groups">The channel's groups that are being scanned.</param>
-    /// <param name="groupRadio">Group name to serial number.</param>
-    /// <param name="serials">The serial numbers of the radios that are on.</param>
-    /// <returns>The radio's place in <paramref name="serials"/>, or -1 for any radio.</returns>
-    public static int RadioFor(IEnumerable<string> groups, IReadOnlyDictionary<string, string> groupRadio, IReadOnlyList<string?> serials)
-    {
-        foreach (string group in groups)
-        {
-            string? serial = null;
-            if (!groupRadio.TryGetValue(group, out serial))
-            {
-                foreach (var pair in groupRadio)
-                {
-                    if (!MemoryStore.SameGroup(pair.Key, group)) continue;
-                    serial = pair.Value;
-                    break;
-                }
-            }
-            if (serial is null) continue;
-            for (int r = 0; r < serials.Count; r++)
-                if (serials[r] == serial) return r;
-        }
-        return -1;
-    }
-
     /// <summary>
     /// Each radio's share of the list.
     /// </summary>

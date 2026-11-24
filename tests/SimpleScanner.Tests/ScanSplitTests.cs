@@ -135,24 +135,6 @@ public class ScanSplitTests
     }
 
     [Fact]
-    public void AGroupsRadioIsTheFirstOfItsGroupsThatHasOneThatIsOn()
-    {
-        var given = new Dictionary<string, string> { ["Air"] = "A", ["Rail"] = "B", ["Marine"] = "GONE" };
-        string?[] on = ["A", "B"];
-        Assert.Equal(0, ScanSplit.RadioFor(["Air"], given, on));
-        Assert.Equal(1, ScanSplit.RadioFor(["Rail", "Air"], given, on));
-        Assert.Equal(-1, ScanSplit.RadioFor(["Police"], given, on));
-        Assert.Equal(-1, ScanSplit.RadioFor([], given, on));
-        // A radio that is not on: the group counts as anyone's, and a later group may still name one.
-        Assert.Equal(-1, ScanSplit.RadioFor(["Marine"], given, on));
-        Assert.Equal(0, ScanSplit.RadioFor(["Marine", "Air"], given, on));
-        Assert.Equal(-1, ScanSplit.RadioFor(["Rail"], given, ["A"]));
-        // A tag's group keeps its radio when the tag is written another way.
-        var tags = new Dictionary<string, string> { [MemoryStore.TagPrefix + "Fire Dispatch"] = "B" };
-        Assert.Equal(1, ScanSplit.RadioFor([MemoryStore.TagPrefix + "fire dispatch"], tags, on));
-    }
-
-    [Fact]
     public void AListOfSomeThousandsIsSharedOutQuickly()
     {
         var rng = new Random(7);

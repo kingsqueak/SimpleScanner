@@ -17,15 +17,6 @@ public partial class MainWindow : Window
         Opened += (_, _) => BringOntoAScreen();
     }
 
-    /// <summary>Below this width a scan group's radio box goes under the group's name instead of beside it (see the styles).</summary>
-    private const double NarrowWidth = 1050;
-
-    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
-    {
-        base.OnPropertyChanged(change);
-        if (change.Property == ClientSizeProperty) Classes.Set("narrow", ClientSize.Width < NarrowWidth);
-    }
-
     // The full window's and the small window's least and usual sizes.
     private const double FullMinWidth = 700, FullMinHeight = 634, FullWidth = 1130, FullHeight = 664;
     private const double MiniMinWidth = 300, MiniMinHeight = 170, MiniWidth = 520, MiniHeight = 262;

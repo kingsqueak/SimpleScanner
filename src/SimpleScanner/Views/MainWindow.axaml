@@ -9,25 +9,6 @@
         Icon="avares://SimpleScanner/Assets/icon.png"
         Title="SimpleScanner" Width="1130" Height="664" MinWidth="700" MinHeight="634"
         WindowStartupLocation="CenterScreen">
-  <Window.Styles>
-    <!-- A scan group's radio, at the right of the group's name (set here, not on the box, so that the narrow window can move it) -->
-    <Style Selector="ComboBox.radio">
-      <Setter Property="DockPanel.Dock" Value="Right" />
-      <Setter Property="Margin" Value="4,0,12,0" />
-      <Setter Property="Width" Value="84" />
-    </Style>
-    <!-- Faint while the group is left to any radio -->
-    <Style Selector="ComboBox.radio.any">
-      <Setter Property="Opacity" Value="0.45" />
-    </Style>
-    <!-- In a narrow window there is no room for it beside the group's name: it goes underneath -->
-    <Style Selector="Window.narrow ComboBox.radio">
-      <Setter Property="DockPanel.Dock" Value="Bottom" />
-      <Setter Property="HorizontalAlignment" Value="Left" />
-      <Setter Property="Margin" Value="26,0,0,4" />
-      <Setter Property="Width" Value="70" />
-    </Style>
-  </Window.Styles>
   <Panel Margin="12">
 
   <!-- The small window: the display, scaled to the window, and one row of buttons under it -->
@@ -275,18 +256,7 @@
                   <ItemsControl ItemsSource="{Binding UserGroupRows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:GroupRow">
-                        <DockPanel>
-                          <ComboBox Classes="radio" Classes.any="{Binding IsAny}" IsVisible="{Binding HasRadios}" ItemsSource="{Binding Radios}" SelectedItem="{Binding Radio}"
-                                    MinHeight="0" Height="22" Padding="6,0,0,0" FontSize="11" VerticalAlignment="Center"
-                                    ToolTip.Tip="The radio that scans this group. Any leaves it to the program, which shares those channels out among the radios that are on. A group given to a radio that is off is shared out the same way.">
-                            <ComboBox.ItemTemplate>
-                              <DataTemplate x:DataType="vm:RadioChoice">
-                                <TextBlock Text="{Binding Label}" FontSize="11" />
-                              </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                          </ComboBox>
-                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                        </DockPanel>
+                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -302,18 +272,7 @@
                   <ItemsControl ItemsSource="{Binding PlaceGroupRows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:GroupRow">
-                        <DockPanel>
-                          <ComboBox Classes="radio" Classes.any="{Binding IsAny}" IsVisible="{Binding HasRadios}" ItemsSource="{Binding Radios}" SelectedItem="{Binding Radio}"
-                                    MinHeight="0" Height="22" Padding="6,0,0,0" FontSize="11" VerticalAlignment="Center"
-                                    ToolTip.Tip="The radio that scans this group. Any leaves it to the program, which shares those channels out among the radios that are on. A group given to a radio that is off is shared out the same way.">
-                            <ComboBox.ItemTemplate>
-                              <DataTemplate x:DataType="vm:RadioChoice">
-                                <TextBlock Text="{Binding Label}" FontSize="11" />
-                              </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                          </ComboBox>
-                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                        </DockPanel>
+                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -329,18 +288,7 @@
                   <ItemsControl ItemsSource="{Binding AutoGroupRows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:GroupRow">
-                        <DockPanel>
-                          <ComboBox Classes="radio" Classes.any="{Binding IsAny}" IsVisible="{Binding HasRadios}" ItemsSource="{Binding Radios}" SelectedItem="{Binding Radio}"
-                                    MinHeight="0" Height="22" Padding="6,0,0,0" FontSize="11" VerticalAlignment="Center"
-                                    ToolTip.Tip="The radio that scans this group. Any leaves it to the program, which shares those channels out among the radios that are on. A group given to a radio that is off is shared out the same way.">
-                            <ComboBox.ItemTemplate>
-                              <DataTemplate x:DataType="vm:RadioChoice">
-                                <TextBlock Text="{Binding Label}" FontSize="11" />
-                              </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                          </ComboBox>
-                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
-                        </DockPanel>
+                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" MinHeight="0" Padding="6,3" />
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>

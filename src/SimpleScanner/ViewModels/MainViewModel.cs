@@ -36,39 +36,10 @@ public sealed partial class MemoryRow(MemoryChannel channel, Action changed) : O
     }
 }
 
-/// <summary>A radio a scan group can be given to, or any of them (no serial number).</summary>
-public sealed partial class RadioChoice(string label, string? serial) : ObservableObject
-{
-    [ObservableProperty] private string _label = label;
-    public string? Serial { get; } = serial;
-    public override string ToString() => Label;
-}
-
-/// <summary>A memory group as a tick box in the group selector, with the radio that scans it.</summary>
-public sealed partial class GroupRow(string name, bool selected, Action changed,
-    IReadOnlyList<RadioChoice>? radios = null, RadioChoice? radio = null, Action<GroupRow>? radioChanged = null) : ObservableObject
+/// <summary>A memory group as a tick box in the group selector.</summary>
+public sealed partial class GroupRow(string name, bool selected, Action changed) : ObservableObject
 {
     public string Name { get; } = name;
-    /// <summary>The radios the group can be given to, the first being any of them; empty with one radio, when there is nothing to choose.</summary>
-    public IReadOnlyList<RadioChoice> Radios { get; } = radios ?? [];
-    public bool HasRadios => Radios.Count > 0;
-    /// <summary>The group is left to any radio, which is how they all begin: shown faintly, so those given to a radio stand out.</summary>
-    public bool IsAny => radio?.Serial is null;
-
-    /// <summary>The radio that scans this group; the first choice leaves it to the program.</summary>
-    public RadioChoice? Radio
-    {
-        get => radio;
-        set
-        {
-            if (value is null || ReferenceEquals(radio, value)) return;
-            radio = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(IsAny));
-            radioChanged?.Invoke(this);
-        }
-    }
-
     /// <summary>Made by the program from a tag, not by the user.</summary>
     public bool IsAuto { get; } = MemoryStore.IsTagGroup(name);
     /// <summary>Made by the program from a location.</summary>
@@ -113,9 +84,6 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Several radios are running: each has a strip of its own in place of the one display.</summary>
     public bool IsMulti => RadioList.Count > 1;
     public bool IsSingle => RadioList.Count == 1;
-
-    /// <summary>What a scan group can be given to: any radio, each radio here, and any radio not here that a group was given to before.</summary>
-    public System.Collections.ObjectModel.ObservableCollection<RadioChoice> GroupRadioChoices { get; } = [new("Any", null)];
 
     /// <summary>The radios in the Receiver box: those running here and those plugged in and free.</summary>
     [ObservableProperty] private IReadOnlyList<RadioInfo> _receiverChoices = [];
@@ -178,12 +146,11 @@ public sealed partial class MainViewModel : ObservableObject
             r.PropertyChanged += (_, e) =>
             {
                 if (e.PropertyName is nameof(RadioViewModel.IsScanning) or nameof(RadioViewModel.IsSearching)) ScanStateChanged();
-                else if (e.PropertyName is nameof(RadioViewModel.Name)) NameRadios();
+                else if (e.PropertyName is nameof(RadioViewModel.Name)) OnPropertyChanged(nameof(GroupsTitle));
                 else if (e.PropertyName is nameof(RadioViewModel.IsOn)) MarkInUse();
                 else if (e.PropertyName is nameof(RadioViewModel.IsBusy) && !r.IsBusy) ListReceivers();     // switched on or off, or changed over
             };
         }
-        NameRadios();
         _loading = true;
         _selectedAvoidTime = AvoidTimes.FirstOrDefault(a => (int)a.Value == settings.AvoidMinutes) ?? AvoidTimes[0];
         _selectedResumeTime = ResumeTimes.FirstOrDefault(r => (int)r.Value == settings.ResumeSeconds) ?? ResumeTimes[^1];
@@ -334,42 +301,6 @@ public sealed partial class MainViewModel : ObservableObject
         ShownChanged();
     }
 
-    // Each radio's name where a group is given to one: its model, with the end of its serial number
-    // where two are of the same model.
-    private void NameRadios()
-    {
-        OnPropertyChanged(nameof(GroupsTitle));
-        var choices = GroupRadioChoices;
-        foreach (var r in RadioList)
-        {
-            if (r.Serial is not { Length: > 0 } serial) continue;
-            bool twins = RadioList.Count(o => o.Name == r.Name) > 1;
-            string label = twins ? $"{r.Name} …{serial[^Math.Min(4, serial.Length)..]}" : r.Name;
-            if (choices.FirstOrDefault(c => c.Serial == serial) is { } have) have.Label = label;
-            else choices.Insert(1 + choices.Skip(1).TakeWhile(c => IsHere(c.Serial!)).Count(), new RadioChoice(label, serial));
-        }
-        // A radio that groups were given to and that is not here now keeps its place in the list.
-        foreach (string serial in _settings.GroupRadio.Values.Distinct())
-            if (choices.All(c => c.Serial != serial)) choices.Add(new RadioChoice($"Not here …{serial[^Math.Min(4, serial.Length)..]}", serial));
-    }
-
-    private RadioChoice ChoiceFor(string group)
-    {
-        string? serial = _settings.GroupRadio.FirstOrDefault(p => MemoryStore.SameGroup(p.Key, group)).Value;
-        return GroupRadioChoices.FirstOrDefault(c => c.Serial == serial) ?? GroupRadioChoices[0];
-    }
-
-    // A group was given to another radio, or to any.
-    private void OnGroupRadioChanged(GroupRow row)
-    {
-        if (_loading) return;
-        foreach (string key in _settings.GroupRadio.Keys.Where(k => MemoryStore.SameGroup(k, row.Name)).ToList())
-            _settings.GroupRadio.Remove(key);
-        if (row.Radio?.Serial is { } serial) _settings.GroupRadio[row.Name] = serial;
-        StopScans();
-        _dirty = true;
-    }
-
     private void ScanStateChanged()
     {
         OnPropertyChanged(nameof(IsScanning));
@@ -409,8 +340,7 @@ public sealed partial class MainViewModel : ObservableObject
             PlaceGroupRows.Clear();
             foreach (string n in names)
             {
-                var row = new GroupRow(n, wanted.Any(w => MemoryStore.SameGroup(w, n)), OnGroupsChanged,
-                    IsMulti ? GroupRadioChoices : null, ChoiceFor(n), OnGroupRadioChanged);
+                var row = new GroupRow(n, wanted.Any(w => MemoryStore.SameGroup(w, n)), OnGroupsChanged);
                 GroupRows.Add(row);
                 (row.IsPlace ? PlaceGroupRows : row.IsAuto ? AutoGroupRows : UserGroupRows).Add(row);
             }
@@ -499,11 +429,6 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The channel editor has renamed a group: if it was ticked here, the new name is.</summary>
     public void GroupRenamed(string old, string name)
     {
-        if (_settings.GroupRadio.Remove(old, out string? serial))
-        {
-            _settings.GroupRadio[name] = serial;
-            _dirty = true;
-        }
         foreach (var r in RadioList) _groups[r] = _groups[r].Select(g => g == old ? name : g).Distinct().ToList();
         RefreshMemories(SelectedGroups.Select(g => g == old ? name : g).Distinct().ToList());
     }
@@ -721,21 +646,15 @@ public sealed partial class MainViewModel : ObservableObject
         if (places.Count == 0) return null;
         var list = places.Select(g => ToScan(g.First())).ToList();
         var usable = on.Select(r => r.UsableHz).ToList();
-        // The groups given to a radio that is on, with that radio's place among those on.
-        var serials = on.Select(r => r.Serial).ToList();
-        var given = GroupRows.Where(g => g.Radio?.Serial is not null)
-            .Select(g => (g.Name, Radio: ScanSplit.RadioFor([g.Name], _settings.GroupRadio, serials))).Where(g => g.Radio >= 0).ToList();
-        // Which radio each frequency goes to: the one a group of its is given to, if that radio scans the group;
-        // otherwise the only radio that scans it; otherwise (-1) it is shared out among all, or (-2) among some.
+        // Which radio each frequency goes to: the only radio that scans it; otherwise (-1) it is shared out
+        // among all, or (-2) among some.
         var wanted = new int[places.Count];
         var wanters = new List<int>[places.Count];
         for (int i = 0; i < places.Count; i++)
         {
             var place = places[i];
             var who = wanters[i] = Enumerable.Range(0, on.Count).Where(r => place.Any(c => Wants(r, c))).ToList();
-            int named = given.Where(g => who.Contains(g.Radio) && (groups[g.Radio].Count == 0 || groups[g.Radio].Contains(g.Name))
-                && place.Any(c => MemoryStore.InGroup(c, g.Name))).Select(g => g.Radio).DefaultIfEmpty(-1).First();
-            wanted[i] = named >= 0 ? named : who.Count == 1 ? who[0] : who.Count == on.Count ? -1 : -2;
+            wanted[i] = who.Count == 1 ? who[0] : who.Count == on.Count ? -1 : -2;
         }
         // Frequencies that some of the radios scan, but not all: shared out among just those first, with what
         // those radios already have to themselves counted in.

@@ -1,0 +1,195 @@
+using System.Text;
+using System.Text.Json;
+
+namespace SimpleScanner.Remote;
+
+/// <summary>
+/// The helper program's side: a real receiver, worked by the messages that arrive and reporting back.
+/// </summary>
+internal sealed class ReceiverHost
+{
+    private readonly IReceiver _rx;
+    private readonly StreamReader _in;
+    private readonly Stream _out;
+    private readonly object _write = new();
+    private long _seq;
+    private volatile bool _open = true;
+
+    private ReceiverHost(IReceiver rx, Stream input, Stream output)
+    {
+        _rx = rx;
+        _in = new StreamReader(input, new UTF8Encoding(false));
+        _out = output;
+    }
+
+    /// <summary>Serve the receiver until the other end closes the stream (the window has gone) or says "quit". The receiver is then stopped and disposed.</summary>
+    public static void Run(IReceiver rx, Stream input, Stream output)
+    {
+        var host = new ReceiverHost(rx, input, output);
+        rx.Failed += why => host.Send(new WireMessage { Op = "failed", Error = why });
+        var reports = new Thread(host.Report) { IsBackground = true, Name = "receiver status" };
+        reports.Start();
+        try
+        {
+            while (host._in.ReadLine() is { } line)
+            {
+                if (line.Length == 0) continue;
+                WireMessage? m;
+                try { m = JsonSerializer.Deserialize<WireMessage>(line, WireMessage.Json); }
+                catch (JsonException) { continue; }
+                if (m is null) continue;
+                if (m.Op == "quit") break;
+                host.Handle(m);
+                Interlocked.Exchange(ref host._seq, m.Id);
+            }
+        }
+        catch (IOException) { }
+        finally
+        {
+            host._open = false;
+            reports.Join(500);
+            rx.Dispose();
+        }
+    }
+
+    private void Handle(WireMessage m)
+    {
+        bool answered = m.Op is "start" or "stop" or "avoid";
+        try
+        {
+            JsonElement? result = null;
+            switch (m.Op)
+            {
+                case "start": _rx.Start(); break;
+                case "stop": _rx.Stop(); break;
+                case "avoid": result = JsonSerializer.SerializeToElement(_rx.AvoidChannel(), WireMessage.Json); break;
+                case "set": Set(m.Name ?? "", m.Arg); break;
+                case "setMode":
+                    var mode = m.Arg!.Value.Deserialize<ModeArg>(WireMessage.Json)!;
+                    _rx.SetMode(mode.Mode, mode.BandwidthHz);
+                    break;
+                case "startScan": _rx.StartScan(m.Arg!.Value.Deserialize<List<ScanChannel>>(WireMessage.Json)!); break;
+                case "stopScan": _rx.StopScan(); break;
+                case "skip": _rx.SkipChannel(); break;
+                case "clearAvoided": _rx.ClearAvoided(); break;
+            }
+            // An answer carries a report made after the work, so what is read next is already true.
+            if (answered) Send(new WireMessage { Op = "reply", Id = m.Id, Arg = result, Status = Snapshot(_rx, m.Id) });
+        }
+        catch (Exception e)
+        {
+            var why = (e as System.Reflection.TargetInvocationException)?.InnerException ?? e;
+            if (answered) Send(new WireMessage { Op = "reply", Id = m.Id, Error = why.Message });
+            else Console.Error.WriteLine($"{m.Op} {m.Name}: {why.Message}");
+        }
+    }
+
+    // "Volume" is the receiver's; "Source.Antenna" its radio's.
+    private void Set(string name, JsonElement? arg)
+    {
+        object target = _rx;
+        var type = typeof(IReceiver);
+        if (name.StartsWith("Source."))
+        {
+            target = _rx.Source;
+            type = typeof(Radio.IIqSource);
+            name = name[7..];
+        }
+        var property = type.GetProperty(name);
+        if (property is null || !property.CanWrite) throw new InvalidOperationException("no such setting");
+        property.SetValue(target, arg is { } a ? a.Deserialize(property.PropertyType, WireMessage.Json) : null);
+    }
+
+    private void Report()
+    {
+        while (_open)
+        {
+            ReceiverStatus status;
+            try { status = Snapshot(_rx, Interlocked.Read(ref _seq)); }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine($"status: {e.Message}");
+                Thread.Sleep(200);
+                continue;
+            }
+            if (!Send(new WireMessage { Op = "status", Status = status })) return;
+            Thread.Sleep(50);
+        }
+    }
+
+    private bool Send(WireMessage m)
+    {
+        byte[] line = JsonSerializer.SerializeToUtf8Bytes(m, WireMessage.Json);
+        lock (_write)
+        {
+            try
+            {
+                _out.Write(line);
+                _out.WriteByte((byte)'\n');
+                _out.Flush();
+                return true;
+            }
+            catch (Exception e) when (e is IOException or ObjectDisposedException) { return false; }
+        }
+    }
+
+    internal static ReceiverStatus Snapshot(IReceiver rx, long seq)
+    {
+        var src = rx.Source;
+        var digital = rx.Digital;
+        var radio = src.Radio;
+        return new ReceiverStatus
+        {
+            Seq = seq,
+            IsRunning = rx.IsRunning,
+            FrequencyHz = rx.FrequencyHz,
+            Mode = rx.Mode,
+            BandwidthHz = rx.BandwidthHz,
+            LevelDb = rx.LevelDb,
+            LevelOffsetDb = rx.LevelOffsetDb,
+            SquelchOpen = rx.SquelchOpen,
+            Blocked = rx.Blocked,
+            SquelchDb = rx.SquelchDb,
+            SquelchEnabled = rx.SquelchEnabled,
+            AutoSquelch = rx.AutoSquelch,
+            Stereo = rx.Stereo,
+            StereoEnabled = rx.StereoEnabled,
+            DigitalText = digital?.ToString(),
+            DigitalEncrypted = digital is { Encrypted: true },
+            DigitalNothingToHear = digital is { NothingToHear: true },
+            AudioDevice = rx.AudioDevice,
+            Volume = rx.Volume,
+            ScanHangSeconds = rx.ScanHangSeconds,
+            ScanSkipSeconds = rx.ScanSkipSeconds,
+            ResumeSeconds = rx.ResumeSeconds,
+            AvoidTime = rx.AvoidTime,
+            AvoidedCount = rx.AvoidedCount,
+            Scanning = rx.Scanning,
+            ScanListening = rx.ScanListening,
+            ScanPasses = rx.ScanPasses,
+            ScanWindows = rx.ScanWindows,
+            ScanChannel = rx.ScanChannel,
+            DroppedBlocks = rx.DroppedBlocks,
+            Description = src.Description,
+            RadioModel = radio?.Model,
+            RadioSerial = radio?.Serial ?? src.Serial,
+            SampleRate = src.SampleRate,
+            CenterHz = src.CenterHz,
+            UsableBandwidthHz = src.UsableBandwidthHz,
+            Antennas = [.. src.Antennas],
+            Antenna = src.Antenna,
+            HasBiasT = src.HasBiasT,
+            BiasT = src.BiasT,
+            HasFmNotch = src.HasFmNotch,
+            FmNotch = src.FmNotch,
+            Ppm = src.Ppm,
+            AutoGain = src.AutoGain,
+            GainStep = src.GainStep,
+            MaxGainStep = src.MaxGainStep,
+            ActiveGainStep = src.ActiveGainStep,
+            GainDb = src.GainDb,
+            Overloaded = src.Overloaded,
+            LastRetuneMs = src.LastRetuneMs,
+        };
+    }
+}

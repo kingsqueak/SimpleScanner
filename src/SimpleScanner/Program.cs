@@ -1,12 +1,37 @@
 using Avalonia;
+using SimpleScanner.Radio.SdrPlay;
+using SimpleScanner.Remote;
 
 namespace SimpleScanner;
 
 internal static class Program
 {
     [STAThread]
-    public static void Main(string[] args) =>
+    public static void Main(string[] args)
+    {
+        // SimpleScanner --radio-host <serial> [--rate <samples a second>]: no window. Run one receiver on
+        // that radio for the program that started this one, taking its messages on standard input and
+        // answering on standard output (see Remote/Wire.cs). This is how a second radio is run: the
+        // SDRplay software lets one program open one radio only.
+        int at = Array.IndexOf(args, "--radio-host");
+        if (at >= 0 && at + 1 < args.Length)
+        {
+            RunHelper(args[at + 1], args);
+            return;
+        }
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
+
+    private static void RunHelper(string serial, string[] args)
+    {
+        var output = Console.OpenStandardOutput();
+        Console.SetOut(Console.Error);       // nothing else may write among the messages
+        int at = Array.IndexOf(args, "--rate");
+        double rate = at >= 0 && at + 1 < args.Length
+            ? double.Parse(args[at + 1], System.Globalization.CultureInfo.InvariantCulture) : Receiver.DefaultSampleRate;
+        var source = new SdrPlaySource { Serial = serial, OnlyThisRadio = true };
+        ReceiverHost.Run(new Receiver(source, sampleRate: rate), Console.OpenStandardInput(), output);
+    }
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().LogToTrace();

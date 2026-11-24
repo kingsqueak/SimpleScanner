@@ -29,7 +29,7 @@ public sealed record ScanChannel(string Name, double FrequencyHz, Mode Mode, dou
 /// the decoded speech, and <see cref="Digital"/> says what the signal is. Encrypted calls are
 /// reported and stay silent.
 /// </summary>
-public sealed class Receiver : IDisposable
+public sealed class Receiver : IReceiver
 {
     /// <summary>IQ rate asked of the radio: a multiple of 240 kHz, 12-bit on an RSPdx.</summary>
     public const double DefaultSampleRate = 7_680_000;
@@ -629,7 +629,27 @@ public sealed class Receiver : IDisposable
         Volatile.Write(ref _level, -140);
     }
 
-    public void Dispose() => Stop();
+    // Stops, and gives back the decoders' memory. The receiver cannot be started again after this.
+    public void Dispose()
+    {
+        var thread = _thread;
+        Stop();
+        // The decoders belong to the DSP thread: free them only once it has ended. If it will not end
+        // (or this is that thread), they are left: a small leak, not a call into freed memory.
+        if (thread is not null && (thread == Thread.CurrentThread || !thread.Join(2000))) return;
+        lock (_cfg)
+        {
+            _p25?.Dispose();
+            _dmr?.Dispose();
+            _nxdn?.Dispose();
+            _dstar?.Dispose();
+            _ysf?.Dispose();
+        }
+    }
+
+    // Blocks of samples thrown away because the DSP thread had fallen 512 blocks behind (since the start).
+    public long DroppedBlocks => Interlocked.Read(ref _dropped);
+    private long _dropped;
 
     // On the radio's thread: copy the block and hand it to the DSP thread.
     private void OnSamples(ReadOnlySpan<float> i, ReadOnlySpan<float> q, bool retuned)
@@ -648,7 +668,11 @@ public sealed class Receiver : IDisposable
         try { added = queue.TryAdd(new Block(data, n, retuned)); }
         catch (InvalidOperationException) { }
         _retunedUnsaid = retuned && !added;
-        if (!added) ArrayPool<float>.Shared.Return(data);
+        if (!added)
+        {
+            ArrayPool<float>.Shared.Return(data);
+            Interlocked.Increment(ref _dropped);
+        }
     }
 
     private void Run(BlockingCollection<Block> queue)

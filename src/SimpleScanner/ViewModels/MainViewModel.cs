@@ -66,7 +66,7 @@ public sealed partial class MainViewModel : ObservableObject
     public const double MinHz = 100_000, MaxHz = 2_000_000_000;
 
     private readonly Settings _settings;
-    private readonly Receiver _rx;
+    private readonly IReceiver _rx;
     private readonly MemoryStore _memories;
     private const string AllGroups = "All groups", DefaultDevice = "System default";
     private long _lastPasses;
@@ -178,7 +178,7 @@ public sealed partial class MainViewModel : ObservableObject
     public bool IsWfm => !AutoMode && Mode == Mode.Wfm;
     public string PowerText => IsOn ? "Stop" : "Start";
 
-    public MainViewModel(Settings settings, Receiver receiver, MemoryStore memories)
+    public MainViewModel(Settings settings, IReceiver receiver, MemoryStore memories)
     {
         _settings = settings;
         _rx = receiver;

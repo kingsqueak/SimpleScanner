@@ -22,7 +22,7 @@ void
 mbe_checkGolayBlock (long int *block)
 {
 
-  static int i, syndrome, eccexpected, eccbits, databits;
+  int i, syndrome, eccexpected, eccbits, databits;   /* not static: several decoders may run at once */
   long int mask, block_l;
 
   block_l = *block;

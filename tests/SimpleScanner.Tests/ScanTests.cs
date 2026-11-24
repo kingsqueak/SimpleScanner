@@ -41,8 +41,11 @@ internal sealed class FakeSource : IIqSource
     public bool Overloaded => false;
     public double LastRetuneMs => 0;
 
+    public string? FailToStart;              // the reason it gives for not starting
+
     public void Start(double sampleRate, double centerHz)
     {
+        if (FailToStart is { } why) throw new InvalidOperationException(why);
         SampleRate = sampleRate;
         _center = centerHz;
         _run = true;
@@ -332,5 +335,37 @@ public class ScanTests
         long before = rx.ScanPasses;
         Assert.True(Wait(() => rx.ScanPasses >= before + 2, 6), "the scan stalled waiting for the retune");
         rx.Stop();
+    }
+
+    [Fact]
+    public void TwoReceiversScanAtOnceAndEachStopsOnItsOwnSignal()
+    {
+        var a = new FakeSource();
+        var b = new FakeSource();
+        var first = new Receiver(a, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60, ScanHangSeconds = 0.2 };
+        var second = new Receiver(b, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60, ScanHangSeconds = 0.2 };
+        ScanChannel[] low = [new("one", 120.0e6, Mode.Am, BandPlan.AmAir), new("two", 125.0e6, Mode.Am, BandPlan.AmAir)];
+        ScanChannel[] high = [new("three", 130.0e6, Mode.Am, BandPlan.AmAir), new("four", 135.0e6, Mode.Am, BandPlan.AmAir)];
+        first.Start();
+        second.Start();
+        first.StartScan(low);
+        second.StartScan(high);
+        Assert.True(Wait(() => first.ScanPasses >= 2 && second.ScanPasses >= 2, 3), "one of the two did not go round");
+
+        // A carrier for the second only: it stops, the first keeps going round.
+        b.CarrierHz = 135.0e6;
+        Assert.True(Wait(() => second.ScanListening, 2), "the second did not stop on its carrier");
+        Assert.Equal("four", second.ScanChannel?.Name);
+        long before = first.ScanPasses;
+        Assert.True(Wait(() => first.ScanPasses >= before + 2, 3), "the first stopped going round");
+        Assert.False(first.ScanListening);
+        Assert.Equal(0, first.DroppedBlocks);
+
+        // Disposing one leaves the other running; disposing twice does no harm.
+        first.Dispose();
+        first.Dispose();
+        Assert.True(second.IsRunning);
+        Assert.True(second.ScanListening);
+        second.Dispose();
     }
 }

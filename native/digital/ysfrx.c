@@ -30,6 +30,7 @@
 //
 // One instance per channel listened to. Not thread-safe: call everything for an instance from
 // one thread.
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include "radiofoundry/core/air/air_softmodem.h"
@@ -452,33 +453,39 @@ static void info_clear(ysfrx *r)
     imbe_dec_init(&r->dec);
 }
 
+// Filled once, whichever thread comes first: several receivers may be made at the same moment
+static pthread_once_t profile_once = PTHREAD_ONCE_INIT;
+
+static void profile_fill(void)
+{
+    int k, i;
+    profile.levels = 4;
+    profile.shape = AIR_SHAPE_RRC;
+    profile.shape_param = 20;
+    profile.dev_outer_hz = 2700;
+    profile.timing = AIR_TIMING_CONTINUOUS;
+    profile.bw = RADIO_BW_12K5;
+    profile.sync_every_syms = 0;             // the sync is 20 symbols, short of the 24 a modem chip wants
+    profile.sync_any_syms = FRAME_BITS / 2;
+    profile.idle = 0x77;
+    profile.nsyncs = 2;
+    for (k = 0; k < 2; k++) {                // as sent, and with the deviation turned over
+        profile.sync[k].id = (uint8_t)k;
+        profile.sync[k].nsyms = SYNC_BITS / 2;
+        profile.sync[k].max_errs = 2;
+        for (i = 0; i < SYNC_BITS / 2; i++)
+            air_sym_put(profile.sync[k].syms, (uint16_t)i, (uint8_t)(((SYNC >> (SYNC_BITS - 2 - 2 * i)) & 3) ^ (k ? 2 : 0)));
+    }
+    profile.sym_rate = 4800;
+}
+
 // rate: of the samples fed, 8000 to 48000 Hz (24000 is the modem's own rate and the best).
 // hz_per_unit: the deviation that reads 1.0 in the samples. NULL if the modem refuses the rate.
 SS_API ysfrx *ysfrx_new(int rate, float hz_per_unit)
 {
     ysfrx *r = (ysfrx *)calloc(1, sizeof(ysfrx));
     if (!r) return NULL;
-    if (!profile.sym_rate) {
-        int k, i;
-        profile.levels = 4;
-        profile.shape = AIR_SHAPE_RRC;
-        profile.shape_param = 20;
-        profile.dev_outer_hz = 2700;
-        profile.timing = AIR_TIMING_CONTINUOUS;
-        profile.bw = RADIO_BW_12K5;
-        profile.sync_every_syms = 0;             // the sync is 20 symbols, short of the 24 a modem chip wants
-        profile.sync_any_syms = FRAME_BITS / 2;
-        profile.idle = 0x77;
-        profile.nsyncs = 2;
-        for (k = 0; k < 2; k++) {                // as sent, and with the deviation turned over
-            profile.sync[k].id = (uint8_t)k;
-            profile.sync[k].nsyms = SYNC_BITS / 2;
-            profile.sync[k].max_errs = 2;
-            for (i = 0; i < SYNC_BITS / 2; i++)
-                air_sym_put(profile.sync[k].syms, (uint16_t)i, (uint8_t)(((SYNC >> (SYNC_BITS - 2 - 2 * i)) & 3) ^ (k ? 2 : 0)));
-        }
-        profile.sym_rate = 4800;
-    }
+    pthread_once(&profile_once, profile_fill);
     r->dec.s = &r->dec_state;
     r->dec.p = &r->params;
     r->dec.mbe.s = &r->mbe_state;

@@ -26,6 +26,7 @@
 //
 // One instance per channel listened to. Not thread-safe: call everything for an instance from
 // one thread.
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include "radiofoundry/core/air/air_softmodem.h"
@@ -171,7 +172,7 @@ static int header_take(dstarrx *r, const uint8_t *h)
 // Viterbi decoder. The 330 decoded bits are the 41 octets, least significant bit first, and two tail bits
 static int header_decode(dstarrx *r)
 {
-    static uint8_t path[HEADER_BITS / 2][4];
+    uint8_t path[HEADER_BITS / 2][4];              // on the stack: two decoders may run at once
     uint8_t d[HEADER_BITS], out[HEADER_BITS / 2], h[HEADER_BYTES];
     uint16_t metric[4] = { 0, 1000, 1000, 1000 }, next[4];
     uint8_t sr = 0x7F;
@@ -395,28 +396,34 @@ static void info_clear(dstarrx *r)
     r->v_head = r->v_count = 0;
 }
 
+// Filled once, whichever thread comes first: several receivers may be made at the same moment
+static pthread_once_t profile_once = PTHREAD_ONCE_INIT;
+
+static void profile_fill(void)
+{
+    profile.levels = 2;
+    profile.shape = AIR_SHAPE_GAUSS;
+    profile.shape_param = 50;
+    profile.dev_outer_hz = 1200;             // GMSK at 4800 bit/s: a quarter of the bit rate
+    profile.timing = AIR_TIMING_CONTINUOUS;
+    profile.bw = RADIO_BW_12K5;
+    profile.sync_every_syms = SUPERFRAME * FRAME_BITS;
+    profile.idle = 0x77;
+    profile.nsyncs = 4;
+    profile.sync[0] = sync_of(0, DATA_SYNC, 0);
+    profile.sync[1] = sync_of(1, DATA_SYNC, 1);
+    profile.sync[2] = sync_of(2, HEAD_SYNC & 0xFFFFFFu, 0);
+    profile.sync[3] = sync_of(3, HEAD_SYNC & 0xFFFFFFu, 1);
+    profile.sym_rate = 4800;
+}
+
 // rate: of the samples fed, 8000 to 48000 Hz (24000 is the modem's own rate and the best).
 // hz_per_unit: the deviation that reads 1.0 in the samples. NULL if the modem refuses the rate.
 SS_API dstarrx *dstarrx_new(int rate, float hz_per_unit)
 {
     dstarrx *r = (dstarrx *)calloc(1, sizeof(dstarrx));
     if (!r) return NULL;
-    if (!profile.sym_rate) {
-        profile.levels = 2;
-        profile.shape = AIR_SHAPE_GAUSS;
-        profile.shape_param = 50;
-        profile.dev_outer_hz = 1200;             // GMSK at 4800 bit/s: a quarter of the bit rate
-        profile.timing = AIR_TIMING_CONTINUOUS;
-        profile.bw = RADIO_BW_12K5;
-        profile.sync_every_syms = SUPERFRAME * FRAME_BITS;
-        profile.idle = 0x77;
-        profile.nsyncs = 4;
-        profile.sync[0] = sync_of(0, DATA_SYNC, 0);
-        profile.sync[1] = sync_of(1, DATA_SYNC, 1);
-        profile.sync[2] = sync_of(2, HEAD_SYNC & 0xFFFFFFu, 0);
-        profile.sync[3] = sync_of(3, HEAD_SYNC & 0xFFFFFFu, 1);
-        profile.sym_rate = 4800;
-    }
+    pthread_once(&profile_once, profile_fill);
     info_clear(r);
     r->rate = (uint32_t)rate;
     r->scale = hz_per_unit / 1000.0f * COUNTS_PER_KHZ;

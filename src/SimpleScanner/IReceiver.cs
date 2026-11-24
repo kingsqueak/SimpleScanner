@@ -1,0 +1,60 @@
+using SimpleScanner.Digital;
+using SimpleScanner.Dsp;
+using SimpleScanner.Radio;
+
+namespace SimpleScanner;
+
+/// <summary>
+/// One receiver as the window sees it: a radio, tuned and demodulated, with its squelch, its sound and its
+/// scan. <see cref="Receiver"/> is the real one, in this program. <see cref="Remote.RemoteReceiver"/> stands
+/// for one running in a helper program of its own, which is how a second radio is run: the SDRplay
+/// software lets one program open one radio only.
+/// </summary>
+public interface IReceiver : IDisposable
+{
+    IIqSource Source { get; }
+    bool IsRunning { get; }
+    /// <summary>The radio stopped by itself. May be raised on any thread.</summary>
+    event Action<string>? Failed;
+
+    void Start();
+    void Stop();
+
+    double FrequencyHz { get; set; }
+    Mode Mode { get; }
+    double BandwidthHz { get; }
+    void SetMode(Mode mode, double bandwidthHz);
+
+    double LevelDb { get; }
+    double LevelOffsetDb { get; set; }
+    bool SquelchOpen { get; }
+    bool Blocked { get; }
+    double SquelchDb { get; set; }
+    bool SquelchEnabled { get; set; }
+    bool AutoSquelch { get; set; }
+    bool Stereo { get; }
+    bool StereoEnabled { get; set; }
+    IDigitalStatus? Digital { get; }
+
+    string? AudioDevice { get; set; }
+    double Volume { get; set; }
+
+    double ScanHangSeconds { get; set; }
+    double ScanSkipSeconds { get; set; }
+    double? ResumeSeconds { get; set; }
+    TimeSpan? AvoidTime { get; set; }
+    int AvoidedCount { get; }
+    bool Scanning { get; }
+    bool ScanListening { get; }
+    long ScanPasses { get; }
+    int ScanWindows { get; }
+    ScanChannel? ScanChannel { get; }
+    void StartScan(IReadOnlyList<ScanChannel> channels);
+    void StopScan();
+    void SkipChannel();
+    ScanChannel? AvoidChannel();
+    void ClearAvoided();
+
+    /// <summary>Blocks of samples thrown away because the processing had fallen behind (since the start).</summary>
+    long DroppedBlocks { get; }
+}

@@ -42,6 +42,12 @@ public sealed unsafe class SdrPlaySource : IIqSource
     /// </summary>
     public string? Serial { get; set; }
 
+    /// <summary>
+    /// With several radios in use at once: when the radio named by <see cref="Serial"/> is not there,
+    /// <see cref="Start"/> fails; it does not open another, which may be meant for another receiver.
+    /// </summary>
+    public bool OnlyThisRadio { get; set; }
+
     public RadioInfo? Radio { get; private set; }
 
     public IReadOnlyList<RadioInfo> Radios()
@@ -110,14 +116,16 @@ public sealed unsafe class SdrPlaySource : IIqSource
             {
                 Check(Native.GetDevices(devices, &count, 16), "list the radios");
                 int pick = -1;
-                bool dx = false;
+                bool dx = false, exact = false;
                 for (int k = 0; k < count; k++)
                 {
                     if (devices[k].Valid == 0) continue;
-                    if (Serial is { Length: > 0 } wanted && SerialOf(&devices[k]) == wanted) { pick = k; break; }
+                    if (Serial is { Length: > 0 } wanted && SerialOf(&devices[k]) == wanted) { pick = k; exact = true; break; }
                     if (pick < 0) pick = k;
                     if (!dx && devices[k].HwVer is Native.HwRspDx or Native.HwRspDxR2) { pick = k; dx = true; }
                 }
+                if (OnlyThisRadio && Serial is { Length: > 0 } && !exact)
+                    throw new InvalidOperationException($"Receiver {Serial} not found. Check that it is plugged in and that no other program is using it.");
                 if (pick < 0)
                     throw new InvalidOperationException("No SDRplay radio found. Check that it is plugged in and that no other program is using it.");
                 _device = devices[pick];
@@ -173,7 +181,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
             catch
             {
                 if (_self.IsAllocated) _self.Free();
-                fixed (DeviceT* d = &_device) Native.ReleaseDevice(d);
+                Release();
                 _params = null;
                 throw;
             }
@@ -200,13 +208,21 @@ public sealed unsafe class SdrPlaySource : IIqSource
             var err = Native.Uninit(_device.Dev);
             lock (_gate)
             {
-                fixed (DeviceT* d = &_device) Native.ReleaseDevice(d);
+                Release();
                 _params = null;
                 // If the API would not stop, a callback may still arrive: leave it a live handle
                 // to find (a small leak) rather than a freed one.
                 if (err == Err.Success && _self.IsAllocated) _self.Free();
             }
         }
+    }
+
+    // Under the API's own lock, as the opening is: another radio may be starting or stopping now.
+    private void Release()
+    {
+        Native.LockDeviceApi();
+        try { fixed (DeviceT* d = &_device) Native.ReleaseDevice(d); }
+        finally { Native.UnlockDeviceApi(); }
     }
 
     public void Dispose() => Stop();

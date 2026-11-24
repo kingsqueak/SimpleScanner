@@ -7,14 +7,23 @@
 //                                      run the receiver on a frequency and print its level each second;
 //                                      the file takes the audio as raw 48 kHz 32-bit float, stereo;
 //                                      the word "auto" anywhere switches the auto (noise) squelch on
+//   rsp-bench multi <from MHz> <to MHz> [seconds] [squelch dB] radio=<a> radio=<b> ... [rate=<MS/s>,<MS/s>...]
+//                                      several radios at once in this one program, each scanning the range:
+//                                      samples received against asked, blocks dropped, retune time and the
+//                                      processor time used, each second. With no radio= all the free ones.
+//                                      rate= gives each radio's sample rate in turn (7.68 when not given)
+//   rsp-bench helpers [seconds] [squelch dB] radio=<a>:<from MHz>-<to MHz> radio=<b>:<from>-<to> ...
+//                                      each radio in a helper program of its own, as the app runs a second radio
 using System.Diagnostics;
 using SimpleScanner;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio.SdrPlay;
 
 bool autoSquelch = args.Contains("auto"), fast = args.Contains("fast");
-string? radio = args.FirstOrDefault(a => a.StartsWith("radio="))?[6..];
-args = args.Where(a => a != "auto" && a != "fast" && !a.StartsWith("radio=")).ToArray();
+string[] radios = args.Where(a => a.StartsWith("radio=")).Select(a => a[6..]).ToArray();
+string? radio = radios.FirstOrDefault();
+string? rateWord = args.FirstOrDefault(a => a.StartsWith("rate="))?[5..];
+args = args.Where(a => a != "auto" && a != "fast" && !a.StartsWith("radio=") && !a.StartsWith("rate=")).ToArray();
 
 if (args.Length >= 1 && args[0] == "list")
 {
@@ -32,6 +41,169 @@ SdrPlaySource NewSource()
     if (match is null) throw new InvalidOperationException($"No free radio matches \"{radio}\".");
     s.Serial = match.Serial;
     return s;
+}
+
+if (args.Length >= 1 && args[0] == "helpers")
+{
+    // rsp-bench helpers [seconds] [squelch dB] radio=<a>:<from MHz>-<to MHz> radio=<b>:<from>-<to> ...
+    // Each radio in a helper program of its own (the app started with --radio-host), as the app runs a
+    // second radio: each scans its range and plays what it stops on. Reports what the helpers say.
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    int seconds = args.Length > 1 ? int.Parse(args[1]) : 20;
+    double squelch = args.Length > 2 ? double.Parse(args[2], inv) : -95;
+    string config = AppContext.BaseDirectory.Contains("/Debug/") ? "Debug" : "Release";
+    string? root = AppContext.BaseDirectory;
+    while (root is not null && !Directory.Exists(Path.Combine(root, "src", "SimpleScanner"))) root = Path.GetDirectoryName(root);
+    string app = Path.Combine(root ?? ".", "src", "SimpleScanner", "bin", config, "net10.0", "SimpleScanner");
+    var free = SdrPlaySource.ListRadios();
+    var rxs = new List<(SimpleScanner.Remote.RemoteReceiver Rx, List<ScanChannel> List, string Name)>();
+    try
+    {
+        foreach (string word in radios)
+        {
+            string[] parts = word.Split(':');
+            var match = free.FirstOrDefault(r => r.Serial == parts[0] || r.Model.Equals(parts[0], StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"No free radio matches \"{parts[0]}\".");
+            string[] range = (parts.Length > 1 ? parts[1] : "160-163").Split('-');
+            double lo = double.Parse(range[0], inv) * 1e6, hi = double.Parse(range[1], inv) * 1e6;
+            var list = new List<ScanChannel>();
+            for (double f = lo; f <= hi + 1;)
+            {
+                var band = BandPlan.Find(f);
+                double channel = Math.Ceiling(f / band.StepHz - 1e-6) * band.StepHz;
+                if (channel > hi + 1) break;
+                if (!BandPlan.Find(channel).Blocked) list.Add(new ScanChannel($"{channel / 1e6:F4}", Math.Round(channel / 10) * 10, Mode.Nfm, BandPlan.NfmNarrow));
+                f = channel + band.StepHz;
+            }
+            var rx = SimpleScanner.Remote.RemoteReceiver.Launch(match.Serial, SdrPlaySource.ListRadios, program: app);
+            rx.Failed += why => Console.WriteLine($"  {match.Model} FAILED: {why}");
+            rx.SquelchDb = squelch;
+            rx.Volume = 0.3;
+            rx.ScanSkipSeconds = 5;
+            rxs.Add((rx, list, match.Model));
+        }
+        foreach (var (rx, _, name) in rxs)
+        {
+            var sw1 = Stopwatch.StartNew();
+            rx.Start();
+            Console.WriteLine($"{name}: started in {sw1.ElapsedMilliseconds} ms: {rx.Source.Description}, antennas {string.Join("/", rx.Source.Antennas)}, bias T {(rx.Source.HasBiasT ? "yes" : "no")}");
+        }
+        Thread.Sleep(1500);
+        foreach (var (rx, list, _) in rxs) rx.StartScan(list);
+        var last = new long[rxs.Count];
+        for (int s = 1; s <= seconds; s++)
+        {
+            Thread.Sleep(1000);
+            var line = new System.Text.StringBuilder($"  {s,3} s");
+            for (int k = 0; k < rxs.Count; k++)
+            {
+                var rx = rxs[k].Rx;
+                long p = rx.ScanPasses;
+                line.Append($"  [{rxs[k].Name}] {p - last[k],3} passes, {rx.DroppedBlocks} dropped, retune {rx.Source.LastRetuneMs:F0} ms, "
+                    + (rx.ScanListening ? $"ON {rx.ScanChannel?.Name} {rx.LevelDb:F0} dB {rx.Digital}" : rx.Scanning ? "scanning" : "NOT SCANNING"));
+                last[k] = p;
+            }
+            Console.WriteLine(line);
+        }
+        foreach (var (rx, _, name) in rxs)
+        {
+            rx.Stop();
+            Console.WriteLine($"{name}: stopped, running {rx.IsRunning}");
+        }
+    }
+    finally
+    {
+        foreach (var (rx, _, _) in rxs) rx.Dispose();
+    }
+    Thread.Sleep(500);
+    Console.WriteLine($"helpers left: {Process.GetProcessesByName("SimpleScanner").Length}");
+    return;
+}
+
+if (args.Length >= 3 && args[0] == "multi")
+{
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    double lo = double.Parse(args[1], inv) * 1e6, hi = double.Parse(args[2], inv) * 1e6;
+    int seconds = args.Length > 3 ? int.Parse(args[3]) : 20;
+    double squelch = args.Length > 4 ? double.Parse(args[4], inv) : -95;
+    double[] rates = rateWord?.Split(',').Select(r => double.Parse(r, inv) * 1e6).ToArray() ?? [];
+
+    var free = SdrPlaySource.ListRadios();
+    var chosen = radios.Length == 0 ? free.ToList() : radios.Select(want =>
+        free.FirstOrDefault(r => r.Serial == want || r.Model.Equals(want, StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidOperationException($"No free radio matches \"{want}\".")).ToList();
+    if (chosen.Count == 0) throw new InvalidOperationException("No free radio.");
+
+    var list = new List<ScanChannel>();
+    for (double f = lo; f <= hi + 1;)
+    {
+        var band = BandPlan.Find(f);
+        double channel = Math.Ceiling(f / band.StepHz - 1e-6) * band.StepHz;
+        if (channel > hi + 1) break;
+        if (!BandPlan.Find(channel).Blocked) list.Add(new ScanChannel("", Math.Round(channel / 10) * 10, Mode.Nfm, BandPlan.NfmNarrow));
+        f = channel + band.StepHz;
+    }
+
+    // One receiver for each radio, all made and started on this thread, as the app will.
+    var rxs = new List<Receiver>();
+    var counts = new long[chosen.Count];
+    for (int k = 0; k < chosen.Count; k++)
+    {
+        int at = k;
+        var src = new SdrPlaySource { Serial = chosen[k].Serial, OnlyThisRadio = true };
+        src.Samples += (i, q, retuned) => Interlocked.Add(ref counts[at], i.Length);
+        var rx = new Receiver(src, playAudio: false, sampleRate: k < rates.Length ? rates[k] : Receiver.DefaultSampleRate)
+            { ScanSkipSeconds = 2, ScanHangSeconds = 0.3 };
+        rx.SquelchDb = squelch;
+        rxs.Add(rx);
+    }
+    try
+    {
+        foreach (var rx in rxs) rx.Start();
+        Thread.Sleep(1500);                  // let the gains settle
+        foreach (var rx in rxs) rx.StartScan(list);
+        Console.WriteLine($"{rxs.Count} radios, {list.Count} channels {lo / 1e6}-{hi / 1e6} MHz, squelch {squelch} dB, {Environment.ProcessorCount} processors");
+        for (int k = 0; k < rxs.Count; k++)
+            Console.WriteLine($"  [{k}] {rxs[k].Source.Description} at {rxs[k].SampleRate / 1e6} MS/s, {rxs[k].ScanWindows} windows");
+
+        var me = Process.GetCurrentProcess();
+        var sw = Stopwatch.StartNew();
+        var lastCounts = counts.Select((_, k) => Interlocked.Read(ref counts[k])).ToArray();
+        var lastPasses = new long[rxs.Count];
+        var firstDrops = rxs.Select(r => r.DroppedBlocks).ToArray();
+        var lastCpu = me.TotalProcessorTime;
+        var cpuStart = lastCpu;
+        double lastT = 0, worstShort = 0;
+        for (int s = 1; s <= seconds; s++)
+        {
+            Thread.Sleep(Math.Max(0, (int)(s * 1000 - sw.ElapsedMilliseconds)));
+            double t = sw.Elapsed.TotalSeconds, dt = t - lastT;
+            me.Refresh();
+            var cpu = me.TotalProcessorTime;
+            var line = new System.Text.StringBuilder($"  {t,5:F1} s  cpu {(cpu - lastCpu).TotalSeconds / dt * 100,4:F0}%");
+            for (int k = 0; k < rxs.Count; k++)
+            {
+                long c = Interlocked.Read(ref counts[k]), p = rxs[k].ScanPasses;
+                double got = (c - lastCounts[k]) / dt / rxs[k].SampleRate * 100;
+                if (s > 1) worstShort = Math.Max(worstShort, 100 - got);
+                line.Append($"  [{k}] {got,5:F1}% of samples, {rxs[k].DroppedBlocks - firstDrops[k]} dropped, {p - lastPasses[k]} passes, retune {rxs[k].Source.LastRetuneMs:F0} ms{(rxs[k].ScanListening ? $", on {rxs[k].FrequencyHz / 1e6:F4}" : "")}");
+                lastCounts[k] = c;
+                lastPasses[k] = p;
+            }
+            Console.WriteLine(line);
+            lastCpu = cpu;
+            lastT = t;
+        }
+        me.Refresh();
+        Console.WriteLine($"mean cpu {(me.TotalProcessorTime - cpuStart).TotalSeconds / sw.Elapsed.TotalSeconds * 100:F0}% of one processor; "
+            + $"dropped blocks {string.Join(" / ", rxs.Select((r, k) => r.DroppedBlocks - firstDrops[k]))}; "
+            + $"passes {string.Join(" / ", rxs.Select(r => r.ScanPasses))}; worst second {worstShort:F1}% short of samples");
+    }
+    finally
+    {
+        foreach (var rx in rxs) rx.Dispose();
+    }
+    return;
 }
 
 if (args.Length >= 2 && args[0] == "listen")

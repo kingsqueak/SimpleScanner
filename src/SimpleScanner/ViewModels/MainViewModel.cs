@@ -86,6 +86,10 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>How long Avoid keeps a frequency out of the scan, in minutes; 0 is until the app is closed.</summary>
     public IReadOnlyList<Choice> AvoidTimes { get; } = [new("30 min", 30), new("1 hr", 60), new("Full session", 0)];
 
+    /// <summary>The longest a scan stays on a busy channel, in seconds; 0 (Hold) is until the signal drops.</summary>
+    public IReadOnlyList<Choice> ResumeTimes { get; } =
+        [new("15s", 15), new("30s", 30), new("1min", 60), new("3min", 180), new("5min", 300), new("10min", 600), new("Hold", 0)];
+
     private static readonly Choice[] AmWidths = [new("8.33 kHz channel", BandPlan.AmAir833), new("25 kHz channel", BandPlan.AmAir)];
     private static readonly Choice[] NfmWidths = [new("12.5 kHz channel", BandPlan.NfmNarrow), new("25 kHz channel", BandPlan.NfmWide)];
     private static readonly Choice[] WfmWidths = [new("Broadcast", BandPlan.Wfm)];
@@ -124,6 +128,7 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private Choice? _selectedWidth;
     [ObservableProperty] private Choice _selectedStep;
     [ObservableProperty] private Choice _selectedAvoidTime;
+    [ObservableProperty] private Choice _selectedResumeTime;
     [ObservableProperty] private IReadOnlyList<string> _antennas;
     [ObservableProperty] private string _selectedAntenna;
     [ObservableProperty] private bool _isScanning;
@@ -164,6 +169,8 @@ public sealed partial class MainViewModel : ObservableObject
         _selectedStep = Steps.FirstOrDefault(s => Math.Abs(s.Value - settings.StepHz) < 0.5) ?? Steps[0];
         _selectedAvoidTime = AvoidTimes.FirstOrDefault(a => (int)a.Value == settings.AvoidMinutes) ?? AvoidTimes[0];
         _rx.AvoidTime = AvoidSpan(_selectedAvoidTime);
+        _selectedResumeTime = ResumeTimes.FirstOrDefault(r => (int)r.Value == settings.ResumeSeconds) ?? ResumeTimes[^1];
+        _rx.ResumeSeconds = _selectedResumeTime.Value > 0 ? _selectedResumeTime.Value : null;
         Volume = settings.Volume * 100;
         SquelchDb = settings.SquelchDb;
         SquelchOn = settings.SquelchOn;
@@ -327,6 +334,18 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>The stored channels, for the channel editor.</summary>
     public MemoryStore Store => _memories;
+
+    /// <summary>Where the main window was when it was last closed, kept with the settings.</summary>
+    public Settings.Place? WindowPlace
+    {
+        get => _settings.Window;
+        set
+        {
+            if (value == _settings.Window) return;
+            _settings.Window = value;
+            _settings.Save();
+        }
+    }
 
     /// <summary>The channel editor's column widths, kept with the settings.</summary>
     public Dictionary<string, double>? ChannelColumns
@@ -574,6 +593,13 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     private static TimeSpan? AvoidSpan(Choice choice) => choice.Value > 0 ? TimeSpan.FromMinutes(choice.Value) : null;
+
+    /// <summary>Takes effect at once, on the channel the scan is stopped on as well.</summary>
+    partial void OnSelectedResumeTimeChanged(Choice value)
+    {
+        _rx.ResumeSeconds = value.Value > 0 ? value.Value : null;
+        _dirty = true;
+    }
 
     /// <summary>A change of timer applies to what is avoided from now on; those already avoided keep the time they had.</summary>
     partial void OnSelectedAvoidTimeChanged(Choice value)
@@ -841,6 +867,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.BandwidthHz = SelectedWidth?.Value ?? _settings.BandwidthHz;
         _settings.StepHz = SelectedStep.Value;
         _settings.AvoidMinutes = (int)SelectedAvoidTime.Value;
+        _settings.ResumeSeconds = (int)SelectedResumeTime.Value;
         _settings.Volume = Volume / 100;
         _settings.SquelchDb = SquelchDb;
         _settings.SquelchOn = SquelchOn;

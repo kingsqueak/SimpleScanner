@@ -16,8 +16,14 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var vm = new MainViewModel(Settings.Load(), new Receiver(new SdrPlaySource()), MemoryStore.Load());
-            desktop.MainWindow = new MainWindow { DataContext = vm };
-            desktop.ShutdownRequested += (_, _) => vm.Shutdown();
+            var window = new MainWindow { DataContext = vm };
+            window.RestorePlace();
+            desktop.MainWindow = window;
+            desktop.ShutdownRequested += (_, _) =>
+            {
+                window.KeepPlace();
+                vm.Shutdown();
+            };
             // --start: switch the receiver on at launch.
             if ((desktop.Args ?? []).Contains("--start")) vm.TogglePowerCommand.Execute(null);
         }

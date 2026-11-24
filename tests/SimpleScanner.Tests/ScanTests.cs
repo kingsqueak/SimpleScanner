@@ -200,6 +200,28 @@ public class ScanTests
         rx.Stop();
     }
 
+    [Fact]
+    public void WithAResumeTimeTheScanLeavesAChannelThatIsStillBusy()
+    {
+        var source = new FakeSource { CarrierHz = 121.75e6 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60 };
+        rx.Start();
+        rx.StartScan([new("a", 121.65e6, Mode.Am, BandPlan.AmAir), new("b", 121.75e6, Mode.Am, BandPlan.AmAir)]);
+        // Hold: it stays for as long as the carrier does.
+        Assert.True(Wait(() => rx.ScanListening, 2));
+        Thread.Sleep(600);
+        Assert.True(rx.ScanListening);
+        // With a time set it goes, passes the channel by for a while, then comes back to it.
+        rx.ResumePassBySeconds = 1;
+        rx.ResumeSeconds = 0.3;
+        Assert.True(Wait(() => !rx.ScanListening, 2));
+        Assert.True(rx.Scanning);
+        Thread.Sleep(400);
+        Assert.False(rx.ScanListening);
+        Assert.True(Wait(() => rx.ScanListening, 3));
+        rx.Stop();
+    }
+
     private static readonly double[] Airband =
     [
         118.25, 120.6, 121.3, 121.65, 121.75, 121.9, 124.725, 124.9, 127.2, 128.8, 132.225, 133.0, 134.75, 135.9,

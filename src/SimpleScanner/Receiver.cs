@@ -83,7 +83,7 @@ public sealed class Receiver : IDisposable
     private readonly Queue<int> _candidates = new();
     private ScanState _scan;
     private int _window, _scanIndex = -1, _surveySkip, _fftFill, _surveyCount;
-    private double _scanTimer, _scanClock;
+    private double _scanTimer, _scanClock, _listenTime;
     private bool _scanSawSignal, _scanHeardVoice;
     private long _passes;
     private readonly Fft _fft;
@@ -287,6 +287,13 @@ public sealed class Receiver : IDisposable
     public double SilentDigitalLookSeconds { get; set; } = 0.4;
     /// <summary>How long a skipped channel is passed by.</summary>
     public double ScanSkipSeconds { get; set; } = 10;
+    /// <summary>
+    /// The longest a scan stays on one channel before it carries on, signal or no signal; null is
+    /// no limit, and it stays until the signal drops.
+    /// </summary>
+    public double? ResumeSeconds { get; set; }
+    /// <summary>How long a channel left on the resume timer is passed by, so that the rest get a turn.</summary>
+    public double ResumePassBySeconds { get; set; } = 10;
     /// <summary>How long an avoided frequency is left out of scans and searches; null is until the app closes.</summary>
     public TimeSpan? AvoidTime { get; set; } = TimeSpan.FromMinutes(30);
     /// <summary>Frequencies being avoided now.</summary>
@@ -514,6 +521,7 @@ public sealed class Receiver : IDisposable
                 {
                     _scan = ScanState.Listen;
                     _scanTimer = 0;
+                    _listenTime = 0;
                     _scanHeardVoice = false;
                     return true;
                 }
@@ -525,6 +533,14 @@ public sealed class Receiver : IDisposable
                 // an encrypted call) keeps the squelch open for as long as it likes. If a call was heard on this
                 // stop, give it the hang time for a reply and come back soon; if not, leave as soon as it is clear
                 // what the signal is, and pass it by for longer.
+                _listenTime += seconds;
+                if (ResumeSeconds is { } limit && _listenTime >= limit)
+                {
+                    // Still busy, or it would have been left already: without a pause the scan would be straight back.
+                    if (_scanIndex >= 0) _skipUntil[_scanIndex] = _scanClock + ResumePassBySeconds;
+                    NextWindowLocked();
+                    return false;
+                }
                 bool silent = open && _digital is { NothingToHear: true };
                 if (open && _digital is { NothingToHear: false }) _scanHeardVoice = true;
                 if (open && !silent) _scanTimer = 0;

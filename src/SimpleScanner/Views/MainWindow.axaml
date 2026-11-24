@@ -275,7 +275,8 @@
                     ToolTip.Tip="Look again for sound devices, after plugging one in" />
           </WrapPanel>
           <TextBlock Grid.Row="1" Grid.Column="0" Text="Radio" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
-          <WrapPanel Grid.Row="1" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
+          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="6">
+          <WrapPanel ItemSpacing="8" LineSpacing="6">
             <CheckBox Content="Auto gain" IsChecked="{Binding AutoGain}" FontSize="12"
                       ToolTip.Tip="Let the scanner step the radio's front-end attenuation: up on overload, back down when it clears" />
             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -284,19 +285,25 @@
                       TickFrequency="1" IsSnapToTickEnabled="True"
                       ToolTip.Tip="Front-end attenuation: 0 is the most gain. With Auto gain on, this is the most gain the scanner may use." />
             </StackPanel>
+          </WrapPanel>
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <TextBlock Text="Antenna" Classes="label" Margin="14,0,0,0" />
+              <TextBlock Text="Antenna" Classes="label" Width="84" />
               <ComboBox ItemsSource="{Binding Antennas}" SelectedItem="{Binding SelectedAntenna}" Width="130" />
             </StackPanel>
-          </WrapPanel>
+          </StackPanel>
           <TextBlock Grid.Row="2" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
-          <WrapPanel Grid.Row="2" Grid.Column="1" ItemSpacing="8" LineSpacing="6">
+          <StackPanel Grid.Row="2" Grid.Column="1" Spacing="6">
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <TextBlock Text="Avoid Timer" Classes="label" />
+              <TextBlock Text="Avoid Timer" Classes="label" Width="84" />
               <ComboBox ItemsSource="{Binding AvoidTimes}" SelectedItem="{Binding SelectedAvoidTime}" Width="130"
                         ToolTip.Tip="How long the Avoid button keeps a frequency out of the scan. Full session is until the app is closed. A change applies to frequencies avoided from then on." />
             </StackPanel>
-          </WrapPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="Resume Timer" Classes="label" Width="84" />
+              <ComboBox ItemsSource="{Binding ResumeTimes}" SelectedItem="{Binding SelectedResumeTime}" Width="130"
+                        ToolTip.Tip="The longest the scan stays on a busy channel before it carries on. It still leaves sooner if the signal drops. A channel left this way is passed by for ten seconds so the others get a turn. Hold stays until the signal drops." />
+            </StackPanel>
+          </StackPanel>
         </Grid>
       </TabItem>
     </TabControl>

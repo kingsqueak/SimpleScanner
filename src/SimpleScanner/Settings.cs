@@ -7,6 +7,10 @@ namespace SimpleScanner;
 /// or %LOCALAPPDATA% (Windows).</summary>
 public sealed class Settings
 {
+    /// <summary>Where the main window was and how big, in screen pixels and in layout units.</summary>
+    public sealed record Place(int X, int Y, double Width, double Height);
+    public Place? Window { get; set; }
+
     public double FrequencyHz { get; set; } = 162_400_000;
     /// <summary>Take the mode, filter width and step from the band plan.</summary>
     public bool AutoMode { get; set; } = true;
@@ -33,6 +37,8 @@ public sealed class Settings
     public Dictionary<string, double>? ChannelColumns { get; set; }
     /// <summary>Minutes an avoided frequency stays out of the scan; 0 is until the app is closed.</summary>
     public int AvoidMinutes { get; set; } = 30;
+    /// <summary>Seconds a scan stays on a busy channel before it carries on; 0 is until the signal drops.</summary>
+    public int ResumeSeconds { get; set; }
     public double SearchFromMHz { get; set; } = 144;
     public double SearchToMHz { get; set; } = 148;
 

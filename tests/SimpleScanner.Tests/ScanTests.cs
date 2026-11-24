@@ -25,6 +25,11 @@ internal sealed class FakeSource : IIqSource
 #pragma warning restore CS0067
     public IReadOnlyList<string> Antennas => ["Antenna"];
     public string Antenna { get; set; } = "Antenna";
+    public bool HasBiasT => false;
+    public bool BiasT { get; set; }
+    public bool HasFmNotch => false;
+    public bool FmNotch { get; set; }
+    public double Ppm { get; set; }
     public bool AutoGain { get; set; }
     public int GainStep { get; set; }
     public int MaxGainStep => 0;

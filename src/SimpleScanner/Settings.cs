@@ -32,6 +32,12 @@ public sealed class Settings
     public bool AutoGain { get; set; } = true;
     public int GainStep { get; set; }
     public string Antenna { get; set; } = "Antenna A";
+    /// <summary>DC on the antenna socket for a preamplifier there (Antenna B on an RSPdx).</summary>
+    public bool BiasT { get; set; }
+    /// <summary>The radio's notch filter for the FM broadcast band.</summary>
+    public bool FmNotch { get; set; }
+    /// <summary>Correction for the radio's reference oscillator, in parts per million.</summary>
+    public double Ppm { get; set; }
     public double LevelOffsetDb { get; set; }
     /// <summary>The memory group shown, which is also the one scanned.</summary>
     public string? Group { get; set; }

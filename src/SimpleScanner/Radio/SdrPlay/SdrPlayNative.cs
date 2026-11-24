@@ -20,12 +20,13 @@ internal enum Err
 [Flags]
 internal enum Update : uint
 {
-    None = 0, DevFs = 0x1, TunerGr = 0x8000, TunerFrf = 0x20000, TunerBwType = 0x40000,
+    None = 0, DevFs = 0x1, DevPpm = 0x2, Rsp1aBiasTControl = 0x10, Rsp1aRfNotchControl = 0x20, Rsp2BiasTControl = 0x80,
+    Rsp2RfNotchControl = 0x400, TunerGr = 0x8000, TunerFrf = 0x20000, TunerBwType = 0x40000,
     CtrlAgc = 0x01000000, CtrlOverloadMsgAck = 0x04000000,
 }
 
 [Flags]
-internal enum UpdateExt1 : uint { None = 0, RspDxAntennaControl = 0x4 }
+internal enum UpdateExt1 : uint { None = 0, RspDxBiasTControl = 0x2, RspDxAntennaControl = 0x4, RspDxRfNotchControl = 0x8 }
 
 internal enum EventId { GainChange = 0, PowerOverloadChange = 1, DeviceRemoved = 2, RspDuoModeChange = 3, DeviceFailure = 4 }
 
@@ -121,7 +122,7 @@ internal static unsafe partial class Native
 {
     private const string Lib = "sdrplay_api";
     public const int TunerA = 1;
-    public const int HwRspDx = 4, HwRspDxR2 = 7;
+    public const int HwRsp1 = 1, HwRsp2 = 2, HwRspDuo = 3, HwRspDx = 4, HwRsp1b = 6, HwRspDxR2 = 7, HwRsp1a = 255;
 
     static Native() => NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolve);
 

@@ -303,6 +303,16 @@
               <TextBlock Text="Antenna" Classes="label" Width="84" />
               <ComboBox ItemsSource="{Binding Antennas}" SelectedItem="{Binding SelectedAntenna}" Width="130" />
             </StackPanel>
+            <CheckBox Content="FM broadcast notch" IsChecked="{Binding FmNotch}" IsEnabled="{Binding HasBiasT}" FontSize="12"
+                      ToolTip.Tip="Switch in the radio's filter that cuts the FM broadcast band (88 to 108 MHz), so strong stations there cannot overload it while it listens elsewhere. Turn it off to listen to broadcast FM." />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="Correction" Classes="label" Width="84" />
+              <NumericUpDown Value="{Binding Ppm}" Minimum="-100" Maximum="100" Increment="0.1" FormatString="0.0" Width="130"
+                             ToolTip.Tip="Frequency correction for the radio's reference oscillator, in parts per million. 0 unless signals on known frequencies all read off by the same proportion." />
+              <TextBlock Text="ppm" Classes="label" />
+            </StackPanel>
+            <CheckBox Content="Enable bias T" IsChecked="{Binding BiasT}" IsEnabled="{Binding HasBiasT}" FontSize="12"
+                      ToolTip.Tip="Put DC (about 4.7 V) on the antenna socket to power a masthead preamplifier or an active antenna. On an RSPdx it is on Antenna B only. Leave it off unless something on that socket needs the power." />
           </StackPanel>
           <TextBlock Grid.Row="2" Grid.Column="0" Text="Scan" Classes="label" VerticalAlignment="Top" Margin="0,8,0,0" />
           <StackPanel Grid.Row="2" Grid.Column="1" Spacing="6">

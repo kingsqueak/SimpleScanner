@@ -139,6 +139,12 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private Choice _selectedResumeTime;
     [ObservableProperty] private IReadOnlyList<string> _antennas;
     [ObservableProperty] private string _selectedAntenna;
+    [ObservableProperty] private bool _biasT;
+    [ObservableProperty] private bool _fmNotch;
+    /// <summary>Frequency correction in parts per million; null while the box is empty.</summary>
+    [ObservableProperty] private decimal? _ppm = 0;
+    /// <summary>The radio in use has a bias T (not known until it has been started once).</summary>
+    [ObservableProperty] private bool _hasBiasT = true;
     [ObservableProperty] private bool _isScanning;
     /// <summary>What the group selector's button says: the groups ticked, or that all are shown.</summary>
     [ObservableProperty] private string _groupsText = AllGroups;
@@ -187,6 +193,9 @@ public sealed partial class MainViewModel : ObservableObject
         AutoSquelch = settings.AutoSquelch;
         StereoOn = settings.Stereo;
         AutoGain = settings.AutoGain;
+        BiasT = settings.BiasT;
+        FmNotch = settings.FmNotch;
+        Ppm = (decimal)Math.Clamp(double.IsFinite(settings.Ppm) ? settings.Ppm : 0, -MaxPpm, MaxPpm);
         GainStep = settings.GainStep;
         AutoMode = settings.AutoMode;
         Mode = settings.Mode;
@@ -194,6 +203,9 @@ public sealed partial class MainViewModel : ObservableObject
         _loading = false;
 
         _rx.Source.Antenna = _selectedAntenna;
+        _rx.Source.BiasT = BiasT;
+        _rx.Source.FmNotch = FmNotch;
+        _rx.Source.Ppm = (double)(Ppm ?? 0);
         _rx.Source.AutoGain = AutoGain;
         _rx.Source.GainStep = (int)GainStep;
         _rx.Volume = Volume / 100;
@@ -829,6 +841,29 @@ public sealed partial class MainViewModel : ObservableObject
         _dirty = true;
     }
 
+    public const double MaxPpm = 100;
+
+    partial void OnFmNotchChanged(bool value)
+    {
+        if (_loading) return;
+        _rx.Source.FmNotch = value;
+        _dirty = true;
+    }
+
+    partial void OnPpmChanged(decimal? value)
+    {
+        if (_loading || value is null) return;
+        _rx.Source.Ppm = Math.Clamp((double)value.Value, -MaxPpm, MaxPpm);
+        _dirty = true;
+    }
+
+    partial void OnBiasTChanged(bool value)
+    {
+        if (_loading) return;
+        _rx.Source.BiasT = value;
+        _dirty = true;
+    }
+
     partial void OnIsOnChanged(bool value) => OnPropertyChanged(nameof(PowerText));
 
     [RelayCommand]
@@ -853,6 +888,7 @@ public sealed partial class MainViewModel : ObservableObject
                 IsOn = true;
                 Status = "";
                 DeviceText = _rx.Source.Description;
+                HasBiasT = _rx.Source.HasBiasT;   // the FM notch is on the same models
                 var antennas = _rx.Source.Antennas;
                 if (!antennas.SequenceEqual(Antennas))
                 {
@@ -946,6 +982,9 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.AutoGain = AutoGain;
         _settings.GainStep = (int)Math.Round(GainStep);
         _settings.Antenna = SelectedAntenna;
+        _settings.BiasT = BiasT;
+        _settings.FmNotch = FmNotch;
+        _settings.Ppm = (double)(Ppm ?? 0);
         _settings.Groups = SelectedGroups;
         _settings.Group = null;
         _settings.AudioDevice = SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice;

@@ -32,6 +32,17 @@ public interface IIqSource : IDisposable
     IReadOnlyList<string> Antennas { get; }
     string Antenna { get; set; }
 
+    /// <summary>The radio can put DC on an antenna socket to power a preamplifier there (known once started).</summary>
+    bool HasBiasT { get; }
+    /// <summary>DC on the antenna socket that has it. Off unless asked for; may be set before the radio is started.</summary>
+    bool BiasT { get; set; }
+    /// <summary>The radio has a notch filter for the FM broadcast band (known once started).</summary>
+    bool HasFmNotch { get; }
+    /// <summary>Cut the FM broadcast band ahead of the tuner, so strong stations there cannot overload it.</summary>
+    bool FmNotch { get; set; }
+    /// <summary>Correction for the error of the radio's reference oscillator, in parts per million.</summary>
+    double Ppm { get; set; }
+
     /// <summary>Let the radio choose its front-end gain. <see cref="GainStep"/> is then the most gain it may use.</summary>
     bool AutoGain { get; set; }
     /// <summary>Front-end attenuation step: 0 is the most gain.</summary>

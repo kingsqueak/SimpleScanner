@@ -28,7 +28,8 @@ public sealed unsafe class SdrPlaySource : IIqSource
     private Timer? _housekeeping;
     private readonly AutoGainStep _auto = new();
     private float[] _i = [], _q = [];
-    private bool _running, _autoGain = true;
+    private bool _running, _autoGain = true, _biasT, _fmNotch;
+    private double _ppm;
     private int _gainStep, _activeStep, _ifGr = 40;
     private string _antenna = "Antenna A";
     private volatile bool _retunePending, _announceRetune, _overloadAckPending, _overloaded;
@@ -100,6 +101,9 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 _activeStep = Math.Min(_gainStep, MaxLnaState(centerHz));
                 p->DevParams->FsFreq.FsHz = sampleRate;
                 if (isDx) p->DevParams->RspDxParams.AntennaSel = Antennas.ToList().IndexOf(_antenna);
+                WriteBiasT(p, out _, out _);
+                WriteFmNotch(p, out _, out _);
+                p->DevParams->Ppm = _ppm;
                 var ch = p->RxChannelA;
                 ch->TunerParams.BwType = BandwidthFor(sampleRate);
                 ch->TunerParams.IfType = 0;                       // zero IF
@@ -233,6 +237,110 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 _params->DevParams->RspDxParams.AntennaSel = Antennas.ToList().IndexOf(value);
                 Native.UpdateDevice(_device.Dev, Native.TunerA, Update.None, UpdateExt1.RspDxAntennaControl);
                 _auto.Reset();
+            }
+        }
+    }
+
+    // No bias T on the RSP1; the RSPduo has it on tuner 2 only, which the scanner does not use.
+    // Before the radio is found the model is not known (0), and the answer is yes.
+    public bool HasBiasT => _device.HwVer is not (Native.HwRsp1 or Native.HwRspDuo);
+
+    public bool BiasT
+    {
+        get => _biasT;
+        set
+        {
+            lock (_gate)
+            {
+                if (value == _biasT) return;
+                _biasT = value;
+                if (!_running) return;
+                WriteBiasT(_params, out Update reason, out UpdateExt1 ext);
+                if (reason != Update.None || ext != UpdateExt1.None)
+                    Native.UpdateDevice(_device.Dev, Native.TunerA, reason, ext);
+            }
+        }
+    }
+
+    /// <summary>Puts the bias T switch into the radio's settings, in the place this model keeps it,
+    /// and says which update tells a running radio about it (none on a model without one).</summary>
+    private void WriteBiasT(DeviceParamsT* p, out Update reason, out UpdateExt1 ext)
+    {
+        byte on = (byte)(_biasT ? 1 : 0);
+        reason = Update.None;
+        ext = UpdateExt1.None;
+        switch (_device.HwVer)
+        {
+            case Native.HwRspDx or Native.HwRspDxR2:      // on Antenna B
+                p->DevParams->RspDxParams.BiasTEnable = on;
+                ext = UpdateExt1.RspDxBiasTControl;
+                break;
+            case Native.HwRsp1a or Native.HwRsp1b:
+                p->RxChannelA->Rsp1aTunerParams.BiasTEnable = on;
+                reason = Update.Rsp1aBiasTControl;
+                break;
+            case Native.HwRsp2:                           // on Antenna B
+                p->RxChannelA->Rsp2TunerParams.BiasTEnable = on;
+                reason = Update.Rsp2BiasTControl;
+                break;
+        }
+    }
+
+    // Same models as the bias T: the RSP1 has no notch, and the RSPduo is not catered for.
+    public bool HasFmNotch => HasBiasT;
+
+    public bool FmNotch
+    {
+        get => _fmNotch;
+        set
+        {
+            lock (_gate)
+            {
+                if (value == _fmNotch) return;
+                _fmNotch = value;
+                if (!_running) return;
+                WriteFmNotch(_params, out Update reason, out UpdateExt1 ext);
+                if (reason != Update.None || ext != UpdateExt1.None)
+                    Native.UpdateDevice(_device.Dev, Native.TunerA, reason, ext);
+                _auto.Reset();      // what overloads the radio has changed
+            }
+        }
+    }
+
+    private void WriteFmNotch(DeviceParamsT* p, out Update reason, out UpdateExt1 ext)
+    {
+        byte on = (byte)(_fmNotch ? 1 : 0);
+        reason = Update.None;
+        ext = UpdateExt1.None;
+        switch (_device.HwVer)
+        {
+            case Native.HwRspDx or Native.HwRspDxR2:
+                p->DevParams->RspDxParams.RfNotchEnable = on;
+                ext = UpdateExt1.RspDxRfNotchControl;
+                break;
+            case Native.HwRsp1a or Native.HwRsp1b:
+                p->DevParams->Rsp1aParams.RfNotchEnable = on;
+                reason = Update.Rsp1aRfNotchControl;
+                break;
+            case Native.HwRsp2:
+                p->RxChannelA->Rsp2TunerParams.RfNotchEnable = on;
+                reason = Update.Rsp2RfNotchControl;
+                break;
+        }
+    }
+
+    public double Ppm
+    {
+        get => _ppm;
+        set
+        {
+            lock (_gate)
+            {
+                if (!double.IsFinite(value) || value == _ppm) return;
+                _ppm = value;
+                if (!_running) return;
+                _params->DevParams->Ppm = value;
+                Native.UpdateDevice(_device.Dev, Native.TunerA, Update.DevPpm, UpdateExt1.None);
             }
         }
     }

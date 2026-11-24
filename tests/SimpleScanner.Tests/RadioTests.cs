@@ -32,6 +32,7 @@ public unsafe class SdrPlayLayoutTests
         Assert.Equal(46, (int)Marshal.OffsetOf<DevParamsT>("Rsp2Params"));
         Assert.Equal(48, (int)Marshal.OffsetOf<DevParamsT>("RspDuoParams"));
         Assert.Equal(52, (int)Marshal.OffsetOf<DevParamsT>("RspDxParams"));
+        Assert.Equal(1, (int)Marshal.OffsetOf<RspDxParamsT>("BiasTEnable"));
         Assert.Equal(4, (int)Marshal.OffsetOf<RspDxParamsT>("AntennaSel"));
         Assert.Equal(8, (int)Marshal.OffsetOf<RspDxParamsT>("RfNotchEnable"));
         Assert.Equal(12, (int)Marshal.OffsetOf<TunerParamsT>("Gain"));

@@ -288,6 +288,54 @@ if (args.Length >= 3 && args[0] == "hunt")
     return;
 }
 
+if (args.Length >= 1 && args[0] == "grtest")
+{
+    // rsp-bench grtest [MHz a] [MHz b] [GR a] [GR b]: hop between two tunings that are given different IF gain
+    // reductions, sent with the frequency, and show the level of the samples in 5 ms steps after each retune,
+    // with the radio's gain reports: is the new reduction in force when the retune is confirmed?
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    double a = (args.Length > 1 ? double.Parse(args[1], inv) : 146.275) * 1e6, b = (args.Length > 2 ? double.Parse(args[2], inv) : 156.95) * 1e6;
+    int grA = args.Length > 3 ? int.Parse(args[3]) : 25, grB = args.Length > 4 ? int.Parse(args[4]) : 55;
+    var src = NewSource();
+    src.AutoGain = false;
+    src.FreezeIfGain = true;
+    src.RememberIfGr(a, grA);
+    src.RememberIfGr(b, grB);
+    var gate = new object();
+    var sw = Stopwatch.StartNew();
+    double tuneAt = 0;
+    var bins = new (double Sum, long N)[40];
+    var notes = new List<string>();
+    src.Samples += (i, q, retuned) =>
+    {
+        double sum = 0;
+        for (int k = 0; k < i.Length; k++) sum += i[k] * i[k] + q[k] * q[k];
+        lock (gate)
+        {
+            int bin = (int)((sw.Elapsed.TotalMilliseconds - tuneAt) / 5);
+            if (retuned) notes.Add($"confirmed +{sw.Elapsed.TotalMilliseconds - tuneAt:F1} ms");
+            if (bin >= 0 && bin < bins.Length) bins[bin] = (bins[bin].Sum + sum, bins[bin].N + i.Length);
+        }
+    };
+    src.GainTrace = (ms, gr, lna, gain) => { lock (gate) notes.Add($"report +{sw.Elapsed.TotalMilliseconds - tuneAt:F1} ms GR {gr} gain {gain:F1}"); };
+    src.Start(Receiver.DefaultSampleRate, a);
+    Thread.Sleep(1000);
+    Console.WriteLine($"{src.Description}: {a / 1e6} MHz at GR {grA} <-> {b / 1e6} MHz at GR {grB}; level of the samples (dBFS) in 5 ms steps from the retune");
+    for (int hop = 0; hop < 12; hop++)
+    {
+        double to = hop % 2 == 0 ? b : a;
+        lock (gate) { Array.Clear(bins); notes.Clear(); tuneAt = sw.Elapsed.TotalMilliseconds; }
+        src.Tune(to);
+        Thread.Sleep(200);
+        lock (gate)
+            Console.WriteLine($"  to {to / 1e6,8:F3} (GR {(hop % 2 == 0 ? grB : grA)}): "
+                + string.Join(" ", bins.Take(30).Select(x => x.N == 0 ? "  .." : $"{10 * Math.Log10(x.Sum / x.N + 1e-12),4:F0}"))
+                + "\n      " + string.Join("; ", notes));
+    }
+    src.Stop();
+    return;
+}
+
 if (args.Length >= 1 && args[0] == "stored")
 {
     // rsp-bench stored [seconds] [squelch dB] [plan] [db=<file>] group=<name> group=<name> ...
@@ -299,7 +347,7 @@ if (args.Length >= 1 && args[0] == "stored")
     bool planOnly = args.Contains("plan");
     string? dbFile = args.FirstOrDefault(a => a.StartsWith("db="))?[3..];
     var groups = args.Where(a => a.StartsWith("group=")).Select(a => a[6..]).ToList();
-    var rest = args.Skip(1).Where(a => a != "plan" && !a.StartsWith("db=") && !a.StartsWith("group=")).ToArray();
+    var rest = args.Skip(1).Where(a => a != "plan" && a != "gains" && !a.StartsWith("add=") && !a.StartsWith("db=") && !a.StartsWith("group=")).ToArray();
     int seconds = rest.Length > 0 ? int.Parse(rest[0]) : 30;
     double squelch = rest.Length > 1 ? double.Parse(rest[1], inv) : -100;
     var list = MemoryStore.Load(dbFile).Channels
@@ -315,6 +363,14 @@ if (args.Length >= 1 && args[0] == "stored")
             return new ScanChannel(c.Name, c.FrequencyHz, mode, width);
         })
         .Where(c => !BandPlan.IsBlocked(c.FrequencyHz, c.BandwidthHz)).ToList();
+    // add=<MHz> puts one more frequency in the list, whether or not it is stored or ticked.
+    foreach (string word in args.Where(a => a.StartsWith("add=")))
+    {
+        double hz = double.Parse(word[4..], inv) * 1e6;
+        var band = BandPlan.Find(hz);
+        list.Add(new ScanChannel($"added {hz / 1e6:F4}", hz, band.Mode, band.BandwidthHz));
+    }
+    list = list.OrderBy(c => c.FrequencyHz).ToList();
     double usable = SdrPlaySource.BandwidthFor(Receiver.DefaultSampleRate) * 1000.0 * 0.92;
     var plan = ScanPlan.Build(list, usable);
     Console.WriteLine($"{list.Count} channels in {plan.Count} windows (usable {usable / 1e6:F2} MHz)");
@@ -327,6 +383,9 @@ if (args.Length >= 1 && args[0] == "stored")
     var trace = new List<(double At, double Hz, double CallMs, double Ms, string How)>();
     var clock = Stopwatch.StartNew();
     src.RetuneTrace = (hz, callMs, ms, how) => { lock (gate) trace.Add((clock.Elapsed.TotalSeconds, hz, callMs, ms, how)); };
+    // The word "gains" prints every gain report: when it came after the retune, and what it said.
+    if (args.Contains("gains"))
+        src.GainTrace = (ms, gr, lna, gain) => Console.WriteLine($"      gain report {clock.Elapsed.TotalSeconds,6:F3} s  centre {src.CenterHz / 1e6,9:F4}  +{ms,6:F1} ms after retune  IF GR {gr,2}  LNA GR {lna,2}  gain {gain,5:F1}  (sent GR {src.IfGainReductionDb}, LNA {src.ActiveGainStep})");
     using var rx = new Receiver(src, playAudio: false) { ResumeSeconds = 15 };
     rx.SquelchDb = squelch;
     rx.AutoSquelch = autoSquelch;

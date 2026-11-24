@@ -95,6 +95,10 @@ public sealed unsafe class SdrPlaySource : IIqSource
     /// </summary>
     public Action<double, double, double, string>? RetuneTrace { get; set; }
 
+    /// <summary>For measuring: each gain report from the radio, with the ms since the last retune was asked for,
+    /// the IF reduction, the LNA reduction and the gain it gives. Called on the API's event thread.</summary>
+    public Action<double, uint, uint, double>? GainTrace { get; set; }
+
     /// <summary>
     /// Use the service's IF AGC, not ours; read when the radio is started. For comparing the two:
     /// the service's makes retunes slow.
@@ -112,6 +116,10 @@ public sealed unsafe class SdrPlaySource : IIqSource
     private double _gainBase;                       // the gain with no IF reduction, from the radio's last report
 
     private static long GrKey(double centerHz) => (long)Math.Round(centerHz / 100e3);
+
+    /// <summary>For measuring: no learning and no trimming, so the reductions given with <see cref="RememberIfGr"/> stay.</summary>
+    internal bool FreezeIfGain { get; set; }
+    internal void RememberIfGr(double centerHz, int gr) { lock (_gate) _grFor[GrKey(centerHz)] = gr; }
 
     /// <summary>
     /// The IF gain reduction to use after the samples measured <paramref name="dbfs"/> (mean power
@@ -331,7 +339,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
             {
                 // Remember what this tuning wants, and send what the next one wanted last time along
                 // with the frequency: one update, not a gain change chasing the retune.
-                if (TakePower() is double dbfs)
+                if (TakePower() is double dbfs && !FreezeIfGain)
                 {
                     if (_grFor.Count > 4096) _grFor.Clear();
                     _grFor[GrKey(CenterHz)] = NextIfGr(_grCmd, dbfs);
@@ -542,7 +550,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 RetuneTrace?.Invoke(CenterHz, _tuneCallMs, RetuneTimeoutMs, "TIMEOUT");
             }
             // Staying on one tuning: trim the IF gain to the level of the samples.
-            if (!IfAgc && !_retunePending && Stopwatch.GetElapsedTime(_retuneStart).TotalMilliseconds > DwellMs
+            if (!IfAgc && !FreezeIfGain && !_retunePending && Stopwatch.GetElapsedTime(_retuneStart).TotalMilliseconds > DwellMs
                 && TakePower() is double dbfs)
             {
                 int gr = NextIfGr(_grCmd, dbfs);
@@ -628,6 +636,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
             {
                 case EventId.GainChange:
                     var g = (GainCbParamT*)eventParams;
+                    self.GainTrace?.Invoke(Stopwatch.GetElapsedTime(self._retuneStart).TotalMilliseconds, g->GRdB, g->LnaGRdB, g->CurrGain);
                     if (self.IfAgc) self._ifGr = (int)g->GRdB;
                     Volatile.Write(ref self._gainDb, g->CurrGain);
                     Volatile.Write(ref self._gainBase, g->CurrGain + g->GRdB);

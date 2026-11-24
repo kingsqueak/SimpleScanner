@@ -72,6 +72,10 @@
           </Border>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+          <!-- The window's own Scan, for this radio: it selects the radio as well -->
+          <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}" MinWidth="46"
+                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleScanOfCommand}" CommandParameter="{Binding}"
+                  ToolTip.Tip="Scan the ticked channels of this radio's groups with this radio, or stop its scan" />
           <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
                   ToolTip.Tip="Leave the channel this radio's scan has stopped on and carry on" />
           <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}" IsEnabled="{Binding IsScanning}" Margin="0"

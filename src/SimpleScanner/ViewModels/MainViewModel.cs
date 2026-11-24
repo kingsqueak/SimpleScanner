@@ -675,6 +675,14 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>The Scan button on a radio's own display: select that radio, then start or stop its scan as the Scan button on Operate does.</summary>
+    [RelayCommand]
+    private void ToggleScanOf(RadioViewModel radio)
+    {
+        Select(radio);
+        if (Radio == radio) ToggleScan();
+    }
+
     // The radios still scanning take up between them what one that has stopped has left, or what a change of ticks has moved.
     private void ShareAgain()
     {

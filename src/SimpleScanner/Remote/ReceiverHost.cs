@@ -22,11 +22,24 @@ internal sealed class ReceiverHost
         _out = output;
     }
 
-    /// <summary>Serve the receiver until the other end closes the stream (the window has gone) or says "quit". The receiver is then stopped and disposed.</summary>
-    public static void Run(IReceiver rx, Stream input, Stream output)
+    /// <summary>
+    /// Serve the receiver until the other end closes the stream (the window has gone) or says "quit". The receiver is then stopped and disposed.
+    /// </summary>
+    /// <param name="handOver">Given the way to ask the window for a new helper ("restart", with why), for the radio to call when
+    /// it wants a new process (see <see cref="Radio.SdrPlay.SdrPlaySource.HandOverStalls"/>).</param>
+    /// <param name="exit">Ends this helper after it has asked for a new one; the whole process by default.</param>
+    public static void Run(IReceiver rx, Stream input, Stream output, Action<Action<string>>? handOver = null, Action? exit = null)
     {
         var host = new ReceiverHost(rx, input, output);
         rx.Failed += why => host.Send(new WireMessage { Op = "failed", Error = why });
+        handOver?.Invoke(why =>
+        {
+            host._open = false;
+            host.Send(new WireMessage { Op = "restart", Error = why });
+            // Nothing more from this process: the API in it is not to be trusted after a jammed radio.
+            if (exit is not null) exit();
+            else Environment.Exit(3);
+        });
         var reports = new Thread(host.Report) { IsBackground = true, Name = "receiver status" };
         reports.Start();
         try
@@ -72,6 +85,9 @@ internal sealed class ReceiverHost
                 case "stopScan": _rx.StopScan(); break;
                 case "skip": _rx.SkipChannel(); break;
                 case "clearAvoided": _rx.ClearAvoided(); break;
+                case "simulateStall":            // for testing the hand-over to a new helper
+                    if (_rx.Source is Radio.SdrPlay.SdrPlaySource sdr) sdr.SimulateStall = true;
+                    break;
             }
             // An answer carries a report made after the work, so what is read next is already true.
             if (answered) Send(new WireMessage { Op = "reply", Id = m.Id, Arg = result, Status = Snapshot(_rx, m.Id) });

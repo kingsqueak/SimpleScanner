@@ -29,8 +29,10 @@ internal static class Program
         int at = Array.IndexOf(args, "--rate");
         double rate = at >= 0 && at + 1 < args.Length
             ? double.Parse(args[at + 1], System.Globalization.CultureInfo.InvariantCulture) : Receiver.DefaultSampleRate;
-        var source = new SdrPlaySource { Serial = serial, OnlyThisRadio = true };
-        ReceiverHost.Run(new Receiver(source, sampleRate: rate), Console.OpenStandardInput(), output);
+        // A stalled radio is restarted in a new helper (see SdrPlaySource.HandOverStalls).
+        var source = new SdrPlaySource { Serial = serial, OnlyThisRadio = true, HandOverStalls = true };
+        ReceiverHost.Run(new Receiver(source, sampleRate: rate), Console.OpenStandardInput(), output,
+            handOver: ask => source.HandOver += ask);
     }
 
     public static AppBuilder BuildAvaloniaApp() =>

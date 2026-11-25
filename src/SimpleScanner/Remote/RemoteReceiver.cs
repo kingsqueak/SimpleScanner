@@ -15,16 +15,27 @@ namespace SimpleScanner.Remote;
 /// </summary>
 public sealed class RemoteReceiver : IReceiver
 {
-    private readonly Stream _to;
-    private readonly StreamReader _from;
-    private readonly Action? _closed;
+    private Stream _to;
+    private Action? _closed;
     private readonly object _gate = new();
     private readonly ConcurrentDictionary<long, TaskCompletionSource<WireMessage>> _waiting = new();
-    private readonly ManualResetEventSlim _first = new();
+    private ManualResetEventSlim _first = new();
     private readonly RemoteSource _source;
     private ReceiverStatus _s = new();
     private long _id, _lastChange;
     private volatile bool _disposed, _gone;
+
+    // A new helper when the old one asks for it ("restart": its radio jammed, see SdrPlaySource.HandOverStalls).
+    // Everything sent is remembered, so that the new one is given it again.
+    private readonly Func<(Stream To, Stream From, Action? Closed)>? _launch;
+    private readonly Action<string?> _replug;
+    private readonly Dictionary<string, (object? Value, Type Type)> _sets = [];
+    private ModeArg? _mode;
+    private IReadOnlyList<ScanChannel>? _scan;
+    private bool _wantRunning;
+    private volatile string? _restartWhy;
+    private long _lastRestart;
+    private const double RestartWindowSeconds = 60;
 
     /// <summary>
     /// Start this program again as a helper for the radio with that serial number, and connect to it.
@@ -45,17 +56,21 @@ public sealed class RemoteReceiver : IReceiver
             start.ArgumentList.Add("--rate");
             start.ArgumentList.Add(rate.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
-        var process = Process.Start(start) ?? throw new InvalidOperationException("The receiver's helper program could not be started.");
-        var rx = new RemoteReceiver(process.StandardInput.BaseStream, process.StandardOutput.BaseStream, freeRadios, () =>
+        (Stream, Stream, Action?) Connect()
         {
-            // Closing its input tells it to stop; if it has not gone soon, it is ended, so the radio is free again.
-            try
+            var process = Process.Start(start) ?? throw new InvalidOperationException("The receiver's helper program could not be started.");
+            return (process.StandardInput.BaseStream, process.StandardOutput.BaseStream, () =>
             {
-                if (!process.WaitForExit(3000)) process.Kill();
-            }
-            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            process.Dispose();
-        });
+                // Closing its input tells it to stop; if it has not gone soon, it is ended, so the radio is free again.
+                try
+                {
+                    if (!process.WaitForExit(3000)) process.Kill();
+                }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                process.Dispose();
+            });
+        }
+        var rx = new RemoteReceiver(Connect, freeRadios);
         if (!rx._first.Wait(10000))
         {
             rx.Dispose();
@@ -71,10 +86,30 @@ public sealed class RemoteReceiver : IReceiver
     public RemoteReceiver(Stream toHelper, Stream fromHelper, Func<IReadOnlyList<RadioInfo>>? freeRadios = null, Action? closed = null)
     {
         _to = toHelper;
-        _from = new StreamReader(fromHelper, new UTF8Encoding(false));
         _closed = closed;
+        _replug = UsbReplugStep;
         _source = new RemoteSource(this, freeRadios ?? (() => []));
-        new Thread(Read) { IsBackground = true, Name = "receiver helper" }.Start();
+        StartReading(fromHelper, _first);
+    }
+
+    /// <param name="launch">Starts a helper and gives its streams, and what to do once they are closed; called again for a new helper.</param>
+    /// <param name="replug">Between two helpers: replug the radio with that serial number (by default in software, on USB).</param>
+    internal RemoteReceiver(Func<(Stream To, Stream From, Action? Closed)> launch, Func<IReadOnlyList<RadioInfo>>? freeRadios = null,
+        Action<string?>? replug = null)
+    {
+        _launch = launch;
+        _replug = replug ?? UsbReplugStep;
+        _source = new RemoteSource(this, freeRadios ?? (() => []));
+        var (to, from, closed) = launch();
+        _to = to;
+        _closed = closed;
+        StartReading(from, _first);
+    }
+
+    private void StartReading(Stream from, ManualResetEventSlim first)
+    {
+        var reader = new StreamReader(from, new UTF8Encoding(false));
+        new Thread(() => Read(reader, first)) { IsBackground = true, Name = "receiver helper" }.Start();
     }
 
     /// <summary>Wait for the helper's first report (so that what is read is the helper's, not blanks).</summary>
@@ -86,11 +121,11 @@ public sealed class RemoteReceiver : IReceiver
 
     // ---- the helper's reports ----------------------------------------------------------------
 
-    private void Read()
+    private void Read(StreamReader from, ManualResetEventSlim first)
     {
         try
         {
-            while (_from.ReadLine() is { } line)
+            while (from.ReadLine() is { } line)
             {
                 WireMessage? m;
                 try { m = JsonSerializer.Deserialize<WireMessage>(line, WireMessage.Json); }
@@ -103,7 +138,7 @@ public sealed class RemoteReceiver : IReceiver
                             // A report made before the helper had our last change would undo it here for a moment.
                             if (status.Seq >= _lastChange) Volatile.Write(ref _s, status);
                         }
-                        _first.Set();
+                        first.Set();
                         break;
                     case "reply":
                         if (_waiting.TryRemove(m.Id, out var waiter)) waiter.TrySetResult(m);
@@ -111,12 +146,22 @@ public sealed class RemoteReceiver : IReceiver
                     case "failed":
                         Failed?.Invoke(m.Error ?? "The radio stopped.");
                         break;
+                    case "restart":
+                        _restartWhy = m.Error ?? "asked for";
+                        break;
                 }
             }
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException) { }
-        // The helper has gone. Nothing is running any more; say so if it was not our doing.
+        // The helper has gone. If it asked for a new one, start that; otherwise nothing is running any
+        // more: say so if it was not our doing.
         _gone = true;
+        if (_restartWhy is { } why && !_disposed && _launch is not null)
+        {
+            _restartWhy = null;
+            new Thread(() => Restart(why)) { IsBackground = true, Name = "receiver helper restart" }.Start();
+            return;
+        }
         bool wasRunning;
         lock (_gate)
         {
@@ -152,8 +197,15 @@ public sealed class RemoteReceiver : IReceiver
         }
     }
 
-    private void Set<T>(string name, T value, Func<ReceiverStatus, ReceiverStatus> change) =>
+    private void Set<T>(string name, T value, Func<ReceiverStatus, ReceiverStatus> change)
+    {
+        lock (_gate)
+        {
+            _sets.Remove(name);              // kept in the order last set
+            _sets[name] = (value, typeof(T));
+        }
         Send("set", name, value, typeof(T), change);
+    }
 
     // Send and wait for the helper's answer. Its failure comes back as the exception a real receiver would throw.
     private WireMessage Ask(string op, int milliseconds)
@@ -191,10 +243,12 @@ public sealed class RemoteReceiver : IReceiver
     public void Start()
     {
         Ask("start", 20000);
+        lock (_gate) _wantRunning = true;
     }
 
     public void Stop()
     {
+        lock (_gate) _wantRunning = false;
         if (_gone) return;
         Ask("stop", 10000);
     }
@@ -208,8 +262,11 @@ public sealed class RemoteReceiver : IReceiver
     public Mode Mode => Status.Mode;
     public double BandwidthHz => Status.BandwidthHz;
 
-    public void SetMode(Mode mode, double bandwidthHz) =>
+    public void SetMode(Mode mode, double bandwidthHz)
+    {
+        lock (_gate) _mode = new ModeArg(mode, bandwidthHz);
         Send("setMode", arg: new ModeArg(mode, bandwidthHz), argType: typeof(ModeArg), change: s => s with { Mode = mode, BandwidthHz = bandwidthHz });
+    }
 
     public double LevelDb => Status.LevelDb;
     public bool SquelchOpen => Status.SquelchOpen;
@@ -298,12 +355,22 @@ public sealed class RemoteReceiver : IReceiver
     public ScanChannel? ScanChannel => Status.ScanChannel;
     public long DroppedBlocks => Status.DroppedBlocks;
 
-    public void StartScan(IReadOnlyList<ScanChannel> channels) =>
+    public void StartScan(IReadOnlyList<ScanChannel> channels)
+    {
+        lock (_gate) _scan = channels.Count > 0 ? channels : null;
         Send("startScan", arg: channels, argType: typeof(IReadOnlyList<ScanChannel>),
             change: s => s with { Scanning = channels.Count > 0 && s.IsRunning, ScanChannel = null, ScanListening = false, SquelchEnabled = true });
+    }
 
-    public void StopScan() => Send("stopScan", change: s => s with { Scanning = false, ScanListening = false, ScanChannel = null });
+    public void StopScan()
+    {
+        lock (_gate) _scan = null;
+        Send("stopScan", change: s => s with { Scanning = false, ScanListening = false, ScanChannel = null });
+    }
     public void SkipChannel() => Send("skip");
+
+    /// <summary>For testing: the helper's radio acts as if jammed (its samples are dropped), so its watchdog fires.</summary>
+    internal void SimulateStall() => Send("simulateStall");
     public void ClearAvoided() => Send("clearAvoided", change: s => s with { AvoidedCount = 0 });
 
     public ScanChannel? AvoidChannel()
@@ -313,10 +380,98 @@ public sealed class RemoteReceiver : IReceiver
         return reply.Arg is { ValueKind: not JsonValueKind.Null } a ? a.Deserialize<ScanChannel>(WireMessage.Json) : null;
     }
 
+    // ---- a new helper for a jammed radio ---------------------------------------------------------
+
+    private static void UsbReplugStep(string? serial)
+    {
+        var usb = Radio.SdrPlay.UsbReplug.WaitFor(serial, TimeSpan.FromSeconds(20), Radio.SdrPlay.UsbReplug.State.Free, Radio.SdrPlay.UsbReplug.State.Gone);
+        var (done, how) = Radio.SdrPlay.UsbReplug.Replug(serial, TimeSpan.FromSeconds(10));
+        RadioLog.Write($"{serial}: USB {usb} after the helper went; replug: {how}");
+        if (done) Radio.SdrPlay.UsbReplug.WaitFor(serial, TimeSpan.FromSeconds(10), Radio.SdrPlay.UsbReplug.State.Free);
+        Thread.Sleep(2000);                  // for the service to see it again
+    }
+
+    // The old helper has gone, asking for a new one. Replug the radio from here (no SDRplay call in this
+    // process), start a helper and give it everything the old one had been given, then start and scan.
+    private void Restart(string why)
+    {
+        string? serial = Status.RadioSerial;
+        string name = Status.RadioModel ?? "radio";
+        bool unplugged = why.Contains("unplugged");
+        bool connected = false;
+        try
+        {
+            RadioLog.Write($"{name} {serial}: helper asked for a new one ({why})");
+            _closed?.Invoke();
+            bool again = _lastRestart != 0 && Stopwatch.GetElapsedTime(_lastRestart).TotalSeconds < RestartWindowSeconds;
+            if (again || _disposed)
+            {
+                if (!_disposed)
+                {
+                    RadioLog.Write($"{name} {serial}: stopped again within a minute; given up");
+                    Failed?.Invoke($"The {name} stopped sending samples again. Unplug it, plug it back in, then switch it on.");
+                }
+                return;
+            }
+            _replug(serial);
+            var first = new ManualResetEventSlim();
+            var (to, from, closed) = _launch!();
+            lock (_gate)
+            {
+                _to = to;
+                _closed = closed;
+                _first = first;
+            }
+            StartReading(from, first);
+            if (_disposed)
+            {
+                Dispose(closing: true);
+                return;
+            }
+            if (!first.Wait(10000)) throw new InvalidOperationException("The new helper program did not answer.");
+            _gone = false;
+            connected = true;
+            // What the old helper had been given, in the order it was last given.
+            List<(string Name, object? Value, Type Type)> sets;
+            ModeArg? mode;
+            IReadOnlyList<ScanChannel>? scan;
+            bool running;
+            lock (_gate)
+            {
+                sets = [.. _sets.Select(kv => (kv.Key, kv.Value.Value, kv.Value.Type))];
+                (mode, scan, running) = (_mode, _scan, _wantRunning);
+            }
+            foreach (var (setName, value, type) in sets) Send("set", setName, value, type);
+            if (mode is not null) Send("setMode", arg: mode, argType: typeof(ModeArg));
+            if (running)
+            {
+                Ask("start", 20000);
+                if (scan is not null) Send("startScan", arg: scan, argType: typeof(IReadOnlyList<ScanChannel>));
+            }
+            _lastRestart = Stopwatch.GetTimestamp();
+            RadioLog.Write($"{name} {serial}: running again in a new helper{(scan is not null ? ", scanning" : "")}");
+        }
+        catch (Exception e)
+        {
+            RadioLog.Write($"{name} {serial}: a new helper failed: {e.Message}");
+            // A helper that is up keeps serving: switching the radio on again later goes to it.
+            _gone = !connected;
+            if (!_disposed)
+                Failed?.Invoke(unplugged
+                    ? $"The {name} was unplugged or dropped off USB. Plug it back in, then switch it on."
+                    : $"The {name} stopped sending samples and would not restart ({e.Message}). Unplug it, plug it back in, then switch it on.");
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        Dispose(closing: true);
+    }
+
+    private void Dispose(bool closing)
+    {
         try { _to.Dispose(); }               // the helper reads the end of its input, stops its radio and goes
         catch (IOException) { }
         _closed?.Invoke();

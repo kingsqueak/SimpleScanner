@@ -9,10 +9,11 @@ namespace SimpleScanner.Remote;
 //
 // To the helper:   start, stop, avoid (each answered by a "reply" with the same Id)
 //                  set (Name is a property of the receiver, or "Source.<property>" of its radio; Arg the value)
-//                  setMode, startScan, stopScan, skip, clearAvoided (not answered)
+//                  setMode, startScan, stopScan, skip, clearAvoided, simulateStall (testing) (not answered)
 // From the helper: reply (Error is the reason when it failed; Arg any result; Status a report made after the work)
 //                  status (twenty times a second: everything the window shows)
 //                  failed (the radio stopped by itself; Error says why)
+//                  restart (the radio is stopped and wants a new helper: this one is going; Error says why)
 internal sealed class WireMessage
 {
     public long Id { get; set; }

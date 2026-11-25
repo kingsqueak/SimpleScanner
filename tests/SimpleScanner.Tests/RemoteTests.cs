@@ -154,4 +154,130 @@ public class RemoteTests
         Assert.False(pair.Remote.IsRunning);
         Assert.Throws<InvalidOperationException>(() => pair.Remote.Start());
     }
+
+    // A helper whose radio jammed asks for a new one and goes; the window replugs the radio, starts
+    // another helper and gives it what the first had: settings, mode, running, scanning.
+    [Fact]
+    public void AHelperThatAsksForANewOneIsReplacedWithItsSettings()
+    {
+        var log = Path.GetTempFileName();
+        SimpleScanner.Radio.RadioLog.FileOverride = log;
+        var hosts = new List<(FakeSource Source, Receiver Real, Action<string>? Ask, Thread Thread)>();
+        int replugs = 0;
+        (Stream, Stream, Action?) Launch()
+        {
+            var down = new AnonymousPipeServerStream(PipeDirection.Out);
+            var downEnd = new AnonymousPipeClientStream(PipeDirection.In, down.ClientSafePipeHandle);
+            var up = new AnonymousPipeServerStream(PipeDirection.Out);
+            var upEnd = new AnonymousPipeClientStream(PipeDirection.In, up.ClientSafePipeHandle);
+            var source = new FakeSource();
+            var real = new Receiver(source, playAudio: false, sampleRate: 2.4e6);
+            int index = hosts.Count;
+            var thread = new Thread(() =>
+            {
+                ReceiverHost.Run(real, downEnd, up,
+                    handOver: ask => hosts[index] = hosts[index] with { Ask = ask },
+                    exit: () => { real.Stop(); up.Dispose(); });     // as the helper's process ends
+                up.Dispose();
+            }) { IsBackground = true };
+            hosts.Add((source, real, null, thread));
+            thread.Start();
+            return (down, upEnd, () => thread.Join(3000));
+        }
+        try
+        {
+            using var rx = new RemoteReceiver(Launch, replug: _ => replugs++);
+            Assert.True(rx.WaitForFirstReport(5000));
+            rx.SquelchDb = -61;
+            rx.Volume = 0.25;
+            rx.ScanHangSeconds = 0.2;
+            rx.Source.GainStep = 2;
+            rx.SetMode(Mode.Am, BandPlan.AmAir);
+            rx.FrequencyHz = 121.5e6;
+            rx.Start();
+            ScanChannel[] list = [new("one", 120.0e6, Mode.Am, BandPlan.AmAir), new("two", 125.0e6, Mode.Am, BandPlan.AmAir)];
+            rx.StartScan(list);
+            Assert.True(Wait(() => rx.ScanPasses >= 2, 3), "the first helper did not scan");
+            string? told = null;
+            rx.Failed += why => told = why;
+
+            Assert.True(Wait(() => hosts[0].Ask is not null, 2));
+            hosts[0].Ask!("radio stalled (test)");
+
+            Assert.True(Wait(() => hosts.Count == 2, 10), "no second helper");
+            var second = hosts[1];
+            Assert.True(Wait(() => second.Real.IsRunning && second.Real.Scanning, 10), "the second helper is not scanning");
+            Assert.Equal(1, replugs);
+            Assert.Null(told);
+            Assert.Equal(-61, second.Real.SquelchDb);
+            Assert.Equal(0.25, second.Real.Volume, 6);
+            Assert.Equal(2, second.Source.GainStep);
+            Assert.Equal(Mode.Am, second.Real.Mode);
+            Assert.True(Wait(() => rx.ScanPasses >= 2 && rx.IsRunning && rx.Scanning, 5), "the window does not see the new helper");
+            Assert.Contains("running again in a new helper, scanning", File.ReadAllText(log));
+
+            // A second call for a new one within a minute is not answered: the window is told instead.
+            Assert.True(Wait(() => hosts[1].Ask is not null, 2));
+            hosts[1].Ask!("radio stalled again (test)");
+            Assert.True(Wait(() => told is not null, 10), "nothing was said");
+            Assert.Equal(2, hosts.Count);
+            Assert.Contains("Unplug it", told);
+        }
+        finally
+        {
+            SimpleScanner.Radio.RadioLog.FileOverride = null;
+            File.Delete(log);
+        }
+    }
+
+    // A new helper whose radio will not start (it was unplugged, say) stays: switching on later works.
+    [Fact]
+    public void ANewHelperWhoseRadioWillNotStartCanBeStartedLater()
+    {
+        var log = Path.GetTempFileName();
+        SimpleScanner.Radio.RadioLog.FileOverride = log;
+        var hosts = new List<(FakeSource Source, Receiver Real, Action<string>? Ask)>();
+        (Stream, Stream, Action?) Launch()
+        {
+            var down = new AnonymousPipeServerStream(PipeDirection.Out);
+            var downEnd = new AnonymousPipeClientStream(PipeDirection.In, down.ClientSafePipeHandle);
+            var up = new AnonymousPipeServerStream(PipeDirection.Out);
+            var upEnd = new AnonymousPipeClientStream(PipeDirection.In, up.ClientSafePipeHandle);
+            var source = new FakeSource();
+            if (hosts.Count > 0) source.FailToStart = "Receiver not found.";
+            var real = new Receiver(source, playAudio: false, sampleRate: 2.4e6);
+            int index = hosts.Count;
+            var thread = new Thread(() =>
+            {
+                ReceiverHost.Run(real, downEnd, up,
+                    handOver: ask => hosts[index] = hosts[index] with { Ask = ask },
+                    exit: () => { real.Stop(); up.Dispose(); });
+                up.Dispose();
+            }) { IsBackground = true };
+            hosts.Add((source, real, null));
+            thread.Start();
+            return (down, upEnd, () => thread.Join(3000));
+        }
+        try
+        {
+            using var rx = new RemoteReceiver(Launch, replug: _ => { });
+            Assert.True(rx.WaitForFirstReport(5000));
+            rx.Start();
+            string? told = null;
+            rx.Failed += why => told = why;
+            Assert.True(Wait(() => hosts[0].Ask is not null, 2));
+            hosts[0].Ask!("reported unplugged by the API, and would not restart");
+            Assert.True(Wait(() => told is not null, 10), "nothing was said");
+            Assert.Contains("was unplugged", told);
+            Assert.Equal(2, hosts.Count);
+            hosts[1].Source.FailToStart = null;          // plugged back in
+            rx.Start();
+            Assert.True(hosts[1].Real.IsRunning);
+        }
+        finally
+        {
+            SimpleScanner.Radio.RadioLog.FileOverride = null;
+            File.Delete(log);
+        }
+    }
 }

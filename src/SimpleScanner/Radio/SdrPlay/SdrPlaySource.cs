@@ -85,6 +85,13 @@ public sealed unsafe class SdrPlaySource : IIqSource
     private string _antenna = "Antenna A";
     private volatile bool _retunePending, _announceRetune, _overloadAckPending, _overloaded;
     private long _retuneStart;
+    private long _lastStream;                       // when the stream callback last ran (Stopwatch ticks)
+    private int _recovering;                        // 1 while a stalled radio is being restarted
+    private long _lastRecovery;                     // when the last restart after a stall was made
+    // For the log when the stream stalls: retunes since the start, how they ended, the slowest, the last.
+    private long _started, _retunes, _timeouts, _refusals, _gainUpdates, _gainTrims, _lnaSteps;
+    private double _slowestCallMs;
+    private string _lastRetune = "none";
     private double _gainDb, _lastRetuneMs, _tuneCallMs;
 
     /// <summary>
@@ -98,6 +105,12 @@ public sealed unsafe class SdrPlaySource : IIqSource
     /// <summary>For measuring: each gain report from the radio, with the ms since the last retune was asked for,
     /// the IF reduction, the LNA reduction and the gain it gives. Called on the API's event thread.</summary>
     public Action<double, uint, uint, double>? GainTrace { get; set; }
+
+    /// <summary>
+    /// For measuring and the log: called when the stream has stalled, with what is being done about it
+    /// ("restarting", "restarted", or "gave up: ..."). Called on a thread-pool thread.
+    /// </summary>
+    public Action<string>? StallTrace { get; set; }
 
     /// <summary>
     /// Use the service's IF AGC, not ours; read when the radio is started. For comparing the two:
@@ -119,6 +132,11 @@ public sealed unsafe class SdrPlaySource : IIqSource
 
     /// <summary>For measuring: no learning and no trimming, so the reductions given with <see cref="RememberIfGr"/> stay.</summary>
     internal bool FreezeIfGain { get; set; }
+    /// <summary>For testing the watchdog: drop every block, as a radio whose USB pipe has jammed does.
+    /// Cleared when the watchdog restarts the radio.</summary>
+    internal bool SimulateStall { get => _simulateStall; set => _simulateStall = value; }
+    private volatile bool _simulateStall;
+
     internal void RememberIfGr(double centerHz, int gr) { lock (_gate) _grFor[GrKey(centerHz)] = gr; }
 
     /// <summary>
@@ -168,6 +186,44 @@ public sealed unsafe class SdrPlaySource : IIqSource
     // ---- start and stop -------------------------------------------------------------------
 
     public void Start(double sampleRate, double centerHz)
+    {
+        lock (_lifecycle)
+        {
+            try { StartOnce(sampleRate, centerHz); }
+            catch (InitFailedException first)
+            {
+                // A radio left jammed (an RSP1 after a USB babble error) is refused until it is replugged:
+                // replug it in software and try once more. Not the API until macOS says it is free (see Recover).
+                string? serial = Radio?.Serial;
+                Log($"{first.Message} Replugging it.");
+                UsbReplug.WaitFor(serial, TimeSpan.FromSeconds(10), UsbReplug.State.Free, UsbReplug.State.Gone);
+                var (replugged, how) = UsbReplug.Replug(serial, TimeSpan.FromSeconds(10));
+                Log($"USB replug: {how}");
+                if (!replugged) throw;
+                UsbReplug.WaitFor(serial, TimeSpan.FromSeconds(10), UsbReplug.State.Free);
+                Thread.Sleep(2000);
+                string? wanted = Serial;
+                bool only = OnlyThisRadio;
+                try
+                {
+                    Serial = serial ?? wanted;
+                    OnlyThisRadio = serial is not null || only;
+                    StartOnce(sampleRate, centerHz);
+                    Log("started after a replug");
+                }
+                finally
+                {
+                    Serial = wanted;
+                    OnlyThisRadio = only;
+                }
+            }
+        }
+    }
+
+    // The API refused to start a radio it had opened.
+    private sealed class InitFailedException(string message) : InvalidOperationException(message);
+
+    private void StartOnce(double sampleRate, double centerHz)
     {
         lock (_lifecycle)
         lock (_gate)
@@ -244,7 +300,9 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 _announceRetune = true;
                 _overloaded = false;
                 _auto.Reset();
-                Check(Native.Init(_device.Dev, &fns, (void*)GCHandle.ToIntPtr(_self)), "start the radio");
+                var initErr = Native.Init(_device.Dev, &fns, (void*)GCHandle.ToIntPtr(_self));
+                if (initErr != Err.Success)
+                    throw new InitFailedException($"Could not start the radio: {Native.ErrorText(initErr)}.");
             }
             catch
             {
@@ -254,6 +312,12 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 throw;
             }
             _running = true;
+            Volatile.Write(ref _lastStream, Stopwatch.GetTimestamp());
+            _started = Stopwatch.GetTimestamp();
+            _retunes = _timeouts = _refusals = _gainUpdates = _gainTrims = _lnaSteps = 0;
+            _slowestCallMs = 0;
+            _lastRetune = "none";
+            Log($"started at {sampleRate / 1e6:0.##} MS/s, {centerHz / 1e6:0.####} MHz");
             _housekeeping = new Timer(_ => Housekeeping(), null, 100, 100);
         }
     }
@@ -318,7 +382,10 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 throw new InvalidOperationException($"SDRplay API {version:F2} is too old; version 3.07 or later is needed.");
             }
             _apiOpen = true;
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => Native.Close();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+            {
+                if (!_skipCloseAtExit) Native.Close();      // not after a jammed radio: see HandOverStalls
+            };
         }
     }
 
@@ -357,11 +424,17 @@ public sealed unsafe class SdrPlaySource : IIqSource
             _retunePending = true;
             var err = Native.UpdateDevice(_device.Dev, Native.TunerA, reason, UpdateExt1.None);
             _tuneCallMs = Stopwatch.GetElapsedTime(_retuneStart).TotalMilliseconds;
+            _retunes++;
+            if ((reason & Update.TunerGr) != 0) _gainUpdates++;
+            _slowestCallMs = Math.Max(_slowestCallMs, _tuneCallMs);
+            _lastRetune = $"{centerHz / 1e6:0.###} MHz, call {_tuneCallMs:0} ms";
             if (err != Err.Success)
             {
                 // Refused: say so anyway, or a listener waiting for the retune would wait for ever.
                 _retunePending = false;
                 _announceRetune = true;
+                _refusals++;
+                _lastRetune += $", refused {Native.ErrorText(err)}";
                 RetuneTrace?.Invoke(centerHz, _tuneCallMs, _tuneCallMs, $"refused {Native.ErrorText(err)}");
             }
             if (farMove) _auto.Reset();
@@ -523,6 +596,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
     {
         if (state == _activeStep) return;
         _params->RxChannelA->TunerParams.Gain.LnaState = (byte)state;
+        _lnaSteps++;
         if (Native.UpdateDevice(_device.Dev, Native.TunerA, Update.TunerGr, UpdateExt1.None) == Err.Success)
             _activeStep = state;
         else
@@ -533,6 +607,13 @@ public sealed unsafe class SdrPlaySource : IIqSource
     // run the automatic LNA, and give up waiting for a retune the radio never confirmed.
     private void Housekeeping()
     {
+        // Before the lock: a radio that has stopped answering may leave an update call stuck holding it.
+        if (_running && Stopwatch.GetElapsedTime(Volatile.Read(ref _lastStream)).TotalSeconds > StallSeconds
+            && Interlocked.CompareExchange(ref _recovering, 1, 0) == 0)
+        {
+            ThreadPool.QueueUserWorkItem(_ => Recover(Trouble.Stalled));
+            return;
+        }
         if (!Monitor.TryEnter(_gate)) return;
         try
         {
@@ -547,6 +628,8 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 _lastRetuneMs = RetuneTimeoutMs;
                 _announceRetune = true;
                 _retunePending = false;
+                _timeouts++;
+                _lastRetune += ", never confirmed";
                 RetuneTrace?.Invoke(CenterHz, _tuneCallMs, RetuneTimeoutMs, "TIMEOUT");
             }
             // Staying on one tuning: trim the IF gain to the level of the samples.
@@ -557,6 +640,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 if (gr != _grCmd)
                 {
                     _params->RxChannelA->TunerParams.Gain.GRdB = gr;
+                    _gainTrims++;
                     if (Native.UpdateDevice(_device.Dev, Native.TunerA, Update.TunerGr, UpdateExt1.None) == Err.Success)
                         _grCmd = _ifGr = gr;
                     else
@@ -573,6 +657,159 @@ public sealed unsafe class SdrPlaySource : IIqSource
         }
         finally { Monitor.Exit(_gate); }
     }
+
+    // ---- a stream that stops by itself ---------------------------------------------------------
+
+    // No samples for this long and the stream is taken as dead. The callback runs every millisecond
+    // or so; retunes and gain changes do not pause it.
+    private const double StallSeconds = 3, RecoveryWindowSeconds = 60;
+
+    private enum Trouble { Stalled, Removed, Failure }
+
+    // Three ways an RSP1 on macOS has been seen to die after half an hour to two hours (2026-11-25):
+    // - Stalled: no word from the API, the samples just stop. One oversized USB packet ("babble error"),
+    //   macOS halts the radio's data endpoint, the service logs "pipe is stalled" for ever; a plain
+    //   restart is refused (initHw error 7) until the radio is replugged.
+    // - Removed: the API says the radio was unplugged when it was not (a friend's Mac).
+    // - Failure: the API says the radio failed.
+    // In each case: stop, replug it in software (UsbReplug; it may also come back by itself), wait for
+    // the API to list it again, start it where it was. If that fails, or it goes wrong again within a
+    // minute of the last recovery, give up and say so.
+    private void Recover(Trouble trouble)
+    {
+        string name = Radio?.Model ?? "radio";
+        try
+        {
+            bool again = _lastRecovery != 0 && Stopwatch.GetElapsedTime(_lastRecovery).TotalSeconds < RecoveryWindowSeconds;
+            string what = trouble switch
+            {
+                Trouble.Stalled => "stopped sending samples",
+                Trouble.Removed => "reported unplugged by the API",
+                _ => "reported failed by the API",
+            };
+            Log($"{what}{(again ? " again" : "")} after {Stopwatch.GetElapsedTime(_started).TotalMinutes:0.#} min: "
+                + $"{_retunes} retunes ({_timeouts} never confirmed, {_refusals} refused, {_gainUpdates} with a gain change), "
+                + $"{_gainTrims} IF gain trims, {_lnaSteps} LNA steps, slowest call {_slowestCallMs:0} ms; last retune {_lastRetune}");
+            StallTrace?.Invoke(again ? $"gave up: {what} again" : $"{what}: restarting");
+            double rate = SampleRate;
+            string? serial = Serial;
+            bool only = OnlyThisRadio;
+            string? target = Radio?.Serial ?? serial;
+            Stop();
+            _simulateStall = false;
+            string giveUp = trouble == Trouble.Stalled
+                ? $"The {name} stopped sending samples"
+                : trouble == Trouble.Removed ? $"The {name} dropped off USB" : $"The {name} reported a failure";
+            if (again)
+            {
+                Failed?.Invoke($"{giveUp} again. Unplug it, plug it back in, then switch it on.");
+                return;
+            }
+            if (trouble == Trouble.Stalled && HandingOver(what)) return;
+            // Leave the API alone until the service has let go of the radio. Called while the service was
+            // still sorting itself out after a jammed RSP1 (its stop timed out after 5 s), the API's
+            // GetDevices crashed the program (2026-11-25 11:11). macOS says when the radio is free.
+            var usb = UsbReplug.WaitFor(target, TimeSpan.FromSeconds(20), UsbReplug.State.Free, UsbReplug.State.Gone);
+            Log($"USB after stopping: {usb}");
+            try
+            {
+                Serial = target;                      // this radio, not whichever is free
+                OnlyThisRadio = true;
+                // Removed or failed: a plain stop and start has brought it back (switching it off and on
+                // in the window did, on a friend's Mac), so try that first. A stalled radio is refused
+                // until replugged, so for that go straight to the replug.
+                if (trouble != Trouble.Stalled && usb == UsbReplug.State.Free)
+                {
+                    Thread.Sleep(1000);
+                    try
+                    {
+                        // In a helper, no replug and second start here (Start does that on a refusal): a new process does it.
+                        if (HandOverStalls) StartOnce(rate, CenterHz);
+                        else Start(rate, CenterHz);
+                        Restarted("restarted without a replug");
+                        return;
+                    }
+                    catch (Exception e) { Log($"restart without a replug failed: {e.Message}"); }
+                }
+                // In a helper: the replug and the start are done in a new process.
+                if (HandingOver(trouble == Trouble.Stalled ? what : $"{what}, and would not restart")) return;
+                var (replugged, how) = UsbReplug.Replug(target, TimeSpan.FromSeconds(10));
+                Log($"USB replug: {how}");
+                // Back on USB and free, then a moment for the service to see it. Not on USB at all (a real
+                // unplug, or a radio that dropped off): give it longer to come back.
+                var back = UsbReplug.WaitFor(target, TimeSpan.FromSeconds(replugged ? 10 : 15), UsbReplug.State.Free);
+                Thread.Sleep(2000);
+                Exception? last = null;
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    try
+                    {
+                        if (attempt > 0) Thread.Sleep(3000);
+                        Start(rate, CenterHz);        // where the scan has got to meanwhile
+                        Restarted(attempt == 0 ? "restarted" : "restarted at the second try");
+                        return;
+                    }
+                    catch (Exception e)
+                    {
+                        last = e;
+                        Log($"restart failed (USB {back}): {e.Message}");
+                    }
+                }
+                StallTrace?.Invoke($"gave up: {last?.Message}");
+                Failed?.Invoke(trouble == Trouble.Removed
+                    ? $"{giveUp} and did not come back. Plug it back in (or unplug and replug it), then switch it on."
+                    : $"{giveUp} and would not restart. Unplug it, plug it back in, then switch it on.");
+            }
+            finally
+            {
+                Serial = serial;
+                OnlyThisRadio = only;
+            }
+        }
+        catch { }
+        finally { Volatile.Write(ref _recovering, 0); }
+    }
+
+    private void Restarted(string how)
+    {
+        _lastRecovery = Stopwatch.GetTimestamp();
+        Log(how);
+        StallTrace?.Invoke(how);
+    }
+
+    /// <summary>
+    /// In a helper program: when the radio stalls (or will not restart after the API says it was removed
+    /// or failed), stop it and raise <see cref="HandOver"/> rather than call the API again in this process.
+    /// Twice (2026-11-25) a call to the API in the process whose stop had just timed out crashed it inside
+    /// SDRplay's library, leaving the API's shared lock held and every program waiting on it until the
+    /// service was restarted. A new process started the same jammed radio after a replug without trouble.
+    /// </summary>
+    public bool HandOverStalls { get; set; }
+
+    /// <summary>With <see cref="HandOverStalls"/>: the radio is stopped and wants a new process; the text says why.
+    /// The handler is expected to end this process (the API's close at exit is then left out).</summary>
+    public event Action<string>? HandOver;
+
+    private static volatile bool _skipCloseAtExit;
+
+    private bool HandingOver(string why)
+    {
+        if (!HandOverStalls || HandOver is null) return false;
+        Log($"handing over to a new process: {why}");
+        StallTrace?.Invoke("handed over");
+        _skipCloseAtExit = true;
+        HandOver.Invoke(why);
+        return true;
+    }
+
+    /// <summary>For testing the recovery: behave as when the API says the radio was unplugged (or failed).</summary>
+    internal void SimulateApiEvent(bool removed)
+    {
+        if (Interlocked.CompareExchange(ref _recovering, 1, 0) == 0)
+            ThreadPool.QueueUserWorkItem(_ => Recover(removed ? Trouble.Removed : Trouble.Failure));
+    }
+
+    private void Log(string what) => RadioLog.Write($"{Description}: {what}");
 
     // ---- callbacks from the API's threads --------------------------------------------------
 
@@ -591,6 +828,8 @@ public sealed unsafe class SdrPlaySource : IIqSource
 
     private void Stream(short* xi, short* xq, StreamCbParamsT* p, int n)
     {
+        if (_simulateStall) return;
+        Volatile.Write(ref _lastStream, Stopwatch.GetTimestamp());
         if (_retunePending)
         {
             if (p->RfChanged == 0) return;          // still the old frequency
@@ -647,17 +886,9 @@ public sealed unsafe class SdrPlaySource : IIqSource
                     break;
                 case EventId.DeviceRemoved:
                 case EventId.DeviceFailure:
-                    string why = id == EventId.DeviceRemoved ? "The radio was unplugged." : "The radio reported a failure.";
-                    // Stop from another thread: Uninit cannot be called from inside a callback.
-                    ThreadPool.QueueUserWorkItem(_ =>
-                    {
-                        try
-                        {
-                            self.Stop();
-                            self.Failed?.Invoke(why);
-                        }
-                        catch { }
-                    });
+                    // Recover from another thread: Uninit cannot be called from inside a callback.
+                    // Already recovering: this is the radio going away during it.
+                    self.SimulateApiEvent(id == EventId.DeviceRemoved);
                     break;
             }
         }

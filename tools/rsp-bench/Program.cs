@@ -3,6 +3,7 @@
 //   rsp-bench                          sample throughput and retune times
 //   rsp-bench list                     the radios that are plugged in and free
 //   radio=<serial or model> anywhere   use that radio (otherwise the first RSPdx, or the first of any model)
+//   ant=A|B|C, notch anywhere           RSPdx antenna socket (A when not given); the FM/MW notch on
 //   rsp-bench listen <MHz> [seconds] [squelch dB] [file]
 //                                      run the receiver on a frequency and print its level each second;
 //                                      the file takes the audio as raw 48 kHz 32-bit float, stereo;
@@ -12,6 +13,14 @@
 //                                      samples received against asked, blocks dropped, retune time and the
 //                                      processor time used, each second. With no radio= all the free ones.
 //                                      rate= gives each radio's sample rate in turn (7.68 when not given)
+//   rsp-bench stalltest [MHz] [seconds] [removed|failure]
+//                                      the watchdog: after 5 s the samples are dropped as a jammed USB pipe
+//                                      would (or, with "removed" or "failure", the API's event of that name is
+//                                      acted out); the radio should be replugged in software and come back.
+//                                      Samples a second are printed for the given seconds (30 when not given)
+//   rsp-bench handover [MHz] [seconds] radio=<a>
+//                                      the radio in a helper program; after 5 s it acts as if jammed, and the
+//                                      helper should hand over to a new one that carries on (as in the app)
 //   rsp-bench helpers [seconds] [squelch dB] radio=<a>:<from MHz>-<to MHz> radio=<b>:<from>-<to> ...
 //                                      each radio in a helper program of its own, as the app runs a second radio
 using System.Diagnostics;
@@ -24,7 +33,10 @@ string? lnaWord = args.FirstOrDefault(a => a.StartsWith("lna="))?[4..];
 string[] radios = args.Where(a => a.StartsWith("radio=")).Select(a => a[6..]).ToArray();
 string? radio = radios.FirstOrDefault();
 string? rateWord = args.FirstOrDefault(a => a.StartsWith("rate="))?[5..];
-args = args.Where(a => a != "auto" && a != "fast" && a != "vendoragc" && !a.StartsWith("lna=") && !a.StartsWith("radio=") && !a.StartsWith("rate=")).ToArray();
+string? antWord = args.FirstOrDefault(a => a.StartsWith("ant="))?[4..];      // A, B or C (RSPdx)
+bool notch = args.Contains("notch");
+args = args.Where(a => a != "auto" && a != "fast" && a != "vendoragc" && a != "notch" && !a.StartsWith("lna=") && !a.StartsWith("radio=")
+    && !a.StartsWith("rate=") && !a.StartsWith("ant=")).ToArray();
 
 if (args.Length >= 1 && args[0] == "list")
 {
@@ -35,7 +47,8 @@ if (args.Length >= 1 && args[0] == "list")
 // The radio asked for, by serial number or by model name.
 SdrPlaySource NewSource()
 {
-    var s = new SdrPlaySource { IfAgc = vendorAgc };
+    var s = new SdrPlaySource { IfAgc = vendorAgc, FmNotch = notch };
+    if (antWord is not null) s.Antenna = $"Antenna {antWord.ToUpperInvariant()}";
     if (lnaWord is not null) { s.AutoGain = false; s.GainStep = int.Parse(lnaWord); }
     if (radio is null) return s;
     var match = SdrPlaySource.ListRadios().FirstOrDefault(r =>
@@ -43,6 +56,38 @@ SdrPlaySource NewSource()
     if (match is null) throw new InvalidOperationException($"No free radio matches \"{radio}\".");
     s.Serial = match.Serial;
     return s;
+}
+
+if (args.Length >= 1 && args[0] == "handover")
+{
+    // rsp-bench handover [MHz] [seconds] radio=<a>: the radio in a helper program, as the app runs a second radio.
+    // After 5 s the helper's radio acts as if jammed; the helper should hand over and a new one carry on.
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    double mhz = args.Length > 1 ? double.Parse(args[1], inv) : 162.4;
+    int seconds = args.Length > 2 ? int.Parse(args[2]) : 40;
+    string config = AppContext.BaseDirectory.Contains("/Debug/") ? "Debug" : "Release";
+    string? root = AppContext.BaseDirectory;
+    while (root is not null && !Directory.Exists(Path.Combine(root, "src", "SimpleScanner"))) root = Path.GetDirectoryName(root);
+    string app = Path.Combine(root ?? ".", "src", "SimpleScanner", "bin", config, "net10.0", "SimpleScanner");
+    var match = SdrPlaySource.ListRadios().FirstOrDefault(r => radio is null || r.Serial == radio || r.Model.Equals(radio, StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidOperationException($"No free radio matches \"{radio}\".");
+    using var rx = SimpleScanner.Remote.RemoteReceiver.Launch(match.Serial, SdrPlaySource.ListRadios, program: app);
+    rx.Failed += why => Console.WriteLine($"  FAILED: {why}");
+    var band = BandPlan.Find(mhz * 1e6);
+    rx.SetMode(band.Mode, band.BandwidthHz);
+    rx.FrequencyHz = mhz * 1e6;
+    rx.SquelchDb = -200;
+    rx.Volume = 0.3;
+    rx.Start();
+    Console.WriteLine($"{rx.Source.Description} in a helper: {mhz} MHz, {band.Mode}");
+    for (int s = 1; s <= seconds; s++)
+    {
+        Thread.Sleep(1000);
+        Console.WriteLine($"  {DateTime.Now:HH:mm:ss} {s,3} s  running {rx.IsRunning}  level {rx.LevelDb,7:F1} dB  centre {rx.Source.CenterHz / 1e6:F4}  dropped {rx.DroppedBlocks}");
+        if (s == 5) { rx.SimulateStall(); Console.WriteLine("  -- stall simulated in the helper"); }
+    }
+    rx.Stop();
+    return;
 }
 
 if (args.Length >= 1 && args[0] == "helpers")
@@ -208,6 +253,36 @@ if (args.Length >= 3 && args[0] == "multi")
     return;
 }
 
+if (args.Length >= 1 && args[0] == "stalltest")
+{
+    string? acted = args.FirstOrDefault(a => a is "removed" or "failure");
+    args = args.Where(a => a is not ("removed" or "failure")).ToArray();
+    double mhz = args.Length > 1 ? double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 162.4;
+    int seconds = args.Length > 2 ? int.Parse(args[2]) : 30;
+    var src = NewSource();
+    long count = 0;
+    string? failed = null;
+    src.Samples += (i, q, retuned) => Interlocked.Add(ref count, i.Length);
+    src.StallTrace = what => Console.WriteLine($"  [{DateTime.Now:HH:mm:ss.fff}] watchdog: {what}");
+    src.Failed += why => failed = why;
+    src.Start(Receiver.DefaultSampleRate, mhz * 1e6);
+    Console.WriteLine($"{src.Description}: {mhz} MHz, {Receiver.DefaultSampleRate / 1e6} MS/s");
+    for (int s = 1; s <= seconds && failed is null; s++)
+    {
+        Thread.Sleep(1000);
+        long got = Interlocked.Exchange(ref count, 0);
+        Console.WriteLine($"  {DateTime.Now:HH:mm:ss} {s,3} s  {got / 1e6,6:F2} MS  running {src.IsRunning}{(src.SimulateStall ? "  (stall simulated)" : "")}");
+        if (s == 5)
+        {
+            if (acted is null) src.SimulateStall = true;
+            else src.SimulateApiEvent(acted == "removed");
+        }
+    }
+    if (failed is not null) Console.WriteLine($"  FAILED: {failed}");
+    src.Stop();
+    return;
+}
+
 if (args.Length >= 2 && args[0] == "listen")
 {
     double mhz = double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
@@ -231,7 +306,7 @@ if (args.Length >= 2 && args[0] == "listen")
     {
         Thread.Sleep(fast ? 100 : 1000);
         var src = rx.Source;
-        Console.WriteLine($"  level {rx.LevelDb,7:F1} dB  squelch {(rx.SquelchOpen ? "open  " : "closed")}  roughness {rx.Roughness,7:G4} (limit {rx.RoughnessLimit:G4})  LNA {src.ActiveGainStep}/{src.MaxGainStep}  gain {src.GainDb:F1} dB  overload {src.Overloaded}  underruns {rx.AudioUnderruns}{(rx.Stereo ? "  STEREO" : "")}");
+        Console.WriteLine($"  level {rx.LevelDb,7:F1} dB  squelch {(rx.SquelchOpen ? "open  " : "closed")}  roughness {rx.Roughness,7:G4} (limit {rx.RoughnessLimit:G4})  LNA {src.ActiveGainStep}/{src.MaxGainStep}  IF GR {(src as SdrPlaySource)?.IfGainReductionDb}  gain {src.GainDb:F1} dB  overload {src.Overloaded}  underruns {rx.AudioUnderruns}{(rx.Stereo ? "  STEREO" : "")}");
     }
     rx.Stop();
     return;

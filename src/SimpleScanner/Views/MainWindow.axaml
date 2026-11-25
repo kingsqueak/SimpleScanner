@@ -77,8 +77,9 @@
       </ItemsControl>
     </ScrollViewer>
 
+    <!-- One radio's messages; with several, each radio's are in its strip, under its frequency -->
     <TextBlock DockPanel.Dock="Bottom" Text="{Binding Radio.Status}" Foreground="{DynamicResource WarnText}" FontSize="12"
-               TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" />
+               TextWrapping="Wrap" Margin="2,8,0,0" MinHeight="16" IsVisible="{Binding !IsMulti}" />
 
     <!-- The controls, in tabs under the readout -->
     <Panel Margin="0,8,0,0">
@@ -395,8 +396,8 @@
                       HorizontalAlignment="Left"
                       ToolTip.Tip="Stop using the radio in use and use this one in its place, at once. The settings on screen go with it." />
             </StackPanel>
-            <CheckBox Content="FM broadcast notch" IsChecked="{Binding Radio.FmNotch}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12" IsVisible="{Binding ShownIsHere}"
-                      ToolTip.Tip="Switch in the radio's filter that cuts the FM broadcast band (88 to 108 MHz), so strong stations there cannot overload it while it listens elsewhere. Turn it off to listen to broadcast FM." />
+            <CheckBox Content="MW/FM broadcast notch" IsChecked="{Binding Radio.FmNotch}" IsEnabled="{Binding Radio.HasBiasT}" FontSize="12" IsVisible="{Binding ShownIsHere}"
+                      ToolTip.Tip="Switch in the radio's notch filters for the AM (medium wave) and FM (88 to 108 MHz) broadcast bands, so strong stations there cannot overload it while it listens elsewhere. One switch covers both. Turn it off to listen to AM or FM broadcast." />
             <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShownIsHere}">
               <TextBlock Text="Correction" Classes="label" Width="84" />
               <NumericUpDown Value="{Binding Radio.Ppm}" Minimum="-100" Maximum="100" Increment="0.1" FormatString="0.0" Width="130"

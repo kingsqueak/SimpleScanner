@@ -34,25 +34,27 @@
           <TextBlock Text="{Binding Name}" Foreground="{DynamicResource LcdText}" FontSize="12" FontWeight="SemiBold" />
           <TextBlock Text="{Binding Serial}" Foreground="{DynamicResource LcdDim}" FontSize="11" VerticalAlignment="Bottom" />
         </StackPanel>
-        <StackPanel Orientation="Horizontal">
+        <StackPanel x:Name="FreqRow" Orientation="Horizontal">
           <c:FrequencyReadout FrequencyHz="{Binding FrequencyHz}" FontSize="34"
                               Foreground="{DynamicResource LcdText}" DimForeground="{DynamicResource LcdDim}"
                               ToolTip.Tip="Roll the mouse wheel over a digit to tune by that digit; click its top or bottom half to step it" />
           <TextBlock Text="MHz" Foreground="{DynamicResource LcdDim}" FontSize="12" VerticalAlignment="Bottom" Margin="6,0,0,7" />
         </StackPanel>
+        <!-- What went wrong, or what the radio is doing (starting, changing receiver), in small type under the frequency.
+             No wider than the frequency, so a long message takes a second line (and past that is cut short, the whole of it
+             in the tip) rather than widening the column. -->
+        <TextBlock Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="10" MinHeight="13" Margin="0,-3,0,0"
+                   MaxWidth="{Binding #FreqRow.Bounds.Width}" HorizontalAlignment="Left" TextWrapping="Wrap" MaxLines="2"
+                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
       </StackPanel>
 
-      <!-- What it is on: the channel, whose it is, its particulars, and what a digital signal says (or what went wrong) -->
+      <!-- What it is on: the channel, whose it is, its particulars, and what a digital signal says -->
       <StackPanel Grid.Column="2" VerticalAlignment="Center">
         <TextBlock Text="{Binding BandName}" Foreground="{DynamicResource LcdText}" FontSize="15" TextTrimming="CharacterEllipsis" />
         <TextBlock Text="{Binding DetailText}" Foreground="{DynamicResource LcdText}" FontSize="12" TextTrimming="CharacterEllipsis" MinHeight="15" />
         <TextBlock Text="{Binding InfoText}" Foreground="{DynamicResource LcdDim}" FontSize="11" TextTrimming="CharacterEllipsis" MinHeight="14" />
-        <Panel MinHeight="15">
-          <TextBlock Text="{Binding DigitalText}" Foreground="{DynamicResource LcdOpen}" FontSize="12" FontWeight="SemiBold"
-                     TextTrimming="CharacterEllipsis" />
-          <TextBlock Text="{Binding Status}" Foreground="{DynamicResource WarnText}" FontSize="11" TextTrimming="CharacterEllipsis"
-                     IsVisible="{Binding !IsSelected}" ToolTip.Tip="{Binding Status}" />
-        </Panel>
+        <TextBlock Text="{Binding DigitalText}" Foreground="{DynamicResource LcdOpen}" FontSize="12" FontWeight="SemiBold"
+                   TextTrimming="CharacterEllipsis" MinHeight="15" />
       </StackPanel>
 
       <!-- Its state, and under that the two buttons that belong to the channel its scan has stopped on -->

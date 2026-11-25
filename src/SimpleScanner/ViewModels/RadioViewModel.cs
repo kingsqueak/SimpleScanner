@@ -28,7 +28,6 @@ public sealed partial class RadioViewModel : ObservableObject
     private List<MemoryChannel> _scanMembers = [];
     private bool _loading;
     private int _ticks;
-    private Choice? _avoidTime;
 
     public IReadOnlyList<Choice> Steps { get; } =
     [
@@ -387,17 +386,11 @@ public sealed partial class RadioViewModel : ObservableObject
     /// for the Avoid Timer chosen in Settings. Nothing is stored: closing the app clears them all.
     /// </summary>
     [RelayCommand]
-    private void AvoidChannel()
-    {
-        if (_rx.AvoidChannel() is not { } ch) return;
-        string howLong = _avoidTime is { Value: > 0 } t ? $"for {t.Label}" : "until the app is closed";
-        Status = $"Avoiding {(ch.FrequencyHz / 1e6).ToString("0.0000", CultureInfo.InvariantCulture)} MHz {howLong} ({_rx.AvoidedCount} avoided)";
-    }
+    private void AvoidChannel() => _rx.AvoidChannel();
 
     /// <summary>How long Avoid keeps a frequency out, in minutes; 0 is until the app is closed. Applies to what is avoided from now on.</summary>
     public void SetAvoidTime(Choice choice)
     {
-        _avoidTime = choice;
         _rx.AvoidTime = choice.Value > 0 ? TimeSpan.FromMinutes(choice.Value) : null;
     }
 
@@ -618,7 +611,7 @@ public sealed partial class RadioViewModel : ObservableObject
         IsOn = true;
         Status = "";
         DeviceText = _rx.Source.Description;
-        HasBiasT = _rx.Source.HasBiasT;   // the FM notch is on the same models
+        HasBiasT = _rx.Source.HasBiasT;   // the MW/FM notch is on the same models
         var antennas = _rx.Source.Antennas;
         if (!antennas.SequenceEqual(Antennas))
         {

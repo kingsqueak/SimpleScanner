@@ -251,7 +251,7 @@ Which sound device the audio goes to. It can be changed while receiving. **Refre
 - **Receiver**: the radio these settings belong to, when more than one is plugged in. A radio another program is using is not listed.
 - **Antenna**: the antenna socket, on models with more than one that the app can switch (see **Hardware**).
 - **Use**: run this radio whenever it is plugged in (see **Several radios**). Takes effect at the next start.
-- **FM broadcast notch**: switches in the radio's filter that cuts 88 to 108 MHz, so strong broadcast stations cannot overload it while it listens elsewhere. Turn it off to listen to broadcast FM.
+- **MW/FM broadcast notch**: switches in the radio's notch filters for the AM (medium wave, about 0.5 to 1.7 MHz) and FM (88 to 108 MHz) broadcast bands, so strong broadcast stations cannot overload it while it listens elsewhere. One switch covers both bands. Turn it off to listen to AM or FM broadcast stations.
 - **Correction**: frequency correction in parts per million. Leave at 0 unless signals on known frequencies all read off by the same proportion.
 - **Pan**: where this radio's sound sits between the left and right speaker.
 - **Enable bias T**: puts DC (about 4.7 V) on the antenna socket to power a masthead preamplifier or an active antenna. On an RSPdx it is on Antenna B only. Leave it off unless something on that socket needs the power.
@@ -266,10 +266,10 @@ SimpleScanner works SDRplay RSP receivers through SDRplay's API version 3. It do
 
 ## The RSP models
 
-- **RSPdx** and **RSPdx-R2**: the models the app was written for. Antenna A, B and C can be chosen; bias T (on Antenna B) and the FM broadcast notch are supported.
-- **RSP1A** and **RSP1B**: one antenna socket; bias T and the FM broadcast notch are supported.
+- **RSPdx** and **RSPdx-R2**: the models the app was written for. Antenna A, B and C can be chosen; bias T (on Antenna B) and the MW/FM broadcast notch are supported.
+- **RSP1A** and **RSP1B**: one antenna socket; bias T and the MW/FM broadcast notch are supported.
 - **RSP1**: one antenna socket. It has no bias T and no notch filter.
-- **RSP2** and **RSP2pro**: received on Antenna A; the app does not switch to Antenna B or the Hi-Z port. Bias T is on Antenna B, so it is of no use here; the FM broadcast notch is supported.
+- **RSP2** and **RSP2pro**: received on Antenna A; the app does not switch to Antenna B or the Hi-Z port. Bias T is on Antenna B, so it is of no use here; the MW/FM broadcast notch is supported.
 - **RSPduo**: used as one receiver, on its first tuner only. Bias T and the notch are not offered.
 
 ## What has been tried
@@ -285,7 +285,7 @@ An RSPdx alone, and an RSPdx with an RSP1 as two radios, are what the app has be
 
 ## Antennas
 
-A scanner is only as good as its antenna. A discone or a wideband scanner antenna outdoors and clear of the building does far more than any setting in the app. If strong broadcast stations nearby cause OVERLOAD, switch on the FM broadcast notch and leave Auto gain on.
+A scanner is only as good as its antenna. A discone or a wideband scanner antenna outdoors and clear of the building does far more than any setting in the app. If strong broadcast stations nearby cause OVERLOAD, switch on the MW/FM broadcast notch and leave Auto gain on.
 
 # Troubleshooting
 
@@ -293,7 +293,7 @@ A scanner is only as good as its antenna. A discone or a wideband scanner antenn
 - **"The SDRplay API is not installed"**: install it from sdrplay.com/api and start again.
 - **Running but silent**: check Mute, Volume, the Output device on Settings, and that the squelch mark is below the signal. Check the Antenna socket chosen.
 - **The scan never stops, or stops on noise**: the squelch mark is too high, or too low. Set it just above the bar's resting level, or switch on Auto squelch.
-- **OVERLOAD shows often**: leave Auto gain on, raise the LNA step, and switch on the FM broadcast notch.
+- **OVERLOAD shows often**: leave Auto gain on, raise the LNA step, and switch on the MW/FM broadcast notch.
 - **A digital call is shown but silent**: it is encrypted (ENCRYPTED shows), or it is a kind the app shows without decoding, or this build has no AMBE+2 codec ("no voice codec").
 - **Stutter with two radios**: the USB bus is too full. See **Several radios**.
 - **The RadioReference browser will not sign in**: it needs both an application key and a Premium subscription. The line under the account bar says which is missing.

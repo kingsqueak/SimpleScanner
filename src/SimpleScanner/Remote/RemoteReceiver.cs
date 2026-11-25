@@ -24,10 +24,13 @@ public sealed class RemoteReceiver : IReceiver
     private ReceiverStatus _s = new();
     private long _id, _lastChange;
     private volatile bool _disposed, _gone;
+    private int _gen;                        // which helper's reports count: those of the one started last
 
-    // A new helper when the old one asks for it ("restart": its radio jammed, see SdrPlaySource.HandOverStalls).
+    // A new helper when the old one asks for it ("restart": its radio jammed, see SdrPlaySource.HandOverStalls),
+    // when one that may change its radio is to open another, and when it has gone and is switched on again.
     // Everything sent is remembered, so that the new one is given it again.
-    private readonly Func<(Stream To, Stream From, Action? Closed)>? _launch;
+    private readonly Func<string?, (Stream To, Stream From, Action? Closed)>? _launch;
+    private string? _serial, _helperSerial;  // the radio chosen, and the one the helper now running was started for
     private readonly Action<string?> _replug;
     private readonly Dictionary<string, (object? Value, Type Type)> _sets = [];
     private ModeArg? _mode;
@@ -37,27 +40,35 @@ public sealed class RemoteReceiver : IReceiver
     private long _lastRestart;
     private const double RestartWindowSeconds = 60;
 
+    /// <summary>The radio can be changed (<see cref="IIqSource.Serial"/>): a new helper is started for the one chosen.
+    /// So it is for the window's own receiver; one started for a further radio keeps it.</summary>
+    public bool CanChangeRadio { get; }
+
     /// <summary>
     /// Start this program again as a helper for the radio with that serial number, and connect to it.
-    /// Throws when the helper does not come up.
+    /// With <paramref name="changeable"/> the helper takes another radio when that one is not there (none given: the
+    /// first it finds), and a new helper is started when another is chosen. Throws when the helper does not come up.
     /// </summary>
-    public static RemoteReceiver Launch(string serial, Func<IReadOnlyList<RadioInfo>> freeRadios, double? sampleRate = null, string? program = null)
+    public static RemoteReceiver Launch(string? serial, Func<IReadOnlyList<RadioInfo>> freeRadios, double? sampleRate = null,
+        string? program = null, bool changeable = false)
     {
-        var start = new ProcessStartInfo(program ?? Environment.ProcessPath ?? throw new InvalidOperationException("This program's own file is not known."))
+        string path = program ?? Environment.ProcessPath ?? throw new InvalidOperationException("This program's own file is not known.");
+        (Stream, Stream, Action?) Connect(string? radio)
         {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-        start.ArgumentList.Add("--radio-host");
-        start.ArgumentList.Add(serial);
-        if (sampleRate is { } rate)
-        {
-            start.ArgumentList.Add("--rate");
-            start.ArgumentList.Add(rate.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        }
-        (Stream, Stream, Action?) Connect()
-        {
+            var start = new ProcessStartInfo(path)
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            };
+            start.ArgumentList.Add("--radio-host");
+            start.ArgumentList.Add(radio ?? "");
+            if (changeable) start.ArgumentList.Add("--any");
+            if (sampleRate is { } rate)
+            {
+                start.ArgumentList.Add("--rate");
+                start.ArgumentList.Add(rate.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
             var process = Process.Start(start) ?? throw new InvalidOperationException("The receiver's helper program could not be started.");
             return (process.StandardInput.BaseStream, process.StandardOutput.BaseStream, () =>
             {
@@ -70,7 +81,7 @@ public sealed class RemoteReceiver : IReceiver
                 process.Dispose();
             });
         }
-        var rx = new RemoteReceiver(Connect, freeRadios);
+        var rx = new RemoteReceiver(Connect, freeRadios, serial, changeable);
         if (!rx._first.Wait(10000))
         {
             rx.Dispose();
@@ -96,11 +107,18 @@ public sealed class RemoteReceiver : IReceiver
     /// <param name="replug">Between two helpers: replug the radio with that serial number (by default in software, on USB).</param>
     internal RemoteReceiver(Func<(Stream To, Stream From, Action? Closed)> launch, Func<IReadOnlyList<RadioInfo>>? freeRadios = null,
         Action<string?>? replug = null)
+        : this(_ => launch(), freeRadios, null, false, replug) { }
+
+    /// <param name="launch">Starts a helper for the radio with that serial number (null: any) and gives its streams.</param>
+    internal RemoteReceiver(Func<string?, (Stream To, Stream From, Action? Closed)> launch, Func<IReadOnlyList<RadioInfo>>? freeRadios,
+        string? serial, bool changeable, Action<string?>? replug = null)
     {
         _launch = launch;
         _replug = replug ?? UsbReplugStep;
+        _serial = _helperSerial = serial;
+        CanChangeRadio = changeable;
         _source = new RemoteSource(this, freeRadios ?? (() => []));
-        var (to, from, closed) = launch();
+        var (to, from, closed) = launch(serial);
         _to = to;
         _closed = closed;
         StartReading(from, _first);
@@ -109,7 +127,8 @@ public sealed class RemoteReceiver : IReceiver
     private void StartReading(Stream from, ManualResetEventSlim first)
     {
         var reader = new StreamReader(from, new UTF8Encoding(false));
-        new Thread(() => Read(reader, first)) { IsBackground = true, Name = "receiver helper" }.Start();
+        int gen = Interlocked.Increment(ref _gen);
+        new Thread(() => Read(reader, first, gen)) { IsBackground = true, Name = "receiver helper" }.Start();
     }
 
     /// <summary>Wait for the helper's first report (so that what is read is the helper's, not blanks).</summary>
@@ -121,7 +140,7 @@ public sealed class RemoteReceiver : IReceiver
 
     // ---- the helper's reports ----------------------------------------------------------------
 
-    private void Read(StreamReader from, ManualResetEventSlim first)
+    private void Read(StreamReader from, ManualResetEventSlim first, int gen)
     {
         try
         {
@@ -135,8 +154,9 @@ public sealed class RemoteReceiver : IReceiver
                     case "status" when m.Status is { } status:
                         lock (_gate)
                         {
-                            // A report made before the helper had our last change would undo it here for a moment.
-                            if (status.Seq >= _lastChange) Volatile.Write(ref _s, status);
+                            // A report made before the helper had our last change would undo it here for a moment;
+                            // one from a helper being replaced is not this receiver's any more.
+                            if (status.Seq >= _lastChange && gen == _gen) Volatile.Write(ref _s, status);
                         }
                         first.Set();
                         break;
@@ -153,8 +173,9 @@ public sealed class RemoteReceiver : IReceiver
             }
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException) { }
-        // The helper has gone. If it asked for a new one, start that; otherwise nothing is running any
-        // more: say so if it was not our doing.
+        // The helper has gone. If it was replaced, that is all. If it asked for a new one, start that;
+        // otherwise nothing is running any more: say so if it was not our doing.
+        if (gen != Volatile.Read(ref _gen)) return;
         _gone = true;
         if (_restartWhy is { } why && !_disposed && _launch is not null)
         {
@@ -242,6 +263,15 @@ public sealed class RemoteReceiver : IReceiver
 
     public void Start()
     {
+        // A helper that has gone (it failed, or its radio would not restart), or one started for another radio
+        // than the one chosen now, is replaced first.
+        string? want;
+        lock (_gate) want = _serial;
+        if (_launch is not null && !_disposed && (_gone || CanChangeRadio && want != _helperSerial && !IsRunning))
+        {
+            RadioLog.Write($"{want ?? "radio"}: a new helper{(_gone ? "" : $" for another radio (was {_helperSerial ?? "any"})")}");
+            Replace(want);
+        }
         Ask("start", 20000);
         lock (_gate) _wantRunning = true;
     }
@@ -414,35 +444,11 @@ public sealed class RemoteReceiver : IReceiver
                 return;
             }
             _replug(serial);
-            var first = new ManualResetEventSlim();
-            var (to, from, closed) = _launch!();
-            lock (_gate)
-            {
-                _to = to;
-                _closed = closed;
-                _first = first;
-            }
-            StartReading(from, first);
-            if (_disposed)
-            {
-                Dispose(closing: true);
-                return;
-            }
-            if (!first.Wait(10000)) throw new InvalidOperationException("The new helper program did not answer.");
-            _gone = false;
+            if (!Connect(serial ?? _helperSerial)) return;
             connected = true;
-            // What the old helper had been given, in the order it was last given.
-            List<(string Name, object? Value, Type Type)> sets;
-            ModeArg? mode;
             IReadOnlyList<ScanChannel>? scan;
             bool running;
-            lock (_gate)
-            {
-                sets = [.. _sets.Select(kv => (kv.Key, kv.Value.Value, kv.Value.Type))];
-                (mode, scan, running) = (_mode, _scan, _wantRunning);
-            }
-            foreach (var (setName, value, type) in sets) Send("set", setName, value, type);
-            if (mode is not null) Send("setMode", arg: mode, argType: typeof(ModeArg));
+            lock (_gate) (scan, running) = (_scan, _wantRunning);
             if (running)
             {
                 Ask("start", 20000);
@@ -460,6 +466,73 @@ public sealed class RemoteReceiver : IReceiver
                 Failed?.Invoke(unplugged
                     ? $"The {name} was unplugged or dropped off USB. Plug it back in, then switch it on."
                     : $"The {name} stopped sending samples and would not restart ({e.Message}). Unplug it, plug it back in, then switch it on.");
+        }
+    }
+
+    // Start a helper for that radio (null: any) and give it everything the one before had been given, in
+    // the order it was last given. False when this receiver was closed meanwhile. Throws when it does not answer.
+    private bool Connect(string? serial)
+    {
+        var first = new ManualResetEventSlim();
+        var (to, from, closed) = _launch!(serial);
+        lock (_gate)
+        {
+            _to = to;
+            _closed = closed;
+            _first = first;
+            _helperSerial = serial;
+        }
+        StartReading(from, first);
+        if (_disposed)
+        {
+            Dispose(closing: true);
+            return false;
+        }
+        if (!first.Wait(10000)) throw new InvalidOperationException("The new helper program did not answer.");
+        _gone = false;
+        List<(string Name, object? Value, Type Type)> sets;
+        ModeArg? mode;
+        lock (_gate)
+        {
+            sets = [.. _sets.Select(kv => (kv.Key, kv.Value.Value, kv.Value.Type))];
+            mode = _mode;
+        }
+        foreach (var (setName, value, type) in sets) Send("set", setName, value, type);
+        if (mode is not null) Send("setMode", arg: mode, argType: typeof(ModeArg));
+        return true;
+    }
+
+    // End the helper running now (its radio is stopped and let go) and start one for that radio in its place.
+    private void Replace(string? serial)
+    {
+        Action? closed;
+        lock (_gate)
+        {
+            Interlocked.Increment(ref _gen);     // the old helper's going is not news
+            closed = _closed;
+            _closed = null;
+        }
+        try { _to.Dispose(); }
+        catch (IOException) { }
+        closed?.Invoke();                    // waits for it to go, so that the radio is free
+        if (!Connect(serial)) throw new InvalidOperationException("The receiver was closed.");
+    }
+
+    /// <summary>The radio chosen: the one the next start opens. (<see cref="CanChangeRadio"/>: it may be changed.)</summary>
+    internal string? ChosenSerial
+    {
+        get
+        {
+            lock (_gate) return CanChangeRadio ? _serial ?? Status.RadioSerial : Status.RadioSerial;
+        }
+        set
+        {
+            if (!CanChangeRadio)
+            {
+                if (value != Status.RadioSerial) throw new NotSupportedException("A helper's radio cannot be changed; start another helper.");
+                return;
+            }
+            lock (_gate) _serial = value;
         }
     }
 
@@ -497,14 +570,11 @@ public sealed class RemoteReceiver : IReceiver
             return list;
         }
 
-        // The helper was started for one radio and keeps it.
+        // A helper keeps the radio it was started for; another radio, if it may change, gets a new helper at the next start.
         public string? Serial
         {
-            get => S.RadioSerial;
-            set
-            {
-                if (value != S.RadioSerial) throw new NotSupportedException("A helper's radio cannot be changed; start another helper.");
-            }
+            get => rx.ChosenSerial;
+            set => rx.ChosenSerial = value;
         }
 
         public double SampleRate => S.SampleRate;

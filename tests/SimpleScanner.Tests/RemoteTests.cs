@@ -280,4 +280,89 @@ public class RemoteTests
             File.Delete(log);
         }
     }
+
+    // The window's own receiver runs in a helper too. Choosing another radio starts a helper for it at the next
+    // start, with what the first had been given; a helper that has gone is replaced when the radio is switched on.
+    [Fact]
+    public void TheWindowsOwnHelperTakesAnotherRadioAndComesBackAfterItWent()
+    {
+        var log = Path.GetTempFileName();
+        SimpleScanner.Radio.RadioLog.FileOverride = log;
+        var hosts = new List<(string? Serial, FakeSource Source, Receiver Real, AnonymousPipeServerStream Up, Thread Thread)>();
+        (Stream, Stream, Action?) Launch(string? serial)
+        {
+            var down = new AnonymousPipeServerStream(PipeDirection.Out);
+            var downEnd = new AnonymousPipeClientStream(PipeDirection.In, down.ClientSafePipeHandle);
+            var up = new AnonymousPipeServerStream(PipeDirection.Out);
+            var upEnd = new AnonymousPipeClientStream(PipeDirection.In, up.ClientSafePipeHandle);
+            var source = new FakeSource { Serial = serial };
+            var real = new Receiver(source, playAudio: false, sampleRate: 2.4e6);
+            var thread = new Thread(() =>
+            {
+                ReceiverHost.Run(real, downEnd, up, exit: () => { real.Stop(); up.Dispose(); });
+                up.Dispose();
+            }) { IsBackground = true };
+            hosts.Add((serial, source, real, up, thread));
+            thread.Start();
+            return (down, upEnd, () => thread.Join(3000));
+        }
+        try
+        {
+            using var rx = new RemoteReceiver(Launch, null, "AAA", changeable: true, replug: _ => { });
+            Assert.True(rx.WaitForFirstReport(5000));
+            Assert.Equal("AAA", rx.Source.Serial);
+            rx.SquelchDb = -61;
+            rx.Source.GainStep = 2;
+            rx.SetMode(Mode.Am, BandPlan.AmAir);
+            rx.FrequencyHz = 121.5e6;
+            rx.Start();
+            Assert.True(hosts[0].Real.IsRunning);
+
+            // Another radio chosen while running: nothing changes until it is stopped and started, as in this program.
+            rx.Source.Serial = "BBB";
+            Assert.Equal("BBB", rx.Source.Serial);
+            Assert.Single(hosts);
+            rx.Stop();
+            rx.Start();
+            Assert.Equal(2, hosts.Count);
+            Assert.True(hosts[0].Thread.Join(3000), "the first helper did not go");
+            Assert.False(hosts[0].Real.IsRunning);
+            Assert.Equal("BBB", hosts[1].Serial);
+            Assert.True(hosts[1].Real.IsRunning);
+            Assert.Equal(-61, hosts[1].Real.SquelchDb);
+            Assert.Equal(2, hosts[1].Source.GainStep);
+            Assert.Equal(Mode.Am, hosts[1].Real.Mode);
+            Assert.True(Wait(() => rx.IsRunning && rx.Source.Serial == "BBB", 3), "the window does not see the new helper");
+
+            // Started again on the same radio: the same helper.
+            rx.Stop();
+            rx.Start();
+            Assert.Equal(2, hosts.Count);
+
+            // The helper goes (it crashed): the window is told, and switching on starts a new one for the same radio.
+            string? told = null;
+            rx.Failed += why => told = why;
+            hosts[1].Up.Dispose();
+            Assert.True(Wait(() => told is not null, 5), "nothing was said");
+            Assert.False(rx.IsRunning);
+            rx.Start();
+            Assert.Equal(3, hosts.Count);
+            Assert.Equal("BBB", hosts[2].Serial);
+            Assert.True(hosts[2].Real.IsRunning);
+            Assert.Equal(-61, hosts[2].Real.SquelchDb);
+        }
+        finally
+        {
+            SimpleScanner.Radio.RadioLog.FileOverride = null;
+            File.Delete(log);
+        }
+    }
+
+    [Fact]
+    public void AFurtherRadiosHelperKeepsItsRadio()
+    {
+        using var pair = new Pair();
+        Assert.False(pair.Remote.CanChangeRadio);
+        Assert.Throws<NotSupportedException>(() => pair.Remote.Source.Serial = "other");
+    }
 }

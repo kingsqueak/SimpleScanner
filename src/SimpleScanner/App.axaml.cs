@@ -24,12 +24,21 @@ public partial class App : Application
             var store = AppFiles.OpenStore();
             FillLocations(store);
             var settings = Settings.Load();
-            // The radios marked for use that are plugged in. The window runs the first itself (the one used
-            // last, if it is among them); each other gets a helper program, because the SDRplay software
-            // lets one program open one radio only. With none marked it is as it was with one radio.
+            // The radios marked for use that are plugged in, the one used last first. Each runs in a helper
+            // program of its own: the SDRplay software lets one program open one radio only, and a radio whose
+            // USB link jams is restarted in a fresh helper (see Remote.RemoteReceiver). The first is the
+            // window's own, whose radio can be changed; with none marked it is as it was with one radio.
             var inUse = RadiosInUse(settings);
-            var source = new SdrPlaySource { Serial = inUse.Count > 0 ? inUse[0].Serial : settings.RadioSerial };
-            var receivers = new List<IReceiver> { new Receiver(source) };
+            string? firstSerial = inUse.Count > 0 ? inUse[0].Serial : settings.RadioSerial;
+            IReceiver first;
+            try { first = Remote.RemoteReceiver.Launch(firstSerial, SdrPlaySource.ListRadios, changeable: true); }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // Without its helper the radio is run in this program, as it once always was.
+                Radio.RadioLog.Write($"{firstSerial ?? "radio"}: no helper ({e.Message}); run in the app");
+                first = new Receiver(new SdrPlaySource { Serial = firstSerial });
+            }
+            var receivers = new List<IReceiver> { first };
             string trouble = "";
             foreach (var radio in inUse.Skip(1))
             {
@@ -58,7 +67,7 @@ public partial class App : Application
             bool start = (desktop.Args ?? []).Contains("--start");
             window.Opened += async (_, _) =>
             {
-                if (inUse.Count == 0) await ChooseRadio(window, source, settings);
+                if (inUse.Count == 0) await ChooseRadio(window, first.Source, settings);
                 vm.RefreshRadios();
                 // --start: switch the receivers on at launch.
                 if (start) await vm.StartAll();
@@ -83,7 +92,7 @@ public partial class App : Application
     /// yet), ask which to use. Otherwise nothing is shown: the last one is opened, or the source
     /// finds its own. The Receiver box in Settings changes it afterwards.
     /// </summary>
-    private static async Task ChooseRadio(Window owner, SdrPlaySource source, Settings settings)
+    private static async Task ChooseRadio(Window owner, Radio.IIqSource source, Settings settings)
     {
         IReadOnlyList<Radio.RadioInfo> radios;
         try { radios = SdrPlaySource.ListRadios(); }

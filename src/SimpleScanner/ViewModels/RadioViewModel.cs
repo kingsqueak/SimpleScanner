@@ -107,8 +107,9 @@ public sealed partial class RadioViewModel : ObservableObject
     /// <summary>Something here has changed that is kept between runs, and has not been saved yet.</summary>
     public bool Dirty { get; set; }
 
-    /// <summary>This radio runs in a helper program, which keeps the one radio it was started for.</summary>
-    public bool IsHelper => _rx is Remote.RemoteReceiver;
+    /// <summary>This radio runs in a helper program that keeps the one radio it was started for (one for a further
+    /// radio; the window's own receiver can be changed to another radio, in a helper or not).</summary>
+    public bool IsHelper => _rx is Remote.RemoteReceiver { CanChangeRadio: false };
 
     /// <summary>Says whether another receiver of this program has the radio with that serial number.</summary>
     public Func<string, bool>? IsTaken { get; set; }

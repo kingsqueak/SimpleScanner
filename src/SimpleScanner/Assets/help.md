@@ -226,7 +226,7 @@ With more than one RSP plugged in, the scanner can run them together.
 - When two radios scan channels they have in common, those are shared out between them, so each is visited by one radio and the scan comes round sooner. They are shared out again when one stops.
 - A channel's own Scan tick is the same for every radio.
 - Each radio keeps its own settings (antenna, gain, squelch, volume and the rest) under its serial number. **Pan** on Settings puts a radio's sound to the left or the right, to tell them apart by ear.
-- The first radio runs inside the program. Each further one runs in a helper process, started and ended by the program, because the SDRplay software gives a program one radio.
+- Each radio runs in a helper process of its own, started and ended by the program: the SDRplay software gives a program one radio, and a radio that stops working is restarted in a fresh helper (see **Troubleshooting**).
 
 ## USB: each radio needs room on the bus
 
@@ -296,6 +296,7 @@ A scanner is only as good as its antenna. A discone or a wideband scanner antenn
 - **OVERLOAD shows often**: leave Auto gain on, raise the LNA step, and switch on the MW/FM broadcast notch.
 - **A digital call is shown but silent**: it is encrypted (ENCRYPTED shows), or it is a kind the app shows without decoding, or this build has no AMBE+2 codec ("no voice codec").
 - **Stutter with two radios**: the USB bus is too full. See **Several radios**.
+- **A radio stops by itself after a while** (most often an original RSP1, after half an hour or more of scanning): its USB link has jammed, or the SDRplay software reports it unplugged. The app notices within a few seconds, resets the radio's USB connection, and starts it again in a fresh helper with the same settings and scan; the sound drops for about fifteen seconds. If it stops again within a minute the app gives up and says so: unplug the radio, plug it back in, and switch it on. Each event is written to `~/Library/Logs/SimpleScanner.log` (macOS); the USB reset is done on macOS only.
 - **The RadioReference browser will not sign in**: it needs both an application key and a Premium subscription. The line under the account bar says which is missing.
 
 # Files and privacy

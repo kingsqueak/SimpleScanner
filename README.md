@@ -57,8 +57,9 @@ the scan stops on. Trunked-system frequencies in a download are stored unticked.
 
 With more than one RSP plugged in, the scanner can run them together. On the Settings tab, choose a
 radio in the Receiver box and tick "Use" for each one wanted; they are started at the next launch.
-The first runs inside the program; each further radio runs in a helper process of its own, started
-and ended by the program (the SDRplay API gives a process one radio).
+Each radio, the first included, runs in a helper process of its own, started and ended by the
+program (the SDRplay API gives a process one radio, and a radio whose USB link jams is restarted in
+a fresh helper).
 
 - Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its
   own Scan, Skip and Avoid buttons. Click a strip to select that radio. Tune, Mode, Filter, Audio,

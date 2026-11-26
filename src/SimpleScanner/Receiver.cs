@@ -46,24 +46,18 @@ public sealed class Receiver : IReceiver
     private readonly bool _playAudio;
     private readonly double _rate;
     private readonly object _cfg = new(), _audioLock = new();
-    private readonly ChannelReceiver _channel;
-    private readonly Squelch _squelch = new();
+    private readonly MonitorSlot _slot;
     private BlockingCollection<Block>? _queue;
     private Thread? _thread;
     private AudioOut? _audio;
     private string? _audioDevice;
-    private double _frequencyHz = 162_400_000, _offsetHz = ScanPlan.SingleOffsetHz, _volume = 0.5, _pan, _level = -140;
-    private bool _blocked, _squelchOpen;
+    private double _volume = 0.5, _pan, _level = -140;
     private volatile bool _flushUntilRetuned;
     private bool _retunedUnsaid;            // on the radio's thread only
     private double _flushedSeconds;
     private const double FlushLongestSeconds = 0.8;
-    private float _gain;
-    private float[] _left = [], _right = [], _frames = [];
+    private float[] _frames = [];
     private static readonly float[] Silence = new float[2 * Cushion];
-
-    // Digital voice, all on the DSP thread under _cfg (but its status and availability).
-    private readonly DigitalVoice _digitalVoice = new();
 
     // Scan state, all under _cfg.
     private IReadOnlyList<ScanChannel> _scanList = [];
@@ -75,9 +69,8 @@ public sealed class Receiver : IReceiver
     private long[] _avoidUntil = [];
     private readonly Queue<int> _candidates = new();
     private ScanState _scan;
-    private int _window, _scanIndex = -1, _surveySkip, _fftFill, _surveyCount;
-    private double _scanTimer, _scanClock, _listenTime;
-    private bool _scanSawSignal, _scanHeardVoice;
+    private int _window, _surveySkip, _fftFill, _surveyCount;
+    private double _scanClock;
     private long _passes;
     private readonly Fft _fft;
     private readonly float[] _fftWindow, _fftRe, _fftIm, _workRe, _workIm;
@@ -89,15 +82,13 @@ public sealed class Receiver : IReceiver
         _source = source;
         _playAudio = playAudio;
         _rate = sampleRate;
-        _channel = new ChannelReceiver(sampleRate);
+        _slot = new MonitorSlot(sampleRate);
         _source.Samples += OnSamples;
         _source.Failed += why =>
         {
             Stop();
             Failed?.Invoke(why);
         };
-        _channel.SetOffset(_offsetHz);
-        _channel.DiscriminatorTap = d => _digitalVoice.Feed(d, _channel.DiscriminatorHzPerUnit);
 
         // FFT bins about 2 kHz wide: a few to each narrow channel.
         int size = 256;
@@ -129,9 +120,9 @@ public sealed class Receiver : IReceiver
     public double LevelDb => Volatile.Read(ref _level);
     /// <summary>Added to the level reading, to line it up with a signal generator.</summary>
     public double LevelOffsetDb { get; set; }
-    public bool SquelchOpen => _squelchOpen;
+    public bool SquelchOpen => _slot.SquelchOpen;
     /// <summary>True on a frequency the scanner refuses to receive (cellular telephone bands).</summary>
-    public bool Blocked => _blocked;
+    public bool Blocked => _slot.Blocked;
     public int AudioUnderruns => _audio?.Underruns ?? 0;
 
     /// <summary>The sound output device by name; null or empty is the system's default. May be changed while running.</summary>
@@ -180,16 +171,17 @@ public sealed class Receiver : IReceiver
         set => _pan = double.IsFinite(value) ? Math.Clamp(value, -1, 1) : 0;
     }
 
+    // The squelch and stereo settings are the receiver's: these setters are where they are passed on to the slot.
     public double SquelchDb
     {
-        get => _squelch.ThresholdDb;
-        set => _squelch.ThresholdDb = value;
+        get => _slot.Squelch.ThresholdDb;
+        set => _slot.Squelch.ThresholdDb = value;
     }
 
     public bool SquelchEnabled
     {
-        get => _squelch.Enabled;
-        set => _squelch.Enabled = value;
+        get => _slot.Squelch.Enabled;
+        set => _slot.Squelch.Enabled = value;
     }
 
     /// <summary>
@@ -198,74 +190,64 @@ public sealed class Receiver : IReceiver
     /// </summary>
     public bool AutoSquelch
     {
-        get => _squelch.Auto;
-        set => _squelch.Auto = value;
+        get => _slot.Squelch.Auto;
+        set => _slot.Squelch.Auto = value;
     }
 
     /// <summary>What the auto squelch goes by, and the most it lets through: see <see cref="ChannelReceiver.Roughness"/>.</summary>
-    public double Roughness => _channel.Roughness;
-    public double RoughnessLimit => _channel.RoughnessLimit;
-
-    // The channel moved: what the squelch and the noise measure have seen is of the old one.
-    private void ResetSquelch()
-    {
-        _squelch.Reset();
-        _channel.ResetRoughness();
-    }
+    public double Roughness => _slot.Channel.Roughness;
+    public double RoughnessLimit => _slot.Channel.RoughnessLimit;
 
     /// <summary>A broadcast FM station is being received in stereo.</summary>
-    public bool Stereo => _channel.Stereo;
+    public bool Stereo => _slot.Channel.Stereo;
 
     public bool StereoEnabled
     {
-        get => _channel.StereoEnabled;
-        set => _channel.StereoEnabled = value;
+        get => _slot.Channel.StereoEnabled;
+        set => _slot.Channel.StereoEnabled = value;
     }
 
-    public Mode Mode => _channel.Mode;
-    public double BandwidthHz => _channel.BandwidthHz;
+    public Mode Mode => _slot.Channel.Mode;
+    public double BandwidthHz => _slot.Channel.BandwidthHz;
 
     /// <summary>The digital signal on the channel now (P25, DMR, NXDN, D-STAR or System Fusion), or null for none.</summary>
-    public IDigitalStatus? Digital => _digitalVoice.Status;
+    public IDigitalStatus? Digital => _slot.DigitalVoice.Status;
     /// <summary>False when the digital voice library could not be loaded.</summary>
-    public bool DigitalAvailable => _digitalVoice.DigitalAvailable;
+    public bool DigitalAvailable => _slot.DigitalVoice.DigitalAvailable;
     /// <summary>False when the AMBE+2 speech decoder is not installed: DMR calls are shown, not heard.</summary>
-    public bool DmrVoiceAvailable => _digitalVoice.DmrVoiceAvailable;
-
-    // The channel changed or its signal went: whatever the decoder was following is over.
-    private void ResetDigitalLocked() => _digitalVoice.Reset();
+    public bool DmrVoiceAvailable => _slot.DigitalVoice.DmrVoiceAvailable;
 
     /// <summary>Choosing a mode by hand ends a scan.</summary>
     public void SetMode(Mode mode, double bandwidthHz)
     {
         lock (_cfg)
         {
-            if (mode == _channel.Mode && bandwidthHz == _channel.BandwidthHz) return;
+            if (mode == _slot.Channel.Mode && bandwidthHz == _slot.Channel.BandwidthHz) return;
             _scan = ScanState.Off;
-            ConfigureLocked(mode, bandwidthHz);
+            ConfigureLocked(_slot, mode, bandwidthHz);
             // A wider filter may no longer fit where the channel sat in the span.
-            if (IsRunning && !ScanPlan.Fits(_offsetHz, bandwidthHz, _source.UsableBandwidthHz)) TuneLocked(_frequencyHz);
+            if (IsRunning && !ScanPlan.Fits(_slot.OffsetHz, bandwidthHz, _source.UsableBandwidthHz)) TuneLocked(_slot.FrequencyHz);
         }
     }
 
-    private void ConfigureLocked(Mode mode, double bandwidthHz)
+    private static void ConfigureLocked(MonitorSlot slot, Mode mode, double bandwidthHz)
     {
-        if (mode == _channel.Mode && bandwidthHz == _channel.BandwidthHz) return;
-        _channel.Configure(mode, bandwidthHz);
-        _blocked = BandPlan.IsBlocked(_frequencyHz, bandwidthHz);
-        ResetSquelch();
-        ResetDigitalLocked();
+        if (mode == slot.Channel.Mode && bandwidthHz == slot.Channel.BandwidthHz) return;
+        slot.Channel.Configure(mode, bandwidthHz);
+        slot.Blocked = BandPlan.IsBlocked(slot.FrequencyHz, bandwidthHz);
+        slot.ResetSquelch();
+        slot.ResetDigital();
     }
 
     /// <summary>Tuning by hand ends a scan.</summary>
     public double FrequencyHz
     {
-        get => _frequencyHz;
+        get => _slot.FrequencyHz;
         set
         {
             lock (_cfg)
             {
-                if (value == _frequencyHz) return;
+                if (value == _slot.FrequencyHz) return;
                 _scan = ScanState.Off;
                 TuneLocked(value);
             }
@@ -274,22 +256,22 @@ public sealed class Receiver : IReceiver
 
     private void TuneLocked(double hz)
     {
-        _frequencyHz = hz;
-        _blocked = BandPlan.IsBlocked(hz, _channel.BandwidthHz);
-        ResetSquelch();
-        ResetDigitalLocked();
+        _slot.FrequencyHz = hz;
+        _slot.Blocked = BandPlan.IsBlocked(hz, _slot.Channel.BandwidthHz);
+        _slot.ResetSquelch();
+        _slot.ResetDigital();
         double offset = hz - _source.CenterHz;
-        if (IsRunning && ScanPlan.Fits(offset, _channel.BandwidthHz, _source.UsableBandwidthHz))
+        if (IsRunning && ScanPlan.Fits(offset, _slot.Channel.BandwidthHz, _source.UsableBandwidthHz))
         {
-            _offsetHz = offset;
+            _slot.OffsetHz = offset;
         }
         else
         {
-            _offsetHz = ScanPlan.SingleOffsetFor(hz);
+            _slot.OffsetHz = ScanPlan.SingleOffsetFor(hz);
             if (IsRunning) _flushUntilRetuned = true;
-            _source.Tune(hz - _offsetHz);
+            _source.Tune(hz - _slot.OffsetHz);
         }
-        _channel.SetOffset(_offsetHz);
+        _slot.Channel.SetOffset(_slot.OffsetHz);
     }
 
     // ---- scanning -------------------------------------------------------------------------
@@ -336,8 +318,8 @@ public sealed class Receiver : IReceiver
         get
         {
             lock (_cfg)
-                return _scan is ScanState.Off or ScanState.Survey || _scanIndex < 0 || _scanIndex >= _scanList.Count
-                    ? null : _scanList[_scanIndex];
+                return _scan is ScanState.Off or ScanState.Survey || _slot.ScanIndex < 0 || _slot.ScanIndex >= _scanList.Count
+                    ? null : _scanList[_slot.ScanIndex];
         }
     }
 
@@ -359,7 +341,7 @@ public sealed class Receiver : IReceiver
             for (int i = 0; i < _scanList.Count; i++)
                 _avoided.TryGetValue(AvoidKey(_scanList[i].FrequencyHz), out _avoidUntil[i]);
             _acc = new double[_scanList.Count];
-            _squelch.Enabled = true;
+            SquelchEnabled = true;
             _scanClock = 0;
             Interlocked.Exchange(ref _passes, 0);
             _window = -1;
@@ -379,8 +361,8 @@ public sealed class Receiver : IReceiver
         lock (_cfg)
         {
             if (_scan is ScanState.Off or ScanState.Survey) return;
-            if (_scanIndex >= 0) _skipUntil[_scanIndex] = _scanClock + ScanSkipSeconds;
-            NextCandidateLocked();
+            if (_slot.ScanIndex >= 0) _skipUntil[_slot.ScanIndex] = _scanClock + ScanSkipSeconds;
+            NextCandidateLocked(_slot);
         }
     }
 
@@ -392,12 +374,12 @@ public sealed class Receiver : IReceiver
     {
         lock (_cfg)
         {
-            if (_scan is ScanState.Off or ScanState.Survey || _scanIndex < 0) return null;
-            var ch = _scanList[_scanIndex];
+            if (_scan is ScanState.Off or ScanState.Survey || _slot.ScanIndex < 0) return null;
+            var ch = _scanList[_slot.ScanIndex];
             long until = AvoidTime is { } t ? Environment.TickCount64 + (long)t.TotalMilliseconds : long.MaxValue;
             _avoided[AvoidKey(ch.FrequencyHz)] = until;
-            _avoidUntil[_scanIndex] = until;
-            NextCandidateLocked();
+            _avoidUntil[_slot.ScanIndex] = until;
+            NextCandidateLocked(_slot);
             return ch;
         }
     }
@@ -427,11 +409,11 @@ public sealed class Receiver : IReceiver
             _surveySkip = (int)(SurveySettleSeconds * _rate);
         }
         _scan = ScanState.Survey;
-        _scanIndex = -1;
+        _slot.ScanIndex = -1;
         _fftFill = 0;
         _surveyCount = 0;
         foreach (int c in w.Channels) _acc[c] = 0;
-        _squelchOpen = false;
+        _slot.SquelchOpen = false;
     }
 
     // Look at every channel of the window at once: a few FFTs of the whole span, and the power
@@ -484,87 +466,87 @@ public sealed class Receiver : IReceiver
             {
                 double level = 10 * Math.Log10(_acc[c] / (SurveyFrames * _fftNorm) + 1e-14) - gain + LevelOffsetDb;
                 best = Math.Max(best, level);
-                if (level >= _squelch.ThresholdDb && _scanClock >= _skipUntil[c] && now >= _avoidUntil[c]) found.Add((level, c));
+                if (level >= SquelchDb && _scanClock >= _skipUntil[c] && now >= _avoidUntil[c]) found.Add((level, c));
             }
             double shown = Volatile.Read(ref _level);
             Volatile.Write(ref _level, best > shown ? best : shown + 0.3 * (best - shown));
             _candidates.Clear();
             foreach (var (_, index) in found.OrderByDescending(f => f.level)) _candidates.Enqueue(index);
-            NextCandidateLocked();
+            NextCandidateLocked(_slot);
             return;
         }
     }
 
-    private void NextCandidateLocked()
+    private void NextCandidateLocked(MonitorSlot slot)
     {
         if (_candidates.Count == 0)
         {
             NextWindowLocked();
             return;
         }
-        _scanIndex = _candidates.Dequeue();
-        var ch = _scanList[_scanIndex];
-        ConfigureLocked(ch.Mode, ch.BandwidthHz);
+        slot.ScanIndex = _candidates.Dequeue();
+        var ch = _scanList[slot.ScanIndex];
+        ConfigureLocked(slot, ch.Mode, ch.BandwidthHz);
         // Inside the window already: only the channel filter moves.
-        _frequencyHz = ch.FrequencyHz;
-        _blocked = false;
-        _offsetHz = ch.FrequencyHz - _source.CenterHz;
-        _channel.SetOffset(_offsetHz);
-        ResetSquelch();
-        ResetDigitalLocked();
+        slot.FrequencyHz = ch.FrequencyHz;
+        slot.Blocked = false;
+        slot.OffsetHz = ch.FrequencyHz - _source.CenterHz;
+        slot.Channel.SetOffset(slot.OffsetHz);
+        slot.ResetSquelch();
+        slot.ResetDigital();
         _scan = ScanState.Settle;
-        _scanTimer = 0;
-        _scanSawSignal = false;
+        slot.ScanTimer = 0;
+        slot.ScanSawSignal = false;
     }
 
     /// <summary>One block's worth of listening to a scan candidate. Returns whether the audio may pass.</summary>
-    private bool ScanStepLocked(double level, bool open, double seconds)
+    private bool ScanStepLocked(MonitorSlot slot, double level, bool open, double seconds)
     {
-        _scanTimer += seconds;
+        slot.ScanTimer += seconds;
         switch (_scan)
         {
             case ScanState.Settle:
                 // The filters still hold the last channel.
-                if (_scanTimer >= SettleSeconds)
+                if (slot.ScanTimer >= SettleSeconds)
                 {
                     _scan = ScanState.Look;
-                    _scanTimer = 0;
-                    ResetSquelch();
+                    slot.ScanTimer = 0;
+                    slot.ResetSquelch();
                 }
                 return false;
             case ScanState.Look:
-                if (level >= _squelch.ThresholdDb) _scanSawSignal = true;
+                if (level >= slot.Squelch.ThresholdDb) slot.ScanSawSignal = true;
                 if (open)
                 {
                     _scan = ScanState.Listen;
-                    _scanTimer = 0;
-                    _listenTime = 0;
-                    _scanHeardVoice = false;
+                    slot.ScanTimer = 0;
+                    slot.ListenTime = 0;
+                    slot.ScanHeardVoice = false;
                     return true;
                 }
                 // Nothing there after all, or only noise: move on. Something there: give the squelch time to make up its mind.
-                if (_scanTimer >= (_scanSawSignal && !_squelch.Noisy ? LookLongestSeconds : LookSeconds)) NextCandidateLocked();
+                if (slot.ScanTimer >= (slot.ScanSawSignal && !slot.Squelch.Noisy ? LookLongestSeconds : LookSeconds)) NextCandidateLocked(slot);
                 return false;
             case ScanState.Listen:
                 // A digital signal with nothing to listen to (a control channel, a repeater sending idle bursts,
                 // an encrypted call) keeps the squelch open for as long as it likes. If a call was heard on this
                 // stop, give it the hang time for a reply and come back soon; if not, leave as soon as it is clear
                 // what the signal is, and pass it by for longer.
-                _listenTime += seconds;
-                if (ResumeSeconds is { } limit && _listenTime >= limit)
+                slot.ListenTime += seconds;
+                if (ResumeSeconds is { } limit && slot.ListenTime >= limit)
                 {
                     // Still busy, or it would have been left already: without a pause the scan would be straight back.
-                    if (_scanIndex >= 0) _skipUntil[_scanIndex] = _scanClock + ResumePassBySeconds;
+                    if (slot.ScanIndex >= 0) _skipUntil[slot.ScanIndex] = _scanClock + ResumePassBySeconds;
                     NextWindowLocked();
                     return false;
                 }
-                bool silent = open && _digitalVoice.Status is { NothingToHear: true };
-                if (open && _digitalVoice.Status is { NothingToHear: false }) _scanHeardVoice = true;
-                if (open && !silent) _scanTimer = 0;
-                else if (_scanTimer >= (silent && !_scanHeardVoice ? SilentDigitalLookSeconds : ScanHangSeconds))
+                bool silent = open && slot.DigitalVoice.Status is { NothingToHear: true };
+                if (open && slot.DigitalVoice.Status is { NothingToHear: false }) slot.ScanHeardVoice = true;
+                if (open && !silent) slot.ScanTimer = 0;
+                else if (slot.ScanTimer >= (silent && !slot.ScanHeardVoice ? SilentDigitalLookSeconds : ScanHangSeconds))
                 {
-                    if (silent && _scanIndex >= 0)
-                        _skipUntil[_scanIndex] = _scanClock + (_scanHeardVoice ? AfterCallSkipSeconds : SilentDigitalSkipSeconds);
+                    if (silent && slot.ScanIndex >= 0)
+                        _skipUntil[slot.ScanIndex] = _scanClock + (slot.ScanHeardVoice ? AfterCallSkipSeconds : SilentDigitalSkipSeconds);
                     NextWindowLocked();
                 }
                 return open;
@@ -582,11 +564,11 @@ public sealed class Receiver : IReceiver
         try
         {
             _queue = new BlockingCollection<Block>(512);
-            _offsetHz = ScanPlan.SingleOffsetFor(_frequencyHz);
-            _channel.SetOffset(_offsetHz);
+            _slot.OffsetHz = ScanPlan.SingleOffsetFor(_slot.FrequencyHz);
+            _slot.Channel.SetOffset(_slot.OffsetHz);
             _flushUntilRetuned = false;
-            ResetSquelch();
-            _source.Start(_rate, _frequencyHz - _offsetHz);
+            _slot.ResetSquelch();
+            _source.Start(_rate, _slot.FrequencyHz - _slot.OffsetHz);
         }
         catch
         {
@@ -617,8 +599,8 @@ public sealed class Receiver : IReceiver
             _audio?.Dispose();
             _audio = null;
         }
-        _squelchOpen = false;
-        _digitalVoice.ClearStatus();
+        _slot.SquelchOpen = false;
+        _slot.DigitalVoice.ClearStatus();
         Volatile.Write(ref _level, -140);
     }
 
@@ -630,7 +612,7 @@ public sealed class Receiver : IReceiver
         // The decoders belong to the DSP thread: free them only once it has ended. If it will not end
         // (or this is that thread), they are left: a small leak, not a call into freed memory.
         if (thread is not null && (thread == Thread.CurrentThread || !thread.Join(2000))) return;
-        lock (_cfg) _digitalVoice.Dispose();
+        lock (_cfg) _slot.Dispose();
     }
 
     // Blocks of samples thrown away because the DSP thread had fallen 512 blocks behind (since the start).
@@ -681,7 +663,7 @@ public sealed class Receiver : IReceiver
             {
                 _flushUntilRetuned = false;
                 _flushedSeconds = 0;
-                ResetSquelch();
+                _slot.ResetSquelch();
             }
             else if (_flushUntilRetuned)
             {
@@ -691,7 +673,7 @@ public sealed class Receiver : IReceiver
                 if (_flushedSeconds < FlushLongestSeconds) return;
                 _flushUntilRetuned = false;
                 _flushedSeconds = 0;
-                ResetSquelch();
+                _slot.ResetSquelch();
             }
 
             int n = block.Count;
@@ -703,53 +685,12 @@ public sealed class Receiver : IReceiver
                 return;
             }
 
-            int max = _channel.MaxAudio(n);
-            if (_left.Length < max)
-            {
-                _left = new float[max];
-                _right = new float[max];
-                _frames = new float[2 * max];
-            }
-            count = _channel.Process(block.Data.AsSpan(0, n), block.Data.AsSpan(n, n), _left, _right);
-            double level = _channel.LevelDbfs - _source.GainDb + LevelOffsetDb;
-            if (_blocked) level = -140;
-            // The meter falls slowly and rises at once, like a scanner's bar.
-            double shown = Volatile.Read(ref _level);
-            Volatile.Write(ref _level, level > shown ? level : shown + 0.1 * (level - shown));
-            open = _squelch.Update(level, seconds, _channel.Roughness, _channel.RoughnessLimit) && !_blocked;
-            if (_scan != ScanState.Off) open = ScanStepLocked(level, open, seconds);
-            _squelchOpen = open;
-            // Is there P25, DMR, NXDN, D-STAR or System Fusion on the channel? If so its decoded speech takes the place of the analogue audio.
-            if (count > 0) _digitalVoice.Process(open, _scan is ScanState.Look or ScanState.Settle, _channel.Mode, _left, _right, count);
+            count = ChannelLocked(_slot, block.Data.AsSpan(0, n), block.Data.AsSpan(n, n), seconds, out open);
         }
         if (count == 0) return;
 
-        // Fade in and out over a few milliseconds so the squelch does not click.
         var a = _frames.AsSpan(0, 2 * count);
-        float target = open ? (float)(_volume * _volume) : 0f, g = _gain;
-        const float step = 1f / 240;
-        float pan = (float)_pan;
-        if (pan == 0)
-        {
-            for (int k = 0; k < count; k++)
-            {
-                g += Math.Clamp(target - g, -step, step);
-                a[2 * k] = _left[k] * g;
-                a[2 * k + 1] = _right[k] * g;
-            }
-        }
-        else
-        {
-            var (gl, gr, mix) = PanGains(pan);
-            for (int k = 0; k < count; k++)
-            {
-                g += Math.Clamp(target - g, -step, step);
-                float l = _left[k], r = _right[k], both = mix * 0.5f * (l + r);
-                a[2 * k] = ((1 - mix) * l + both) * g * gl;
-                a[2 * k + 1] = ((1 - mix) * r + both) * g * gr;
-            }
-        }
-        _gain = g;
+        FadeAndPan(_slot, open, a, count);
 
         AudioOutput?.Invoke(a);
         lock (_audioLock)
@@ -761,5 +702,60 @@ public sealed class Receiver : IReceiver
             else if (queued > TooMuch && (!open || queued > 2 * TooMuch)) return;   // the radio's clock runs fast: shed some
             audio.Write(a);
         }
+    }
+
+    // One block of the radio's IQ through one slot: its channel, the level (and the meter), its squelch, its
+    // part of a scan and its digital voice. Returns the number of audio samples left in the slot's buffers.
+    private int ChannelLocked(MonitorSlot slot, ReadOnlySpan<float> i, ReadOnlySpan<float> q, double seconds, out bool open)
+    {
+        int max = slot.Channel.MaxAudio(i.Length);
+        if (slot.Left.Length < max)
+        {
+            slot.Left = new float[max];
+            slot.Right = new float[max];
+        }
+        if (_frames.Length < 2 * max) _frames = new float[2 * max];
+        int count = slot.Channel.Process(i, q, slot.Left, slot.Right);
+        double level = slot.Channel.LevelDbfs - _source.GainDb + LevelOffsetDb;
+        if (slot.Blocked) level = -140;
+        // The meter falls slowly and rises at once, like a scanner's bar.
+        double shown = Volatile.Read(ref _level);
+        Volatile.Write(ref _level, level > shown ? level : shown + 0.1 * (level - shown));
+        open = slot.Squelch.Update(level, seconds, slot.Channel.Roughness, slot.Channel.RoughnessLimit) && !slot.Blocked;
+        if (_scan != ScanState.Off) open = ScanStepLocked(slot, level, open, seconds);
+        slot.SquelchOpen = open;
+        // Is there P25, DMR, NXDN, D-STAR or System Fusion on the channel? If so its decoded speech takes the place of the analogue audio.
+        if (count > 0) slot.DigitalVoice.Process(open, _scan is ScanState.Look or ScanState.Settle, slot.Channel.Mode, slot.Left, slot.Right, count);
+        return count;
+    }
+
+    // A slot's audio into stereo frames, at the volume and pan.
+    private void FadeAndPan(MonitorSlot slot, bool open, Span<float> a, int count)
+    {
+        // Fade in and out over a few milliseconds so the squelch does not click.
+        float target = open ? (float)(_volume * _volume) : 0f, g = slot.Gain;
+        const float step = 1f / 240;
+        float pan = (float)_pan;
+        if (pan == 0)
+        {
+            for (int k = 0; k < count; k++)
+            {
+                g += Math.Clamp(target - g, -step, step);
+                a[2 * k] = slot.Left[k] * g;
+                a[2 * k + 1] = slot.Right[k] * g;
+            }
+        }
+        else
+        {
+            var (gl, gr, mix) = PanGains(pan);
+            for (int k = 0; k < count; k++)
+            {
+                g += Math.Clamp(target - g, -step, step);
+                float l = slot.Left[k], r = slot.Right[k], both = mix * 0.5f * (l + r);
+                a[2 * k] = ((1 - mix) * l + both) * g * gl;
+                a[2 * k + 1] = ((1 - mix) * r + both) * g * gr;
+            }
+        }
+        slot.Gain = g;
     }
 }

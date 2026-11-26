@@ -67,6 +67,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
 
     private const int AgcSetPointDbfs = -30, AgcMode50Hz = 2, MaxIfGr = 59, MinIfGr = 20;
     private const double RetuneTimeoutMs = 500;
+    private const double MaxRfHz = 2e9;             // the top of the tuning range the service accepts (the bottom is above 0)
 
     private static readonly object ApiLock = new();
     private static bool _apiOpen;
@@ -195,7 +196,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 // A radio left jammed (an RSP1 after a USB babble error) is refused until it is replugged:
                 // replug it in software and try once more. Not the API until macOS says it is free (see Recover).
                 string? serial = Radio?.Serial;
-                Log($"{first.Message} Replugging it.");
+                Log($"{first.Message} (Asked for {centerHz / 1e6:0.####} MHz.) Replugging it.");
                 UsbReplug.WaitFor(serial, TimeSpan.FromSeconds(10), UsbReplug.State.Free, UsbReplug.State.Gone);
                 var (replugged, how) = UsbReplug.Replug(serial, TimeSpan.FromSeconds(10));
                 Log($"USB replug: {how}");
@@ -229,6 +230,10 @@ public sealed unsafe class SdrPlaySource : IIqSource
         lock (_gate)
         {
             if (_running) return;
+            // Said here, not left to the API: its answer to a centre outside the range is a plain "Fail", which
+            // reads as a jammed radio and gets it replugged (2026-11-26: -200 kHz, refused ten times in five starts).
+            if (!(centerHz > 0 && centerHz <= MaxRfHz))
+                throw new InvalidOperationException($"Could not start the radio: a centre frequency of {centerHz / 1e6:0.###} MHz is outside its range.");
             EnsureApi();
 
             var devices = stackalloc DeviceT[16];

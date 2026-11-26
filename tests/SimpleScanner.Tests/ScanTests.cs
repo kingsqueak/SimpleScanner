@@ -42,10 +42,15 @@ internal sealed class FakeSource : IIqSource
     public double LastRetuneMs => 0;
 
     public string? FailToStart;              // the reason it gives for not starting
+    public int Refused;                      // retunes to a centre no radio has, refused as the API refuses them
+
+    // What the SDRplay service checks ("rfHz out of range (0:2000000000) = -200000", 2026-11-26).
+    private static bool InRange(double centerHz) => centerHz > 0 && centerHz <= 2e9;
 
     public void Start(double sampleRate, double centerHz)
     {
         if (FailToStart is { } why) throw new InvalidOperationException(why);
+        if (!InRange(centerHz)) throw new InvalidOperationException("Could not start the radio: sdrplay_api_Fail.");
         SampleRate = sampleRate;
         _center = centerHz;
         _run = true;
@@ -61,6 +66,11 @@ internal sealed class FakeSource : IIqSource
 
     public void Tune(double centerHz)
     {
+        if (!InRange(centerHz))
+        {
+            Interlocked.Increment(ref Refused);
+            return;
+        }
         Volatile.Write(ref _center, centerHz);
         Interlocked.Increment(ref Tunes);
         _retuned = true;
@@ -145,6 +155,64 @@ public class ScanTests
         rx.FrequencyHz = 162.4e6;
         Assert.False(rx.Scanning);
         rx.Stop();
+    }
+
+    // A channel on its own sits 300 kHz above the centre. For 100 kHz that centre would be -200 kHz, which the
+    // radio refuses: the start that failed ten times out of ten on 2026-11-26. It is tuned from above instead.
+    [Fact]
+    public void AFrequencyTooLowForTheUsualCentreIsReceivedFromACentreAboveIt()
+    {
+        var source = new FakeSource { CarrierHz = 100e3 };
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6) { SquelchDb = -60, ScanHangSeconds = 0.2 };
+        rx.SetMode(Mode.Am, BandPlan.AmAir);
+        rx.FrequencyHz = 100e3;
+        rx.Start();
+        Assert.True(source.CenterHz > 0, $"started at a centre of {source.CenterHz} Hz");
+        Assert.True(Wait(() => rx.SquelchOpen, 2), "the carrier on 100 kHz is not heard");
+
+        // The same when it is tuned there while running, and when a scan goes there.
+        rx.FrequencyHz = 162.4e6;
+        Assert.True(Wait(() => !rx.SquelchOpen, 2));
+        source.CarrierHz = 250e3;
+        rx.FrequencyHz = 250e3;
+        Assert.True(Wait(() => rx.SquelchOpen, 2), "the carrier on 250 kHz is not heard");
+        rx.FrequencyHz = 162.4e6;
+        source.CarrierHz = 150e3;
+        rx.StartScan([new("low", 150e3, Mode.Am, BandPlan.AmAir), new("air", 125.0e6, Mode.Am, BandPlan.AmAir)]);
+        Assert.True(Wait(() => rx.ScanListening, 3), "the scan did not stop on 150 kHz");
+        Assert.Equal("low", rx.ScanChannel?.Name);
+        Assert.Equal(0, source.Refused);
+        rx.Stop();
+    }
+
+    [Fact]
+    public void ThePlanKeepsEveryCentreInsideTheRadiosRange()
+    {
+        ScanChannel[] list =
+        [
+            new("a", 100e3, Mode.Am, BandPlan.AmAir), new("b", 150e3, Mode.Am, BandPlan.AmAir), new("c", 290e3, Mode.Am, BandPlan.AmAir),
+            new("d", 1.0e6, Mode.Am, BandPlan.AmAir), new("e", 1999.99e6, Mode.Nfm, 12500), new("f", 2000e6, Mode.Nfm, 12500),
+        ];
+        foreach (double usable in new[] { 1.9e6, 6.4e6 })
+        {
+            var windows = ScanPlan.Build(list, usable);
+            Assert.Equal(list.Length, windows.Sum(w => w.Channels.Length));
+            foreach (var w in windows)
+            {
+                Assert.InRange(w.CenterHz, 1, 2e9);
+                foreach (int k in w.Channels)
+                    Assert.True(ScanPlan.Fits(list[k].FrequencyHz - w.CenterHz, list[k].BandwidthHz, usable), $"{list[k].Name} does not fit at {w.CenterHz}");
+            }
+        }
+        // A channel on its own: above the centre as a rule, below it where the centre would leave the range.
+        Assert.Equal(ScanPlan.SingleOffsetHz, ScanPlan.SingleOffsetFor(162.4e6));
+        Assert.Equal(ScanPlan.SingleOffsetHz, ScanPlan.SingleOffsetFor(1.0e6));
+        Assert.Equal(-ScanPlan.SingleOffsetHz, ScanPlan.SingleOffsetFor(100e3));
+        Assert.Equal(-ScanPlan.SingleOffsetHz, ScanPlan.SingleOffsetFor(299e3));
+        // The top of the range needs nothing: the centre is below the channel there.
+        Assert.Equal(ScanPlan.SingleOffsetHz, ScanPlan.SingleOffsetFor(2000e6));
+        Assert.Equal(2000e6 - ScanPlan.SingleOffsetHz, Assert.Single(ScanPlan.Build([new("top", 2000e6, Mode.Nfm, 12500)], 6.4e6)).CenterHz);
+        Assert.Equal(100e3 + ScanPlan.SingleOffsetHz, Assert.Single(ScanPlan.Build([new("bottom", 100e3, Mode.Am, BandPlan.AmAir)], 6.4e6)).CenterHz);
     }
 
     [Fact]

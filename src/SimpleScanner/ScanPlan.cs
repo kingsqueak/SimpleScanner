@@ -14,6 +14,16 @@ public static class ScanPlan
     public const double DcGuardHz = 40_000;
     /// <summary>Where a channel on its own is put relative to the centre.</summary>
     public const double SingleOffsetHz = 300_000;
+    /// <summary>The lowest and highest centre a radio is asked for. Outside them the SDRplay API refuses, and at a
+    /// start says no more than "Fail" (2026-11-26: a centre of -200 kHz for a receiver left on 100 kHz).</summary>
+    public const double MinCenterHz = 100_000, MaxCenterHz = 2_000_000_000;
+
+    /// <summary>
+    /// Where a channel on its own sits relative to the centre: <see cref="SingleOffsetHz"/> above it, or that far
+    /// below it for a frequency so low that the centre would otherwise fall under <see cref="MinCenterHz"/>.
+    /// </summary>
+    public static double SingleOffsetFor(double frequencyHz) =>
+        frequencyHz - SingleOffsetHz >= MinCenterHz ? SingleOffsetHz : -SingleOffsetHz;
 
     /// <summary>True when a channel this wide, this far from the centre, can be received in a passband this wide.</summary>
     public static bool Fits(double offsetHz, double bandwidthHz, double usableHz) =>
@@ -38,7 +48,7 @@ public static class ScanPlan
                 center = FindCenter(channels, i, j, lo, usableHz);
                 if (center is not null) break;
             }
-            center ??= channels[i].FrequencyHz - SingleOffsetHz;
+            center ??= channels[i].FrequencyHz - SingleOffsetFor(channels[i].FrequencyHz);
             windows.Add(new ScanWindow(center.Value, Enumerable.Range(i, j - i + 1).ToArray()));
             i = j + 1;
         }
@@ -62,6 +72,7 @@ public static class ScanPlan
         {
             foreach (double center in shift == 0 ? [mid] : new[] { mid + shift, mid - shift })
             {
+                if (center < MinCenterHz || center > MaxCenterHz) continue;      // not a tuning the radio has
                 bool ok = true;
                 for (int k = from; k <= to && ok; k++)
                     ok = Fits(c[k].FrequencyHz - center, c[k].BandwidthHz, usableHz);

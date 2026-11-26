@@ -230,6 +230,127 @@ public class RemoteTests
         }
     }
 
+    // Helpers started one after another, as the window starts them: each a real receiver on a fake radio.
+    private sealed class Hosts
+    {
+        public readonly List<(FakeSource Source, Receiver Real, Action<string>? Ask)> Started = [];
+
+        public (Stream, Stream, Action?) Launch()
+        {
+            var down = new AnonymousPipeServerStream(PipeDirection.Out);
+            var downEnd = new AnonymousPipeClientStream(PipeDirection.In, down.ClientSafePipeHandle);
+            var up = new AnonymousPipeServerStream(PipeDirection.Out);
+            var upEnd = new AnonymousPipeClientStream(PipeDirection.In, up.ClientSafePipeHandle);
+            var source = new FakeSource();
+            var real = new Receiver(source, playAudio: false, sampleRate: 2.4e6);
+            int index = Started.Count;
+            var thread = new Thread(() =>
+            {
+                ReceiverHost.Run(real, downEnd, up,
+                    handOver: ask => Started[index] = Started[index] with { Ask = ask },
+                    exit: () => { real.Stop(); up.Dispose(); });     // as the helper's process ends
+                up.Dispose();
+            }) { IsBackground = true };
+            Started.Add((source, real, null));
+            thread.Start();
+            return (down, upEnd, () => thread.Join(3000));
+        }
+
+        /// <summary>The helper started as number <paramref name="index"/> says its radio has jammed and goes.</summary>
+        public void AskForANewOne(int index)
+        {
+            Assert.True(Wait(() => Started[index].Ask is not null, 2));
+            Started[index].Ask!("stopped sending samples (test)");
+        }
+    }
+
+    // What happened on 2026-11-26: a stray click on the frequency display sent the lowest frequency there is
+    // (100 kHz), the scan went on, and nothing looked wrong. Six minutes later the radio jammed; the new helper
+    // was given 100 kHz again, asked the radio for a centre of -200 kHz and was refused, as was every start
+    // after it until the app was closed.
+    [Fact]
+    public void AfterAStrayLowFrequencyANewHelperStillStartsAndScans()
+    {
+        var log = Path.GetTempFileName();
+        SimpleScanner.Radio.RadioLog.FileOverride = log;
+        var hosts = new Hosts();
+        try
+        {
+            using var rx = new RemoteReceiver(hosts.Launch, replug: _ => { });
+            Assert.True(rx.WaitForFirstReport(5000));
+            string? told = null;
+            rx.Failed += why => told = why;
+            rx.SquelchDb = -60;
+            rx.SetMode(Mode.Am, BandPlan.AmAir);
+            rx.FrequencyHz = 121.5e6;
+            rx.Start();
+            rx.FrequencyHz = 100e3;                              // the stray click
+            ScanChannel[] list = [new("one", 120.0e6, Mode.Am, BandPlan.AmAir), new("two", 125.0e6, Mode.Am, BandPlan.AmAir)];
+            rx.StartScan(list);
+            Assert.True(Wait(() => rx.ScanPasses >= 2, 3), "the first helper did not scan");
+
+            hosts.AskForANewOne(0);
+
+            Assert.True(Wait(() => hosts.Started.Count == 2, 10), "no second helper");
+            var second = hosts.Started[1];
+            Assert.True(Wait(() => second.Real.IsRunning && second.Real.Scanning || told is not null, 10), "the second helper is not scanning");
+            Assert.Null(told);
+            Assert.True(Wait(() => rx.IsRunning && rx.Scanning && rx.ScanPasses >= 2, 5), "the window does not see the new helper scanning");
+            Assert.Equal(0, hosts.Started[0].Source.Refused);    // the click's own retune was refused too ("1 refused" in the log)
+            Assert.Equal(0, second.Source.Refused);
+            Assert.Contains("running again in a new helper, scanning", File.ReadAllText(log));
+        }
+        finally
+        {
+            SimpleScanner.Radio.RadioLog.FileOverride = null;
+            File.Delete(log);
+        }
+    }
+
+    // A scan moves the receiver without the window sending a frequency. A new helper is put where the old one
+    // had got to (what the display shows), not where the window last sent it by hand, however long ago.
+    [Fact]
+    public void ANewHelperIsPutWhereTheOldOneWasNotWhereItWasLastSentByHand()
+    {
+        var log = Path.GetTempFileName();
+        SimpleScanner.Radio.RadioLog.FileOverride = log;
+        var hosts = new Hosts();
+        try
+        {
+            using var rx = new RemoteReceiver(hosts.Launch, replug: _ => { });
+            Assert.True(rx.WaitForFirstReport(5000));
+            rx.SquelchDb = -60;
+            rx.ScanHangSeconds = 5;
+            rx.SetMode(Mode.Nfm, 12500);
+            rx.FrequencyHz = 162.4e6;                            // by hand, before the scan
+            rx.Start();
+            hosts.Started[0].Source.CarrierHz = 125.0e6;
+            rx.StartScan([new("one", 120.0e6, Mode.Am, BandPlan.AmAir), new("two", 125.0e6, Mode.Am, BandPlan.AmAir)]);
+            Assert.True(Wait(() => rx.ScanListening && rx.FrequencyHz == 125.0e6, 3), "did not stop on the carrier");
+            rx.StopScan();                                       // it stays on the channel it had stopped on
+            Assert.True(Wait(() => !hosts.Started[0].Real.Scanning, 2));
+            Assert.Equal(125.0e6, hosts.Started[0].Real.FrequencyHz);
+
+            hosts.AskForANewOne(0);
+
+            Assert.True(Wait(() => hosts.Started.Count == 2, 10), "no second helper");
+            var second = hosts.Started[1];
+            Assert.True(Wait(() => second.Real.IsRunning, 10), "the second helper is not running");
+            Assert.False(second.Real.Scanning);
+            Assert.Equal(125.0e6, second.Real.FrequencyHz);
+            Assert.Equal(Mode.Am, second.Real.Mode);
+            Assert.Equal(BandPlan.AmAir, second.Real.BandwidthHz);
+            Assert.True(Wait(() => rx.IsRunning, 5));
+            Assert.Equal(125.0e6, rx.FrequencyHz);
+            Assert.Equal(Mode.Am, rx.Mode);
+        }
+        finally
+        {
+            SimpleScanner.Radio.RadioLog.FileOverride = null;
+            File.Delete(log);
+        }
+    }
+
     // A new helper whose radio will not start (it was unplugged, say) stays: switching on later works.
     [Fact]
     public void ANewHelperWhoseRadioWillNotStartCanBeStartedLater()

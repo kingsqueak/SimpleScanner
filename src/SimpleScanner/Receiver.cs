@@ -313,7 +313,7 @@ public sealed class Receiver : IReceiver
         }
         else
         {
-            _offsetHz = ScanPlan.SingleOffsetHz;
+            _offsetHz = ScanPlan.SingleOffsetFor(hz);
             if (IsRunning) _flushUntilRetuned = true;
             _source.Tune(hz - _offsetHz);
         }
@@ -610,7 +610,7 @@ public sealed class Receiver : IReceiver
         try
         {
             _queue = new BlockingCollection<Block>(512);
-            _offsetHz = ScanPlan.SingleOffsetHz;
+            _offsetHz = ScanPlan.SingleOffsetFor(_frequencyHz);
             _channel.SetOffset(_offsetHz);
             _flushUntilRetuned = false;
             ResetSquelch();

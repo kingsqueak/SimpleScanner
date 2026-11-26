@@ -473,6 +473,19 @@ public sealed class RemoteReceiver : IReceiver
     // the order it was last given. False when this receiver was closed meanwhile. Throws when it does not answer.
     private bool Connect(string? serial)
     {
+        // A scan moves the receiver without anything being sent from here, so the frequency and mode last sent
+        // may be hours old, and are not what the display shows. Where the helper before was, by its last report
+        // (with anything sent since), is where the new one is put. Taken now: the new one's reports replace it.
+        // (2026-11-26: a stray click had sent 100 kHz, the scan went on, and every new helper was given 100 kHz.)
+        lock (_gate)
+        {
+            if (_s.FrequencyHz > 0)
+            {
+                _sets.Remove(nameof(FrequencyHz));
+                _sets[nameof(FrequencyHz)] = (_s.FrequencyHz, typeof(double));
+                if (_s.BandwidthHz > 0) _mode = new ModeArg(_s.Mode, _s.BandwidthHz);
+            }
+        }
         var first = new ManualResetEventSlim();
         var (to, from, closed) = _launch!(serial);
         lock (_gate)

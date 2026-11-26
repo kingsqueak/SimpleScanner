@@ -2,12 +2,28 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SimpleScanner.ViewModels"
              xmlns:c="using:SimpleScanner.Controls"
+             xmlns:v="using:SimpleScanner.Views"
              x:Class="SimpleScanner.Views.Display"
              x:DataType="vm:RadioViewModel">
   <!-- One radio's display; its DataContext is that radio. The small-window button belongs to the window, so it is bound there.
        What a scanner shows on its display. The full window shows it at its own size; the small window scales it. -->
+  <UserControl.Styles>
+    <!-- Multi Monitor's rows: an empty one is dim; one waiting for a reply (its hang time) a little dim -->
+    <Style Selector="Grid.slot.waiting">
+      <Setter Property="Opacity" Value="0.72" />
+    </Style>
+    <Style Selector="Grid.slot.empty">
+      <Setter Property="Opacity" Value="0.38" />
+    </Style>
+    <Style Selector="TextBlock.digital">
+      <Setter Property="Foreground" Value="{DynamicResource LcdOpen}" />
+    </Style>
+    <Style Selector="TextBlock.digital.enc">
+      <Setter Property="Foreground" Value="{DynamicResource LcdWarn}" />
+    </Style>
+  </UserControl.Styles>
   <StackPanel Spacing="6">
-    <DockPanel>
+    <DockPanel x:Name="Header" IsVisible="{Binding !ShowSlots}">
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
         <TextBlock Text="OVERLOAD" Foreground="{DynamicResource LcdWarn}" FontSize="13" FontWeight="SemiBold"
                    IsVisible="{Binding Overloaded}" VerticalAlignment="Center" />
@@ -29,6 +45,22 @@
       <TextBlock Text="{Binding BandName}" Foreground="{DynamicResource LcdText}" FontSize="20"
                  TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
     </DockPanel>
+    <!-- Multi Monitor: how many rows hold a channel, and the band, in place of the channel's name. The flags that are
+         the radio's stay; the mode, the RX lamp and ENCRYPTED belong to each row. The same height as the line it replaces. -->
+    <DockPanel x:Name="SlotsHeaderLine" IsVisible="{Binding ShowSlots}" Height="20">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+        <TextBlock Text="OVERLOAD" Foreground="{DynamicResource LcdWarn}" FontSize="13" FontWeight="SemiBold"
+                   IsVisible="{Binding Overloaded}" VerticalAlignment="Center" />
+        <TextBlock Text="MUTE" Foreground="{DynamicResource LcdWarn}" FontSize="13" FontWeight="SemiBold"
+                   IsVisible="{Binding IsMuted}" VerticalAlignment="Center" />
+      </StackPanel>
+      <TextBlock Text="{Binding SlotsHeader}" Foreground="{DynamicResource LcdText}" FontSize="20"
+                 TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+    </DockPanel>
+
+    <Panel>
+    <!-- The display as it has always been: the channel, its frequency, what a digital signal says, the level -->
+    <StackPanel x:Name="Readout" Spacing="6" IsVisible="{Binding !ShowSlots}">
     <!-- What is stored about the channel: whose it is, then its particulars -->
     <TextBlock Text="{Binding DetailText}" Foreground="{DynamicResource LcdText}" FontSize="14"
                TextTrimming="CharacterEllipsis" MinHeight="18" />
@@ -45,7 +77,7 @@
       </Button>
       <Button Classes="power" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleMiniCommand}" IsVisible="{Binding !$parent[Window].((vm:MainViewModel)DataContext).IsMini}"
               HorizontalAlignment="Right" VerticalAlignment="Center"
-              ToolTip.Tip="Small window: only the display, with Mute, Scan, Skip and Avoid under it">
+              ToolTip.Tip="Small window: only the display, with Mute, Scan, Multi, Skip and Avoid under it">
         <Path Width="24" Height="24" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round"
               Data="M 20,4 L 14,10 M 14,5 L 14,10 L 19,10 M 4,20 L 10,14 M 5,14 L 10,14 L 10,19" />
       </Button>
@@ -74,6 +106,110 @@
                   Fill="{DynamicResource LcdText}" Track="{DynamicResource MeterTrack}" MarkerBrush="{DynamicResource LcdOpen}"
                   ToolTip.Tip="Signal level on the channel. The green mark is where the squelch opens." />
     </DockPanel>
+    </StackPanel>
+
+    <!-- Multi Monitor, while a scan or search runs: four rows in seat order in place of all that, in the same height, so
+         that the display does not change size. Each row is two lines of fixed height with columns of fixed width, so
+         nothing moves as rows fill and empty. The power and small-window buttons keep their sides. -->
+    <Grid x:Name="Rows" IsVisible="{Binding ShowSlots}" Height="167" ColumnDefinitions="44,*,44" ColumnSpacing="14">
+      <Button Classes="power" Classes.lit="{Binding IsOn}" Command="{Binding TogglePowerCommand}"
+              VerticalAlignment="Center"
+              ToolTip.Tip="Start or stop the radio. Green when it is running.">
+        <Path Width="24" Height="24" StrokeThickness="2.4" StrokeLineCap="Round"
+              Data="M 12,3 L 12,11.5 M 7.5,5.6 A 8,8 0 1 0 16.5,5.6" />
+      </Button>
+      <Button Grid.Column="2" Classes="power" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleMiniCommand}" IsVisible="{Binding !$parent[Window].((vm:MainViewModel)DataContext).IsMini}"
+              VerticalAlignment="Center"
+              ToolTip.Tip="Small window: only the display, with Mute, Scan, Multi, Skip and Avoid under it">
+        <Path Width="24" Height="24" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round"
+              Data="M 20,4 L 14,10 M 14,5 L 14,10 L 19,10 M 4,20 L 10,14 M 5,14 L 10,14 L 10,19" />
+      </Button>
+      <Button Grid.Column="2" Classes="power" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleMiniCommand}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsMini}"
+              VerticalAlignment="Center"
+              ToolTip.Tip="Back to the full window">
+        <Path Width="24" Height="24" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round"
+              Data="M 14,10 L 20,4 M 15,4 L 20,4 L 20,9 M 10,14 L 4,20 M 4,15 L 4,20 L 9,20" />
+      </Button>
+
+      <ItemsControl Grid.Column="1" ItemsSource="{Binding Slots}" VerticalAlignment="Center">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="3" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:SlotViewModel">
+            <Grid Classes="slot" Classes.empty="{Binding !Holding}" Classes.waiting="{Binding Waiting}"
+                  RowDefinitions="21,18" ColumnDefinitions="44,74,3*,2*,60,44" ColumnSpacing="7" Background="Transparent">
+              <!-- First line: seat, frequency, name, mode or what the digital signal says, level, lamp -->
+              <TextBlock Text="{Binding SeatLabel}" Foreground="{DynamicResource LcdDim}" FontSize="12" FontWeight="SemiBold"
+                         VerticalAlignment="Center"
+                         ToolTip.Tip="Where this row's sound is put between the speakers" />
+              <TextBlock Grid.Column="1" Text="—" Foreground="{DynamicResource LcdDim}" FontSize="15"
+                         VerticalAlignment="Center" IsVisible="{Binding !Holding}" />
+              <TextBlock Grid.Column="1" Text="{Binding FrequencyText}" Foreground="{DynamicResource LcdText}" FontSize="15"
+                         FontWeight="SemiBold" VerticalAlignment="Center" IsVisible="{Binding Holding}" />
+              <TextBlock Grid.Column="2" Text="{Binding Title}" Foreground="{DynamicResource LcdText}" FontSize="15"
+                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding Title}" />
+              <Panel Grid.Column="3">
+                <TextBlock Text="{Binding ModeText}" Foreground="{DynamicResource LcdText}" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding DigitalText, Converter={x:Static StringConverters.IsNullOrEmpty}}" />
+                <TextBlock Classes="digital" Classes.enc="{Binding IsEncrypted}" Text="{Binding DigitalText}" FontSize="13"
+                           FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding DigitalText}"
+                           IsVisible="{Binding DigitalText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              </Panel>
+              <c:LevelBar Grid.Column="4" Height="7" VerticalAlignment="Center" Value="{Binding Level}" IsVisible="{Binding Holding}"
+                          Marker="{Binding $parent[UserControl].((vm:RadioViewModel)DataContext).SquelchDb}"
+                          ShowMarker="{Binding $parent[UserControl].((vm:RadioViewModel)DataContext).SquelchOn}"
+                          Fill="{DynamicResource LcdText}" Track="{DynamicResource MeterTrack}" MarkerBrush="{DynamicResource LcdOpen}"
+                          ToolTip.Tip="{Binding LevelText}" />
+              <!-- The lamp: lit while the channel is heard; outlined, saying WAIT, while it is kept for a reply -->
+              <Border Grid.Column="5" CornerRadius="4" Height="18" Background="{DynamicResource LcdOpen}" IsVisible="{Binding SquelchOpen}">
+                <TextBlock Text="RX" Foreground="Black" FontSize="11" FontWeight="Bold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+              <Border Grid.Column="5" CornerRadius="4" Height="18" BorderBrush="{DynamicResource LcdDim}" BorderThickness="1"
+                      IsVisible="{Binding Waiting}"
+                      ToolTip.Tip="The signal has stopped: the channel is kept for the Multi Monitor hang time set in Settings, so that a reply is heard">
+                <TextBlock Text="WAIT" Foreground="{DynamicResource LcdText}" FontSize="9" FontWeight="Bold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+
+              <!-- Second line: what is stored about the channel, and this row's own Skip and Avoid -->
+              <TextBlock Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" FontSize="12" TextTrimming="CharacterEllipsis"
+                         VerticalAlignment="Center">
+                <ToolTip.Tip>
+                  <MultiBinding Converter="{x:Static v:Display.Lines}">
+                    <Binding Path="DetailText" />
+                    <Binding Path="InfoText" />
+                  </MultiBinding>
+                </ToolTip.Tip>
+                <Run Text="{Binding DetailText}" Foreground="{DynamicResource LcdText}" />
+                <Run Foreground="{DynamicResource LcdDim}">
+                  <Run.Text>
+                    <MultiBinding Converter="{x:Static v:Display.AfterDetail}">
+                      <Binding Path="DetailText" />
+                      <Binding Path="InfoText" />
+                    </MultiBinding>
+                  </Run.Text>
+                </Run>
+              </TextBlock>
+              <StackPanel Grid.Row="1" Grid.Column="4" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="4"
+                          HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button Classes="seg small" Content="Skip" Command="{Binding SkipCommand}"
+                        ToolTip.Tip="Let go of this row's channel and pass it by for a while; the other rows carry on" />
+                <Button Classes="seg small" Content="Avoid" Command="{Binding AvoidCommand}"
+                        ToolTip.Tip="Let go of this row's channel and keep it out of the scan for the Avoid Timer set in Settings" />
+              </StackPanel>
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Grid>
+    </Panel>
+
     <DockPanel>
       <TextBlock DockPanel.Dock="Right" Text="{Binding DeviceText}" Foreground="{DynamicResource LcdDim}" FontSize="12" />
       <TextBlock Text="{Binding GainText}" Foreground="{DynamicResource LcdDim}" FontSize="12" />

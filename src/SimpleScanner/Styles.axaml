@@ -57,6 +57,15 @@
     <Setter Property="Background" Value="{StaticResource Accent}" />
     <Setter Property="Foreground" Value="White" />
   </Style>
+  <!-- A small one, for a Multi Monitor row's own Skip and Avoid -->
+  <Style Selector="Button.seg.small">
+    <Setter Property="Padding" Value="7,1" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="CornerRadius" Value="4" />
+  </Style>
 
   <!-- The tabs under the readout: small headings, in keeping with the buttons -->
   <Style Selector="TabItem">

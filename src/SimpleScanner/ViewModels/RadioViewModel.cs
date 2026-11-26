@@ -547,6 +547,10 @@ public sealed partial class RadioViewModel : ObservableObject
     [RelayCommand]
     private void ToggleMute() => IsMuted = !IsMuted;
 
+    /// <summary>The Multi button beside Scan: switch Multi Monitor on or off for this radio.</summary>
+    [RelayCommand]
+    private void ToggleMultiMonitor() => MultiMonitor = !MultiMonitor;
+
     partial void OnPanChanged(double value)
     {
         // The slider's middle holds: a touch either side of it is the middle.

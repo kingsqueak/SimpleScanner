@@ -19,11 +19,13 @@
       <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
               Command="{Binding ToggleScanCommand}" MinWidth="82"
               ToolTip.Tip="Scan the ticked channels of the groups shown" />
+      <Button Classes="seg" Classes.lit="{Binding Radio.MultiMonitor}" Content="Multi" Command="{Binding Radio.ToggleMultiMonitorCommand}"
+              ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers." />
       <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
               IsEnabled="{Binding Radio.IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
       <Button Classes="seg" Content="Avoid" Command="{Binding Radio.AvoidChannelCommand}"
-              IsEnabled="{Binding Radio.IsScanning}"
-              ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings" />
+              IsEnabled="{Binding Radio.CanAvoidChannel}" ToolTip.ShowOnDisabled="True"
+              ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings. In Multi Monitor each row has its own Avoid." />
       <!-- With one radio this button is on the display -->
       <Button Classes="seg" Content="Full window" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding IsMulti}"
               ToolTip.Tip="Back to the full window" />
@@ -86,7 +88,7 @@
     <!-- With several radios the small-window button has no display to sit on: it is at the end of the tab headings -->
     <Button Classes="seg" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding IsMulti}" ZIndex="1"
             HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,0,0" Padding="7,4" MinWidth="0"
-            ToolTip.Tip="Small window: only the radios' displays, with Mute, Scan, Skip and Avoid under them">
+            ToolTip.Tip="Small window: only the radios' displays, with Mute, Scan, Multi, Skip and Avoid under them">
       <Path Width="16" Height="16" Stretch="Uniform" StrokeThickness="2" StrokeLineCap="Round" StrokeJoin="Round"
             Stroke="{DynamicResource TextMuted}"
             Data="M 20,4 L 14,10 M 14,5 L 14,10 L 19,10 M 4,20 L 10,14 M 5,14 L 10,14 L 10,19" />
@@ -145,11 +147,13 @@
             <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
                     Command="{Binding ToggleScanCommand}" MinWidth="82"
                     ToolTip.Tip="Scan the ticked channels of the groups shown. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
+            <Button Classes="seg" Classes.lit="{Binding Radio.MultiMonitor}" Content="Multi" Command="{Binding Radio.ToggleMultiMonitorCommand}"
+                    ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers." />
             <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
                     IsEnabled="{Binding Radio.IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
             <Button Classes="seg" Content="Avoid" Command="{Binding Radio.AvoidChannelCommand}"
-                    IsEnabled="{Binding Radio.IsScanning}"
-                    ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings. Closing the app clears every avoid." />
+                    IsEnabled="{Binding Radio.CanAvoidChannel}" ToolTip.ShowOnDisabled="True"
+                    ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings. Closing the app clears every avoid. In Multi Monitor each row of the display has its own Avoid." />
           </WrapPanel>
           </Grid>
 
@@ -423,6 +427,10 @@
               <TextBlock Text="Resume Timer" Classes="label" Width="84" />
               <ComboBox ItemsSource="{Binding ResumeTimes}" SelectedItem="{Binding SelectedResumeTime}" Width="130"
                         ToolTip.Tip="The longest the scan stays on a busy channel before it carries on. It still leaves sooner if the signal drops. A channel left this way is passed by for ten seconds so the others get a turn. Hold stays until the signal drops." />
+              <!-- On the resume timer's line: the tab has no room for another line at the window's usual height -->
+              <TextBlock Text="Multi Monitor Hang Time" Classes="label" Margin="12,0,0,0" />
+              <ComboBox ItemsSource="{Binding MultiHangTimes}" SelectedItem="{Binding SelectedMultiHangTime}" Width="130"
+                        ToolTip.Tip="How long Multi Monitor keeps a channel after its signal drops, so that a reply is heard. The same for every radio." />
             </StackPanel>
           </StackPanel>
         </Grid>

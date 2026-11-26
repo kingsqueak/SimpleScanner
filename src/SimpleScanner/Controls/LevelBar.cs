@@ -33,6 +33,8 @@ public sealed class LevelBar : Control
     public override void Render(DrawingContext context)
     {
         double w = Bounds.Width, h = Bounds.Height;
+        // Not laid out yet (a row of the display just made): nothing to draw, and the marker's clamp would have no room.
+        if (w < 2 || h <= 0) return;
         context.FillRectangle(Track ?? Brushes.Transparent, new Rect(0, 0, w, h), 3);
         double fill = w * Fraction(Value);
         if (fill > 0.5) context.FillRectangle(Fill ?? Brushes.Orange, new Rect(0, 0, fill, h), 3);

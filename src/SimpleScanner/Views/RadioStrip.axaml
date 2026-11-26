@@ -13,6 +13,19 @@
     <Style Selector="Border.strip.sel">
       <Setter Property="BorderBrush" Value="{DynamicResource LcdText}" />
     </Style>
+    <!-- Multi Monitor's lines: an empty one is dim; one waiting for a reply (its hang time) a little dim -->
+    <Style Selector="Grid.slot.waiting">
+      <Setter Property="Opacity" Value="0.72" />
+    </Style>
+    <Style Selector="Grid.slot.empty">
+      <Setter Property="Opacity" Value="0.38" />
+    </Style>
+    <Style Selector="TextBlock.digital">
+      <Setter Property="Foreground" Value="{DynamicResource LcdOpen}" />
+    </Style>
+    <Style Selector="TextBlock.digital.enc">
+      <Setter Property="Foreground" Value="{DynamicResource LcdWarn}" />
+    </Style>
     <Style Selector="TextBlock.flag">
       <Setter Property="FontSize" Value="10" />
       <Setter Property="FontWeight" Value="SemiBold" />
@@ -78,20 +91,76 @@
           <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}" MinWidth="46"
                   Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleScanOfCommand}" CommandParameter="{Binding}"
                   ToolTip.Tip="Scan the ticked channels of this radio's groups with this radio, or stop its scan" />
+          <Button Classes="seg" Classes.lit="{Binding MultiMonitor}" Content="Multi" Command="{Binding ToggleMultiMonitorCommand}"
+                  ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers." />
           <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
                   ToolTip.Tip="Leave the channel this radio's scan has stopped on and carry on" />
-          <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}" IsEnabled="{Binding IsScanning}" Margin="0"
-                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings" />
+          <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}" IsEnabled="{Binding CanAvoidChannel}" Margin="0"
+                  ToolTip.ShowOnDisabled="True"
+                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings. In Multi Monitor each of its rows has its own Avoid." />
         </StackPanel>
       </StackPanel>
 
-      <DockPanel Grid.Row="1" Grid.ColumnSpan="4">
+      <StackPanel Grid.Row="1" Grid.ColumnSpan="4">
+      <DockPanel>
         <TextBlock DockPanel.Dock="Right" Text="{Binding LevelText}" Foreground="{DynamicResource LcdText}" FontSize="11"
                    Width="52" TextAlignment="Right" VerticalAlignment="Center" />
         <c:LevelBar Height="8" Value="{Binding Level}" Marker="{Binding SquelchDb}" ShowMarker="{Binding SquelchOn}"
                     Fill="{DynamicResource LcdText}" Track="{DynamicResource MeterTrack}" MarkerBrush="{DynamicResource LcdOpen}"
                     ToolTip.Tip="{Binding GainText}" />
       </DockPanel>
+
+      <!-- Multi Monitor, while this radio scans or searches: a compact line for each of the four seats, under the level.
+           Fixed heights and column widths, so nothing moves as lines fill and empty. The frequency and channel above are
+           the lowest seat that holds one, as the receiver reports it. -->
+      <ItemsControl x:Name="SlotLines" ItemsSource="{Binding Slots}" IsVisible="{Binding ShowSlots}" Margin="0,6,0,0">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="2" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:SlotViewModel">
+            <Grid Classes="slot" Classes.empty="{Binding !Holding}" Classes.waiting="{Binding Waiting}" Height="18"
+                  ColumnDefinitions="44,64,5*,4*,36,Auto" ColumnSpacing="8" Background="Transparent">
+              <TextBlock Text="{Binding SeatLabel}" Foreground="{DynamicResource LcdDim}" FontSize="10" FontWeight="SemiBold"
+                         VerticalAlignment="Center" ToolTip.Tip="Where this line's sound is put between the speakers" />
+              <TextBlock Grid.Column="1" Text="—" Foreground="{DynamicResource LcdDim}" FontSize="12"
+                         VerticalAlignment="Center" IsVisible="{Binding !Holding}" />
+              <TextBlock Grid.Column="1" Text="{Binding FrequencyText}" Foreground="{DynamicResource LcdText}" FontSize="12"
+                         FontWeight="SemiBold" VerticalAlignment="Center" IsVisible="{Binding Holding}" />
+              <TextBlock Grid.Column="2" Text="{Binding Title}" Foreground="{DynamicResource LcdText}" FontSize="12"
+                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding Title}" />
+              <Panel Grid.Column="3">
+                <TextBlock Text="{Binding ModeText}" Foreground="{DynamicResource LcdText}" FontSize="11" FontWeight="SemiBold"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding DigitalText, Converter={x:Static StringConverters.IsNullOrEmpty}}" />
+                <TextBlock Classes="digital" Classes.enc="{Binding IsEncrypted}" Text="{Binding DigitalText}" FontSize="11"
+                           FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding DigitalText}"
+                           IsVisible="{Binding DigitalText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              </Panel>
+              <Border Grid.Column="4" CornerRadius="3" Height="15" Background="{DynamicResource LcdOpen}" IsVisible="{Binding SquelchOpen}">
+                <TextBlock Text="RX" Foreground="Black" FontSize="9" FontWeight="Bold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+              <Border Grid.Column="4" CornerRadius="3" Height="15" BorderBrush="{DynamicResource LcdDim}" BorderThickness="1"
+                      IsVisible="{Binding Waiting}"
+                      ToolTip.Tip="The signal has stopped: the channel is kept for the Multi Monitor hang time set in Settings, so that a reply is heard">
+                <TextBlock Text="WAIT" Foreground="{DynamicResource LcdText}" FontSize="8" FontWeight="Bold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+              <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                <Button Classes="seg small" Content="Skip" Command="{Binding SkipCommand}"
+                        ToolTip.Tip="Let go of this line's channel and pass it by for a while; the other lines carry on" />
+                <Button Classes="seg small" Content="Avoid" Command="{Binding AvoidCommand}"
+                        ToolTip.Tip="Let go of this line's channel and keep it out of the scan for the Avoid Timer set in Settings" />
+              </StackPanel>
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      </StackPanel>
     </Grid>
   </Border>
 </UserControl>

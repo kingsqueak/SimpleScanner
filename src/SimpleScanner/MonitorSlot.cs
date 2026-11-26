@@ -29,9 +29,12 @@ internal sealed class MonitorSlot : IDisposable
 
     // What it is doing.
     public bool SquelchOpen { get; set; }
-    public float Gain { get; set; }
+    // One block of its audio, as the channel and the digital voice leave it.
     public float[] Left { get; set; } = [];
     public float[] Right { get; set; } = [];
+    // Its sound on the way to the speakers: its seat, its fade, where it is between them now, and the
+    // samples the mixer keeps from one block to the next.
+    public SlotSound Sound { get; } = new();
 
     // Its part of a scan.
     public int ScanIndex { get; set; } = -1;

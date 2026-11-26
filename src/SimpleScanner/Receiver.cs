@@ -47,6 +47,8 @@ public sealed class Receiver : IReceiver
     private readonly double _rate;
     private readonly object _cfg = new(), _audioLock = new();
     private readonly MonitorSlot _slot;
+    private readonly SlotSound[] _sounds;       // every slot's sound, for the mixer
+    private readonly SlotMixer _mixer = new();
     private BlockingCollection<Block>? _queue;
     private Thread? _thread;
     private AudioOut? _audio;
@@ -56,7 +58,6 @@ public sealed class Receiver : IReceiver
     private bool _retunedUnsaid;            // on the radio's thread only
     private double _flushedSeconds;
     private const double FlushLongestSeconds = 0.8;
-    private float[] _frames = [];
     private static readonly float[] Silence = new float[2 * Cushion];
 
     // Scan state, all under _cfg.
@@ -83,6 +84,9 @@ public sealed class Receiver : IReceiver
         _playAudio = playAudio;
         _rate = sampleRate;
         _slot = new MonitorSlot(sampleRate);
+        // The one slot is always being received: it holds its channel alone, so it plays in the centre.
+        _slot.Sound.Take(0);
+        _sounds = [_slot.Sound];
         _source.Samples += OnSamples;
         _source.Failed += why =>
         {
@@ -654,8 +658,6 @@ public sealed class Receiver : IReceiver
 
     private void Process(Block block)
     {
-        int count;
-        bool open;
         lock (_cfg)
         {
             // After a retune, blocks already queued are from the old frequency.
@@ -685,12 +687,14 @@ public sealed class Receiver : IReceiver
                 return;
             }
 
-            count = ChannelLocked(_slot, block.Data.AsSpan(0, n), block.Data.AsSpan(n, n), seconds, out open);
+            ChannelLocked(_slot, block.Data.AsSpan(0, n), block.Data.AsSpan(n, n), seconds);
         }
-        if (count == 0) return;
 
-        var a = _frames.AsSpan(0, 2 * count);
-        FadeAndPan(_slot, open, a, count);
+        // The slots' sound, each through its fade to its place, as one block at the volume and pan.
+        var a = _mixer.Mix(_sounds, _volume, _pan);
+        int count = a.Length / 2;
+        if (count == 0) return;
+        bool open = _mixer.AnyOpen;         // with several slots: any of them
 
         AudioOutput?.Invoke(a);
         lock (_audioLock)
@@ -705,8 +709,8 @@ public sealed class Receiver : IReceiver
     }
 
     // One block of the radio's IQ through one slot: its channel, the level (and the meter), its squelch, its
-    // part of a scan and its digital voice. Returns the number of audio samples left in the slot's buffers.
-    private int ChannelLocked(MonitorSlot slot, ReadOnlySpan<float> i, ReadOnlySpan<float> q, double seconds, out bool open)
+    // part of a scan and its digital voice. The audio it gives, if any, is handed to the mixer.
+    private void ChannelLocked(MonitorSlot slot, ReadOnlySpan<float> i, ReadOnlySpan<float> q, double seconds)
     {
         int max = slot.Channel.MaxAudio(i.Length);
         if (slot.Left.Length < max)
@@ -714,48 +718,17 @@ public sealed class Receiver : IReceiver
             slot.Left = new float[max];
             slot.Right = new float[max];
         }
-        if (_frames.Length < 2 * max) _frames = new float[2 * max];
         int count = slot.Channel.Process(i, q, slot.Left, slot.Right);
         double level = slot.Channel.LevelDbfs - _source.GainDb + LevelOffsetDb;
         if (slot.Blocked) level = -140;
         // The meter falls slowly and rises at once, like a scanner's bar.
         double shown = Volatile.Read(ref _level);
         Volatile.Write(ref _level, level > shown ? level : shown + 0.1 * (level - shown));
-        open = slot.Squelch.Update(level, seconds, slot.Channel.Roughness, slot.Channel.RoughnessLimit) && !slot.Blocked;
+        bool open = slot.Squelch.Update(level, seconds, slot.Channel.Roughness, slot.Channel.RoughnessLimit) && !slot.Blocked;
         if (_scan != ScanState.Off) open = ScanStepLocked(slot, level, open, seconds);
         slot.SquelchOpen = open;
         // Is there P25, DMR, NXDN, D-STAR or System Fusion on the channel? If so its decoded speech takes the place of the analogue audio.
         if (count > 0) slot.DigitalVoice.Process(open, _scan is ScanState.Look or ScanState.Settle, slot.Channel.Mode, slot.Left, slot.Right, count);
-        return count;
-    }
-
-    // A slot's audio into stereo frames, at the volume and pan.
-    private void FadeAndPan(MonitorSlot slot, bool open, Span<float> a, int count)
-    {
-        // Fade in and out over a few milliseconds so the squelch does not click.
-        float target = open ? (float)(_volume * _volume) : 0f, g = slot.Gain;
-        const float step = 1f / 240;
-        float pan = (float)_pan;
-        if (pan == 0)
-        {
-            for (int k = 0; k < count; k++)
-            {
-                g += Math.Clamp(target - g, -step, step);
-                a[2 * k] = slot.Left[k] * g;
-                a[2 * k + 1] = slot.Right[k] * g;
-            }
-        }
-        else
-        {
-            var (gl, gr, mix) = PanGains(pan);
-            for (int k = 0; k < count; k++)
-            {
-                g += Math.Clamp(target - g, -step, step);
-                float l = slot.Left[k], r = slot.Right[k], both = mix * 0.5f * (l + r);
-                a[2 * k] = ((1 - mix) * l + both) * g * gl;
-                a[2 * k + 1] = ((1 - mix) * r + both) * g * gr;
-            }
-        }
-        slot.Gain = g;
+        slot.Sound.Give(slot.Left.AsSpan(0, count), slot.Right.AsSpan(0, count), open);
     }
 }

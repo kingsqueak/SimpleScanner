@@ -16,7 +16,19 @@ public sealed record ScanChannel(string Name, double FrequencyHz, Mode Mode, dou
 /// is open and what digital signal is on it. Plain values, so that it can be sent to another program.
 /// </summary>
 public sealed record SlotStatus(int Seat, bool Holding, ScanChannel? Channel, double FrequencyHz, Mode Mode, double BandwidthHz,
-    double LevelDb, bool SquelchOpen, string? Digital, bool Encrypted, bool NothingToHear);
+    double LevelDb, bool SquelchOpen, string? Digital, bool Encrypted, bool NothingToHear)
+{
+    /// <summary>A slot that holds nothing.</summary>
+    public static SlotStatus Empty(int seat) => new(seat, false, null, 0, Mode.Nfm, 0, -140, false, null, false, false);
+}
+
+/// <summary>
+/// The part of a receiver's state that its processing changes together, as one reading
+/// (<see cref="Receiver.ReadStatus"/>): the same values as the properties of those names.
+/// </summary>
+internal sealed record ReceiverReading(double FrequencyHz, Mode Mode, double BandwidthHz, double LevelDb, bool SquelchOpen,
+    bool Blocked, bool Stereo, IDigitalStatus? Digital, bool Scanning, bool ScanListening, ScanChannel? ScanChannel,
+    long ScanPasses, int ScanWindows, int AvoidedCount, bool MultiMonitor, IReadOnlyList<SlotStatus> Slots);
 
 /// <summary>
 /// The receiver: a radio, one channel taken out of its wide IQ stream, squelch and the speaker.
@@ -406,9 +418,14 @@ public sealed class Receiver : IReceiver
     {
         get
         {
-            long now = Environment.TickCount64;
-            lock (_cfg) return _avoided.Values.Count(until => until > now);
+            lock (_cfg) return AvoidedCountLocked();
         }
+    }
+
+    private int AvoidedCountLocked()
+    {
+        long now = Environment.TickCount64;
+        return _avoided.Values.Count(until => until > now);
     }
     public bool Scanning => _scan != ScanState.Off;
     /// <summary>The scan is stopped on an active channel; in Multi Monitor, a slot holds one.</summary>
@@ -435,14 +452,16 @@ public sealed class Receiver : IReceiver
     {
         get
         {
-            lock (_cfg)
-            {
-                if (_scan != ScanState.Stay) return null;
-                var slot = Main;
-                if (_multi && slot.State != SlotState.Listen) return null;
-                return slot.ScanIndex < 0 || slot.ScanIndex >= _scanList.Count ? null : _scanList[slot.ScanIndex];
-            }
+            lock (_cfg) return ScanChannelLocked();
         }
+    }
+
+    private ScanChannel? ScanChannelLocked()
+    {
+        if (_scan != ScanState.Stay) return null;
+        var slot = Main;
+        if (_multi && slot.State != SlotState.Listen) return null;
+        return slot.ScanIndex < 0 || slot.ScanIndex >= _scanList.Count ? null : _scanList[slot.ScanIndex];
     }
 
     /// <summary>
@@ -521,28 +540,48 @@ public sealed class Receiver : IReceiver
     {
         get
         {
-            var list = new SlotStatus[SlotMixer.Seats];
-            lock (_cfg)
+            lock (_cfg) return SlotsLocked();
+        }
+    }
+
+    private SlotStatus[] SlotsLocked()
+    {
+        var list = new SlotStatus[SlotMixer.Seats];
+        var slots = _slots;
+        bool multi = _multi && _scan != ScanState.Off;
+        for (int k = 0; k < list.Length; k++)
+        {
+            var s = k < slots.Length ? slots[k] : null;
+            if (s is null || (multi ? s.State != SlotState.Listen : k != 0))
             {
-                var slots = _slots;
-                bool multi = _multi && _scan != ScanState.Off;
-                for (int k = 0; k < list.Length; k++)
-                {
-                    var s = k < slots.Length ? slots[k] : null;
-                    if (s is null || (multi ? s.State != SlotState.Listen : k != 0))
-                    {
-                        list[k] = new SlotStatus(k, false, null, 0, Mode.Nfm, 0, -140, false, null, false, false);
-                        continue;
-                    }
-                    var channel = _scan == ScanState.Stay && s.State != SlotState.Free && s.ScanIndex >= 0 && s.ScanIndex < _scanList.Count
-                        ? _scanList[s.ScanIndex] : null;
-                    var digital = s.DigitalVoice.Status;
-                    list[k] = new SlotStatus(k, true, channel, s.FrequencyHz, s.Channel.Mode, s.Channel.BandwidthHz,
-                        multi ? s.Level : Volatile.Read(ref _level), s.SquelchOpen, digital?.ToString(),
-                        digital?.Encrypted ?? false, digital?.NothingToHear ?? false);
-                }
+                list[k] = SlotStatus.Empty(k);
+                continue;
             }
-            return list;
+            var channel = _scan == ScanState.Stay && s.State != SlotState.Free && s.ScanIndex >= 0 && s.ScanIndex < _scanList.Count
+                ? _scanList[s.ScanIndex] : null;
+            var digital = s.DigitalVoice.Status;
+            list[k] = new SlotStatus(k, true, channel, s.FrequencyHz, s.Channel.Mode, s.Channel.BandwidthHz,
+                multi ? s.Level : Volatile.Read(ref _level), s.SquelchOpen, digital?.ToString(),
+                digital?.Encrypted ?? false, digital?.NothingToHear ?? false);
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// What the DSP thread changes together, read at one moment: a report made of these never says, say, that
+    /// the scan is listening while the squelch is still shut. Takes the lock once, for no more than the reading
+    /// (the digital status is passed on as it is, to be put into words by the caller). The rest of the
+    /// receiver's state is settings, read on their own.
+    /// </summary>
+    internal ReceiverReading ReadStatus()
+    {
+        lock (_cfg)
+        {
+            var main = Main;
+            return new ReceiverReading(main.FrequencyHz, main.Channel.Mode, main.Channel.BandwidthHz, Volatile.Read(ref _level),
+                SquelchOpen, _slots[0].Blocked, main.Channel.Stereo, main.DigitalVoice.Status,
+                _scan != ScanState.Off, ScanListening, ScanChannelLocked(), Interlocked.Read(ref _passes), _plan.Count,
+                AvoidedCountLocked(), _multi, SlotsLocked());
         }
     }
 

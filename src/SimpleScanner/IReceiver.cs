@@ -57,6 +57,17 @@ public interface IReceiver : IDisposable
     ScanChannel? AvoidChannel();
     void ClearAvoided();
 
+    /// <summary>Multi Monitor: a scan holds up to four active channels of a window at once, each in a slot of its own.</summary>
+    bool MultiMonitor { get; set; }
+    /// <summary>Multi Monitor: how long a slot keeps its channel after the signal has dropped.</summary>
+    double MultiHangSeconds { get; set; }
+    /// <summary>The four slots, always four entries: in a Multi Monitor scan each that holds a channel; otherwise the first is the one channel.</summary>
+    IReadOnlyList<SlotStatus> Slots { get; }
+    /// <summary>Let go the channel this slot (0 to 3) holds and pass it by for a while; the other slots carry on.</summary>
+    void SkipSlot(int slot);
+    /// <summary>Let go the channel this slot (0 to 3) holds and avoid it; the channel avoided, or null if the slot held none.</summary>
+    ScanChannel? AvoidSlot(int slot);
+
     /// <summary>Blocks of samples thrown away because the processing had fallen behind (since the start).</summary>
     long DroppedBlocks { get; }
 }

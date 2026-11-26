@@ -67,7 +67,7 @@ internal sealed class ReceiverHost
 
     private void Handle(WireMessage m)
     {
-        bool answered = m.Op is "start" or "stop" or "avoid";
+        bool answered = m.Op is "start" or "stop" or "avoid" or "avoidSlot";
         try
         {
             JsonElement? result = null;
@@ -84,6 +84,8 @@ internal sealed class ReceiverHost
                 case "startScan": _rx.StartScan(m.Arg!.Value.Deserialize<List<ScanChannel>>(WireMessage.Json)!); break;
                 case "stopScan": _rx.StopScan(); break;
                 case "skip": _rx.SkipChannel(); break;
+                case "skipSlot": _rx.SkipSlot(m.Arg!.Value.GetInt32()); break;
+                case "avoidSlot": result = JsonSerializer.SerializeToElement(_rx.AvoidSlot(m.Arg!.Value.GetInt32()), WireMessage.Json); break;
                 case "clearAvoided": _rx.ClearAvoided(); break;
                 case "simulateStall":            // for testing the hand-over to a new helper
                     if (_rx.Source is Radio.SdrPlay.SdrPlaySource sdr) sdr.SimulateStall = true;
@@ -152,23 +154,29 @@ internal sealed class ReceiverHost
     internal static ReceiverStatus Snapshot(IReceiver rx, long seq)
     {
         var src = rx.Source;
-        var digital = rx.Digital;
         var radio = src.Radio;
+        // What the processing changes together is one reading, taken under the receiver's lock; read one by one, a
+        // report could say the scan is listening with the squelch still shut. Another receiver is read property by property.
+        var now = rx is Receiver real ? real.ReadStatus()
+            : new ReceiverReading(rx.FrequencyHz, rx.Mode, rx.BandwidthHz, rx.LevelDb, rx.SquelchOpen, rx.Blocked, rx.Stereo,
+                rx.Digital, rx.Scanning, rx.ScanListening, rx.ScanChannel, rx.ScanPasses, rx.ScanWindows, rx.AvoidedCount,
+                rx.MultiMonitor, rx.Slots);
+        var digital = now.Digital;
         return new ReceiverStatus
         {
             Seq = seq,
             IsRunning = rx.IsRunning,
-            FrequencyHz = rx.FrequencyHz,
-            Mode = rx.Mode,
-            BandwidthHz = rx.BandwidthHz,
-            LevelDb = rx.LevelDb,
+            FrequencyHz = now.FrequencyHz,
+            Mode = now.Mode,
+            BandwidthHz = now.BandwidthHz,
+            LevelDb = now.LevelDb,
             LevelOffsetDb = rx.LevelOffsetDb,
-            SquelchOpen = rx.SquelchOpen,
-            Blocked = rx.Blocked,
+            SquelchOpen = now.SquelchOpen,
+            Blocked = now.Blocked,
             SquelchDb = rx.SquelchDb,
             SquelchEnabled = rx.SquelchEnabled,
             AutoSquelch = rx.AutoSquelch,
-            Stereo = rx.Stereo,
+            Stereo = now.Stereo,
             StereoEnabled = rx.StereoEnabled,
             DigitalText = digital?.ToString(),
             DigitalEncrypted = digital is { Encrypted: true },
@@ -180,12 +188,15 @@ internal sealed class ReceiverHost
             ScanSkipSeconds = rx.ScanSkipSeconds,
             ResumeSeconds = rx.ResumeSeconds,
             AvoidTime = rx.AvoidTime,
-            AvoidedCount = rx.AvoidedCount,
-            Scanning = rx.Scanning,
-            ScanListening = rx.ScanListening,
-            ScanPasses = rx.ScanPasses,
-            ScanWindows = rx.ScanWindows,
-            ScanChannel = rx.ScanChannel,
+            AvoidedCount = now.AvoidedCount,
+            Scanning = now.Scanning,
+            ScanListening = now.ScanListening,
+            ScanPasses = now.ScanPasses,
+            ScanWindows = now.ScanWindows,
+            ScanChannel = now.ScanChannel,
+            MultiMonitor = now.MultiMonitor,
+            MultiHangSeconds = rx.MultiHangSeconds,
+            Slots = [.. now.Slots],
             DroppedBlocks = rx.DroppedBlocks,
             Description = src.Description,
             RadioModel = radio?.Model,

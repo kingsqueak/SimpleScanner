@@ -187,7 +187,7 @@ public sealed class RemoteReceiver : IReceiver
         lock (_gate)
         {
             wasRunning = _s.IsRunning;
-            Volatile.Write(ref _s, _s with { IsRunning = false, Scanning = false, ScanListening = false, ScanChannel = null, SquelchOpen = false, LevelDb = -140, DigitalText = null });
+            Volatile.Write(ref _s, _s with { IsRunning = false, Scanning = false, ScanListening = false, ScanChannel = null, SquelchOpen = false, LevelDb = -140, DigitalText = null, Slots = ReceiverStatus.EmptySlots });
         }
         foreach (var waiter in _waiting.Values) waiter.TrySetException(new InvalidOperationException("The receiver's helper program stopped."));
         if (!_disposed && wasRunning) Failed?.Invoke("The receiver's helper program stopped.");
@@ -229,7 +229,7 @@ public sealed class RemoteReceiver : IReceiver
     }
 
     // Send and wait for the helper's answer. Its failure comes back as the exception a real receiver would throw.
-    private WireMessage Ask(string op, int milliseconds)
+    private WireMessage Ask(string op, int milliseconds, object? arg = null, Type? argType = null)
     {
         if (_gone) throw new InvalidOperationException("The receiver's helper program is not running.");
         var waiter = new TaskCompletionSource<WireMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -238,7 +238,7 @@ public sealed class RemoteReceiver : IReceiver
         {
             id = _id + 1;
             _waiting[id] = waiter;
-            Send(op, change: s => s);        // counted as a change: reports from before it are stale
+            Send(op, arg: arg, argType: argType, change: s => s);    // counted as a change: reports from before it are stale
         }
         if (!waiter.Task.Wait(milliseconds))
         {
@@ -388,14 +388,66 @@ public sealed class RemoteReceiver : IReceiver
     public void StartScan(IReadOnlyList<ScanChannel> channels)
     {
         lock (_gate) _scan = channels.Count > 0 ? channels : null;
+        // The receiver leaves out the channels it refuses to receive: with none left it does not scan, and stays on its channel.
+        bool any = channels.Any(c => !BandPlan.IsBlocked(c.FrequencyHz, c.BandwidthHz));
         Send("startScan", arg: channels, argType: typeof(IReadOnlyList<ScanChannel>),
-            change: s => s with { Scanning = channels.Count > 0 && s.IsRunning, ScanChannel = null, ScanListening = false, SquelchEnabled = true });
+            change: s => s with
+            {
+                Scanning = channels.Count > 0 && s.IsRunning, ScanChannel = null, ScanListening = false, SquelchEnabled = true,
+                Slots = OneChannel(s, none: s.MultiMonitor && any && s.IsRunning),
+            });
     }
 
     public void StopScan()
     {
         lock (_gate) _scan = null;
-        Send("stopScan", change: s => s with { Scanning = false, ScanListening = false, ScanChannel = null });
+        Send("stopScan", change: s => s with { Scanning = false, ScanListening = false, ScanChannel = null, Slots = OneChannel(s) });
+    }
+
+    // The slots as a receiver has them on one channel, which is where it was (the lowest slot that held one): the
+    // first holds it, the rest nothing. With none, no slot holds anything (a Multi Monitor scan just started).
+    private static SlotStatus[] OneChannel(ReceiverStatus s, bool none = false)
+    {
+        var list = (SlotStatus[])ReceiverStatus.EmptySlots.Clone();
+        if (!none)
+            list[0] = new SlotStatus(0, true, null, s.FrequencyHz, s.Mode, s.BandwidthHz, s.LevelDb, s.SquelchOpen,
+                s.DigitalText, s.DigitalEncrypted, s.DigitalNothingToHear);
+        return list;
+    }
+
+    public bool MultiMonitor
+    {
+        get => Status.MultiMonitor;
+        set => Set(nameof(MultiMonitor), value, s => s with { MultiMonitor = value });
+    }
+
+    public double MultiHangSeconds
+    {
+        get => Status.MultiHangSeconds;
+        set => Set(nameof(MultiHangSeconds), value, s => s with { MultiHangSeconds = value });
+    }
+
+    /// <summary>The last report's four slots (four empty ones before any report, or for a report without them).</summary>
+    public IReadOnlyList<SlotStatus> Slots
+    {
+        get
+        {
+            var slots = Status.Slots;
+            if (slots is { Length: SlotMixer.Seats } && Array.TrueForAll(slots, x => x is not null)) return slots;
+            var list = (SlotStatus[])ReceiverStatus.EmptySlots.Clone();
+            for (int k = 0; k < list.Length && slots is not null && k < slots.Length; k++)
+                if (slots[k] is { } slot) list[k] = slot with { Seat = k };
+            return list;
+        }
+    }
+
+    public void SkipSlot(int slot) => Send("skipSlot", arg: slot, argType: typeof(int));
+
+    public ScanChannel? AvoidSlot(int slot)
+    {
+        if (_gone) return null;
+        var reply = Ask("avoidSlot", 3000, slot, typeof(int));
+        return reply.Arg is { ValueKind: not JsonValueKind.Null } a ? a.Deserialize<ScanChannel>(WireMessage.Json) : null;
     }
     public void SkipChannel() => Send("skip");
 

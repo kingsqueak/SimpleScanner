@@ -7,11 +7,15 @@ namespace SimpleScanner.Remote;
 // What passes between the window and a receiver in a helper program: one line of JSON for each message,
 // down the helper's standard input and back up its standard output.
 //
-// To the helper:   start, stop, avoid (each answered by a "reply" with the same Id)
-//                  set (Name is a property of the receiver, or "Source.<property>" of its radio; Arg the value)
-//                  setMode, startScan, stopScan, skip, clearAvoided, simulateStall (testing) (not answered)
+// To the helper:   start, stop, avoid, avoidSlot (each answered by a "reply" with the same Id; avoid's and
+//                  avoidSlot's Arg is the channel avoided, or null; avoidSlot's Arg in the message is the slot, 0 to 3)
+//                  set (Name is a property of the receiver, or "Source.<property>" of its radio; Arg the value:
+//                  MultiMonitor and MultiHangSeconds among them)
+//                  setMode, startScan, stopScan, skip, skipSlot (Arg the slot, 0 to 3), clearAvoided,
+//                  simulateStall (testing) (not answered)
 // From the helper: reply (Error is the reason when it failed; Arg any result; Status a report made after the work)
-//                  status (twenty times a second: everything the window shows)
+//                  status (twenty times a second: everything the window shows, Multi Monitor's four slots among it;
+//                  what the receiver's processing changes together is one reading, see Receiver.ReadStatus)
 //                  failed (the radio stopped by itself; Error says why)
 //                  restart (the radio is stopped and wants a new helper: this one is going; Error says why)
 internal sealed class WireMessage
@@ -65,6 +69,10 @@ internal sealed record ReceiverStatus
     public long ScanPasses { get; init; }
     public int ScanWindows { get; init; }
     public ScanChannel? ScanChannel { get; init; }
+    public bool MultiMonitor { get; init; }
+    public double MultiHangSeconds { get; init; }
+    /// <summary>Multi Monitor's slots, four of them (see <see cref="IReceiver.Slots"/>); four empty ones until a report says otherwise.</summary>
+    public SlotStatus[] Slots { get; init; } = EmptySlots;
     public long DroppedBlocks { get; init; }
 
     // The radio
@@ -88,4 +96,6 @@ internal sealed record ReceiverStatus
     public double GainDb { get; init; }
     public bool Overloaded { get; init; }
     public double LastRetuneMs { get; init; }
+
+    public static readonly SlotStatus[] EmptySlots = [.. Enumerable.Range(0, SlotMixer.Seats).Select(SlotStatus.Empty)];
 }

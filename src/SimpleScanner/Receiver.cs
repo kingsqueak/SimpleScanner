@@ -11,6 +11,14 @@ namespace SimpleScanner;
 public sealed record ScanChannel(string Name, double FrequencyHz, Mode Mode, double BandwidthHz);
 
 /// <summary>
+/// One of the four slots of Multi Monitor, as a display shows it: its seat (0 to 3: 33% left, 33% right,
+/// hard left, hard right), whether it holds a channel, and if so which, how strong, whether its squelch
+/// is open and what digital signal is on it. Plain values, so that it can be sent to another program.
+/// </summary>
+public sealed record SlotStatus(int Seat, bool Holding, ScanChannel? Channel, double FrequencyHz, Mode Mode, double BandwidthHz,
+    double LevelDb, bool SquelchOpen, string? Digital, bool Encrypted, bool NothingToHear);
+
+/// <summary>
 /// The receiver: a radio, one channel taken out of its wide IQ stream, squelch and the speaker.
 ///
 /// The radio captures several MHz at once. The wanted channel can be anywhere in that span
@@ -28,6 +36,13 @@ public sealed record ScanChannel(string Name, double FrequencyHz, Mode Mode, dou
 /// System Fusion (C4FM) decoders. When one finds its kind of signal on the channel, the analogue audio (which would be a rasp) gives way to
 /// the decoded speech, and <see cref="Digital"/> says what the signal is. Encrypted calls are
 /// reported and stay silent.
+///
+/// Multi Monitor (<see cref="MultiMonitor"/>): a scan that finds several active channels in a window
+/// holds up to four of them at once, each in a slot of its own with its own filter, squelch and digital
+/// voice, and plays them together, each in its own place between the speakers. While any slot holds a
+/// channel the radio stays on the window and the window is looked over again a few times a second, so
+/// that a new signal takes a free slot. A slot keeps its channel for <see cref="MultiHangSeconds"/> after
+/// the signal has gone, to catch the reply. The scan moves on when every slot is free.
 /// </summary>
 public sealed class Receiver : IReceiver
 {
@@ -39,16 +54,23 @@ public sealed class Receiver : IReceiver
     private const double SurveySettleSeconds = 0.003;
     private const int SurveyFrames = 8;
 
-    private enum ScanState { Off, Survey, Settle, Look, Listen }
+    private const double ResurveySeconds = 0.2;      // Multi Monitor: how often a window with a slot held is looked over again
+
+    // What the scan is doing with the radio: looking over a window, or staying on it while one slot or more
+    // tries or holds a channel of it. What each slot is doing is the slot's own (SlotState).
+    private enum ScanState { Off, Survey, Stay }
     private readonly record struct Block(float[] Data, int Count, bool Retuned);
 
     private readonly IIqSource _source;
     private readonly bool _playAudio;
     private readonly double _rate;
     private readonly object _cfg = new(), _audioLock = new();
-    private readonly MonitorSlot _slot;
-    private readonly SlotSound[] _sounds;       // every slot's sound, for the mixer
+    // One slot, or four once Multi Monitor has been switched on. The first is the channel being received when
+    // no Multi Monitor scan is going. The array is replaced, and its slots change places, only under _cfg.
+    private volatile MonitorSlot[] _slots;
+    private SlotSound[] _mixSounds = [];        // the slots' sounds for the mixer, as they stood in this block: the DSP thread's
     private readonly SlotMixer _mixer = new();
+    private volatile bool _multi, _disposed;
     private BlockingCollection<Block>? _queue;
     private Thread? _thread;
     private AudioOut? _audio;
@@ -72,6 +94,10 @@ public sealed class Receiver : IReceiver
     private ScanState _scan;
     private int _window, _surveySkip, _fftFill, _surveyCount;
     private double _scanClock;
+    // This stay in the window: a slot has listened and for how long since, the window is being left (every
+    // slot let go, waiting for them to fade), and (Multi Monitor) when it is looked over next.
+    private bool _stayed, _leaving, _resurveying;
+    private double _stayTime, _resurveyIn;
     private long _passes;
     private readonly Fft _fft;
     private readonly float[] _fftWindow, _fftRe, _fftIm, _workRe, _workIm;
@@ -83,10 +109,10 @@ public sealed class Receiver : IReceiver
         _source = source;
         _playAudio = playAudio;
         _rate = sampleRate;
-        _slot = new MonitorSlot(sampleRate);
-        // The one slot is always being received: it holds its channel alone, so it plays in the centre.
-        _slot.Sound.Take(0);
-        _sounds = [_slot.Sound];
+        var first = new MonitorSlot(sampleRate);
+        // Outside a Multi Monitor scan the first slot is always being received: it holds its channel alone, so it plays in the centre.
+        first.Sound.Take(0);
+        _slots = [first];
         _source.Samples += OnSamples;
         _source.Failed += why =>
         {
@@ -124,9 +150,31 @@ public sealed class Receiver : IReceiver
     public double LevelDb => Volatile.Read(ref _level);
     /// <summary>Added to the level reading, to line it up with a signal generator.</summary>
     public double LevelOffsetDb { get; set; }
-    public bool SquelchOpen => _slot.SquelchOpen;
+    /// <summary>The squelch is open; with several slots, that of any of them.</summary>
+    public bool SquelchOpen
+    {
+        get
+        {
+            foreach (var s in _slots)
+                if (s.SquelchOpen) return true;
+            return false;
+        }
+    }
     /// <summary>True on a frequency the scanner refuses to receive (cellular telephone bands).</summary>
-    public bool Blocked => _slot.Blocked;
+    public bool Blocked => _slots[0].Blocked;
+
+    // The slot the receiver speaks for: in a Multi Monitor scan the lowest one holding a channel, otherwise the first.
+    private MonitorSlot Main
+    {
+        get
+        {
+            var slots = _slots;
+            if (_multi && _scan == ScanState.Stay)
+                foreach (var s in slots)
+                    if (s.State == SlotState.Listen) return s;
+            return slots[0];
+        }
+    }
     public int AudioUnderruns => _audio?.Underruns ?? 0;
 
     /// <summary>The sound output device by name; null or empty is the system's default. May be changed while running.</summary>
@@ -175,17 +223,25 @@ public sealed class Receiver : IReceiver
         set => _pan = double.IsFinite(value) ? Math.Clamp(value, -1, 1) : 0;
     }
 
-    // The squelch and stereo settings are the receiver's: these setters are where they are passed on to the slot.
+    // The squelch and stereo settings are the receiver's: these setters are where they are passed on to every slot.
     public double SquelchDb
     {
-        get => _slot.Squelch.ThresholdDb;
-        set => _slot.Squelch.ThresholdDb = value;
+        get => _slots[0].Squelch.ThresholdDb;
+        set
+        {
+            lock (_cfg)
+                foreach (var s in _slots) s.Squelch.ThresholdDb = value;
+        }
     }
 
     public bool SquelchEnabled
     {
-        get => _slot.Squelch.Enabled;
-        set => _slot.Squelch.Enabled = value;
+        get => _slots[0].Squelch.Enabled;
+        set
+        {
+            lock (_cfg)
+                foreach (var s in _slots) s.Squelch.Enabled = value;
+        }
     }
 
     /// <summary>
@@ -194,43 +250,53 @@ public sealed class Receiver : IReceiver
     /// </summary>
     public bool AutoSquelch
     {
-        get => _slot.Squelch.Auto;
-        set => _slot.Squelch.Auto = value;
+        get => _slots[0].Squelch.Auto;
+        set
+        {
+            lock (_cfg)
+                foreach (var s in _slots) s.Squelch.Auto = value;
+        }
     }
 
     /// <summary>What the auto squelch goes by, and the most it lets through: see <see cref="ChannelReceiver.Roughness"/>.</summary>
-    public double Roughness => _slot.Channel.Roughness;
-    public double RoughnessLimit => _slot.Channel.RoughnessLimit;
+    public double Roughness => Main.Channel.Roughness;
+    public double RoughnessLimit => Main.Channel.RoughnessLimit;
 
     /// <summary>A broadcast FM station is being received in stereo.</summary>
-    public bool Stereo => _slot.Channel.Stereo;
+    public bool Stereo => Main.Channel.Stereo;
 
     public bool StereoEnabled
     {
-        get => _slot.Channel.StereoEnabled;
-        set => _slot.Channel.StereoEnabled = value;
+        get => _slots[0].Channel.StereoEnabled;
+        set
+        {
+            lock (_cfg)
+                foreach (var s in _slots) s.Channel.StereoEnabled = value;
+        }
     }
 
-    public Mode Mode => _slot.Channel.Mode;
-    public double BandwidthHz => _slot.Channel.BandwidthHz;
+    public Mode Mode => Main.Channel.Mode;
+    public double BandwidthHz => Main.Channel.BandwidthHz;
 
     /// <summary>The digital signal on the channel now (P25, DMR, NXDN, D-STAR or System Fusion), or null for none.</summary>
-    public IDigitalStatus? Digital => _slot.DigitalVoice.Status;
+    public IDigitalStatus? Digital => Main.DigitalVoice.Status;
     /// <summary>False when the digital voice library could not be loaded.</summary>
-    public bool DigitalAvailable => _slot.DigitalVoice.DigitalAvailable;
+    public bool DigitalAvailable => _slots[0].DigitalVoice.DigitalAvailable;
     /// <summary>False when the AMBE+2 speech decoder is not installed: DMR calls are shown, not heard.</summary>
-    public bool DmrVoiceAvailable => _slot.DigitalVoice.DmrVoiceAvailable;
+    public bool DmrVoiceAvailable => _slots[0].DigitalVoice.DmrVoiceAvailable;
 
     /// <summary>Choosing a mode by hand ends a scan.</summary>
     public void SetMode(Mode mode, double bandwidthHz)
     {
         lock (_cfg)
         {
-            if (mode == _slot.Channel.Mode && bandwidthHz == _slot.Channel.BandwidthHz) return;
-            _scan = ScanState.Off;
-            ConfigureLocked(_slot, mode, bandwidthHz);
+            var main = Main;
+            if (mode == main.Channel.Mode && bandwidthHz == main.Channel.BandwidthHz) return;
+            EndScanLocked();
+            var slot = _slots[0];
+            ConfigureLocked(slot, mode, bandwidthHz);
             // A wider filter may no longer fit where the channel sat in the span.
-            if (IsRunning && !ScanPlan.Fits(_slot.OffsetHz, bandwidthHz, _source.UsableBandwidthHz)) TuneLocked(_slot.FrequencyHz);
+            if (IsRunning && !ScanPlan.Fits(slot.OffsetHz, bandwidthHz, _source.UsableBandwidthHz)) TuneLocked(slot.FrequencyHz);
         }
     }
 
@@ -246,42 +312,50 @@ public sealed class Receiver : IReceiver
     /// <summary>Tuning by hand ends a scan.</summary>
     public double FrequencyHz
     {
-        get => _slot.FrequencyHz;
+        get => Main.FrequencyHz;
         set
         {
             lock (_cfg)
             {
-                if (value == _slot.FrequencyHz) return;
-                _scan = ScanState.Off;
+                if (value == Main.FrequencyHz) return;
+                EndScanLocked();
                 TuneLocked(value);
             }
         }
     }
 
+    // Puts the one channel (the first slot) on a frequency. Not for use during a scan.
     private void TuneLocked(double hz)
     {
-        _slot.FrequencyHz = hz;
-        _slot.Blocked = BandPlan.IsBlocked(hz, _slot.Channel.BandwidthHz);
-        _slot.ResetSquelch();
-        _slot.ResetDigital();
+        var slot = _slots[0];
+        slot.FrequencyHz = hz;
+        slot.Blocked = BandPlan.IsBlocked(hz, slot.Channel.BandwidthHz);
+        slot.ResetSquelch();
+        slot.ResetDigital();
         double offset = hz - _source.CenterHz;
-        if (IsRunning && ScanPlan.Fits(offset, _slot.Channel.BandwidthHz, _source.UsableBandwidthHz))
+        if (IsRunning && ScanPlan.Fits(offset, slot.Channel.BandwidthHz, _source.UsableBandwidthHz))
         {
-            _slot.OffsetHz = offset;
+            slot.OffsetHz = offset;
         }
         else
         {
-            _slot.OffsetHz = ScanPlan.SingleOffsetFor(hz);
+            slot.OffsetHz = ScanPlan.SingleOffsetFor(hz);
             if (IsRunning) _flushUntilRetuned = true;
-            _source.Tune(hz - _slot.OffsetHz);
+            _source.Tune(hz - slot.OffsetHz);
+            CutLeavingLocked();
         }
-        _slot.Channel.SetOffset(_slot.OffsetHz);
+        slot.Channel.SetOffset(slot.OffsetHz);
     }
 
     // ---- scanning -------------------------------------------------------------------------
 
     /// <summary>How long a channel must stay quiet before the scan moves on from it.</summary>
     public double ScanHangSeconds { get; set; } = 2;
+    /// <summary>
+    /// In Multi Monitor, in place of <see cref="ScanHangSeconds"/>: how long a slot keeps its channel after the
+    /// signal has dropped, so that the reply is caught.
+    /// </summary>
+    public double MultiHangSeconds { get; set; } = 8;
     /// <summary>How long a scan passes by a digital channel it left because there was nothing to hear on it.</summary>
     public double SilentDigitalSkipSeconds { get; set; } = 60;
     /// <summary>The same after a digital call was heard there and ended: short, so the rest of the conversation is caught.</summary>
@@ -292,7 +366,8 @@ public sealed class Receiver : IReceiver
     public double ScanSkipSeconds { get; set; } = 10;
     /// <summary>
     /// The longest a scan stays on one channel before it carries on, signal or no signal; null is
-    /// no limit, and it stays until the signal drops.
+    /// no limit, and it stays until the signal drops. In Multi Monitor it is the longest stay in one
+    /// window, counted from the first slot that holds a channel there.
     /// </summary>
     public double? ResumeSeconds { get; set; }
     /// <summary>How long a channel left on the resume timer is passed by, so that the rest get a turn.</summary>
@@ -309,21 +384,136 @@ public sealed class Receiver : IReceiver
         }
     }
     public bool Scanning => _scan != ScanState.Off;
-    /// <summary>The scan is stopped on an active channel.</summary>
-    public bool ScanListening => _scan == ScanState.Listen;
+    /// <summary>The scan is stopped on an active channel; in Multi Monitor, a slot holds one.</summary>
+    public bool ScanListening
+    {
+        get
+        {
+            if (_scan != ScanState.Stay) return false;
+            foreach (var s in _slots)
+                if (s.State == SlotState.Listen) return true;
+            return false;
+        }
+    }
     /// <summary>Times the scan has been through its whole list.</summary>
     public long ScanPasses => Interlocked.Read(ref _passes);
     /// <summary>Tunings of the radio one pass of the scan takes.</summary>
     public int ScanWindows => _plan.Count;
 
-    /// <summary>The channel the scan is listening to or trying, or null when it is between channels or off.</summary>
+    /// <summary>
+    /// The channel the scan is listening to or trying, or null when it is between channels or off. In Multi
+    /// Monitor: the channel of the lowest slot that holds one.
+    /// </summary>
     public ScanChannel? ScanChannel
     {
         get
         {
             lock (_cfg)
-                return _scan is ScanState.Off or ScanState.Survey || _slot.ScanIndex < 0 || _slot.ScanIndex >= _scanList.Count
-                    ? null : _scanList[_slot.ScanIndex];
+            {
+                if (_scan != ScanState.Stay) return null;
+                var slot = Main;
+                if (_multi && slot.State != SlotState.Listen) return null;
+                return slot.ScanIndex < 0 || slot.ScanIndex >= _scanList.Count ? null : _scanList[slot.ScanIndex];
+            }
+        }
+    }
+
+    /// <summary>
+    /// A scan holds up to four active channels of a window at once, each in a slot of its own, and plays them
+    /// together: see <see cref="Slots"/>. Off, a scan stops on one channel at a time. May be changed at any
+    /// time, during a scan too. Outside a scan it does nothing.
+    /// </summary>
+    public bool MultiMonitor
+    {
+        get => _multi;
+        set
+        {
+            // The other three slots are made the first time the mode is switched on (each has its filters and
+            // five decoders), outside the lock: making them takes a moment.
+            MonitorSlot[]? made = null;
+            if (value && !_disposed && _slots.Length < SlotMixer.Seats)
+            {
+                made = new MonitorSlot[SlotMixer.Seats - 1];
+                for (int k = 0; k < made.Length; k++) made[k] = new MonitorSlot(_rate);
+            }
+            lock (_cfg)
+            {
+                if (made is not null && !_disposed && _slots.Length < SlotMixer.Seats)
+                {
+                    var first = _slots[0];
+                    foreach (var s in made)
+                    {
+                        s.Squelch.ThresholdDb = first.Squelch.ThresholdDb;
+                        s.Squelch.Enabled = first.Squelch.Enabled;
+                        s.Squelch.Auto = first.Squelch.Auto;
+                        s.Channel.StereoEnabled = first.Channel.StereoEnabled;
+                    }
+                    _slots = [first, .. made];
+                    made = null;
+                }
+                if (_disposed || _slots.Length < SlotMixer.Seats) value = false;       // disposed of: there is nothing to switch on
+                if (value != _multi)
+                {
+                    _multi = value;
+                    var slots = _slots;
+                    if (value)
+                    {
+                        // A scan stopped on a channel carries on with it in the first slot; the rest are free for others.
+                        if (_scan == ScanState.Stay)
+                        {
+                            if (slots[0].State != SlotState.Listen) slots[0].Sound.Leave();
+                            _resurveyIn = ResurveySeconds;
+                            _resurveying = _leaving = false;
+                        }
+                    }
+                    else
+                    {
+                        // Back to one channel at a time, which is the first slot's: it keeps what it has, the others
+                        // are let go. If it has nothing, the window is looked over afresh. (A first slot that was
+                        // let go a moment ago and is still fading out finishes its fade meanwhile.)
+                        for (int k = 1; k < slots.Length; k++) ReleaseLocked(slots[k]);
+                        if (slots[0].State != SlotState.Leaving) TakeCentreLocked(slots[0]);
+                        _resurveying = _leaving = false;
+                        if (_scan == ScanState.Stay && slots[0].State is SlotState.Free or SlotState.Leaving) SurveyAgainLocked();
+                    }
+                }
+            }
+            // Made for nothing (another thread was first, or the receiver has been disposed of): never used, so free to go.
+            if (made is not null)
+                foreach (var s in made) s.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The four slots as they are now, in one reading. In a Multi Monitor scan each slot that holds a channel
+    /// says which; otherwise the first is the one channel being received and the rest are empty.
+    /// </summary>
+    public IReadOnlyList<SlotStatus> Slots
+    {
+        get
+        {
+            var list = new SlotStatus[SlotMixer.Seats];
+            lock (_cfg)
+            {
+                var slots = _slots;
+                bool multi = _multi && _scan != ScanState.Off;
+                for (int k = 0; k < list.Length; k++)
+                {
+                    var s = k < slots.Length ? slots[k] : null;
+                    if (s is null || (multi ? s.State != SlotState.Listen : k != 0))
+                    {
+                        list[k] = new SlotStatus(k, false, null, 0, Mode.Nfm, 0, -140, false, null, false, false);
+                        continue;
+                    }
+                    var channel = _scan == ScanState.Stay && s.State != SlotState.Free && s.ScanIndex >= 0 && s.ScanIndex < _scanList.Count
+                        ? _scanList[s.ScanIndex] : null;
+                    var digital = s.DigitalVoice.Status;
+                    list[k] = new SlotStatus(k, true, channel, s.FrequencyHz, s.Channel.Mode, s.Channel.BandwidthHz,
+                        multi ? s.Level : Volatile.Read(ref _level), s.SquelchOpen, digital?.ToString(),
+                        digital?.Encrypted ?? false, digital?.NothingToHear ?? false);
+                }
+            }
+            return list;
         }
     }
 
@@ -335,7 +525,7 @@ public sealed class Receiver : IReceiver
     {
         lock (_cfg)
         {
-            _scan = ScanState.Off;
+            EndScanLocked();
             if (!IsRunning) return;
             _scanList = channels.Where(c => !BandPlan.IsBlocked(c.FrequencyHz, c.BandwidthHz)).OrderBy(c => c.FrequencyHz).ToList();
             if (_scanList.Count == 0) return;
@@ -353,39 +543,144 @@ public sealed class Receiver : IReceiver
         }
     }
 
-    /// <summary>Stop scanning and stay on the present channel.</summary>
+    /// <summary>
+    /// Stop scanning and stay on the present channel. In Multi Monitor that is the channel of the lowest slot
+    /// holding one; the others are let go.
+    /// </summary>
     public void StopScan()
     {
-        lock (_cfg) _scan = ScanState.Off;
+        lock (_cfg) EndScanLocked();
     }
 
-    /// <summary>Leave the channel the scan has stopped on, and pass it by for <see cref="ScanSkipSeconds"/>.</summary>
+    // The scan is over: the receiver is on one channel again, in the first slot and in the centre. That is the
+    // channel it was on, or in Multi Monitor the lowest slot's that holds one: that slot changes places with
+    // the first, so that its sound goes on unbroken. Every other slot is let go.
+    private void EndScanLocked()
+    {
+        _scan = ScanState.Off;
+        OneChannelLocked(fade: true);
+    }
+
+    private void OneChannelLocked(bool fade)
+    {
+        var slots = _slots;
+        if (_multi)
+            for (int k = 1; k < slots.Length; k++)
+            {
+                if (slots[0].State == SlotState.Listen) break;
+                if (slots[k].State == SlotState.Listen) (slots[0], slots[k]) = (slots[k], slots[0]);
+            }
+        for (int k = 1; k < slots.Length; k++)
+        {
+            if (fade) ReleaseLocked(slots[k]);
+            else FreeLocked(slots[k]);
+        }
+        slots[0].State = SlotState.Free;
+        slots[0].Quiet = false;
+        TakeCentreLocked(slots[0]);
+        _candidates.Clear();
+        _stayed = _leaving = _resurveying = false;
+    }
+
+    // The one channel being received holds the first seat, and being alone there it plays in the centre.
+    private static void TakeCentreLocked(MonitorSlot slot)
+    {
+        if (!slot.Sound.Holding || slot.Sound.Seat != 0) slot.Sound.Take(0);
+    }
+
+    /// <summary>
+    /// Leave the channel the scan has stopped on, and pass it by for <see cref="ScanSkipSeconds"/>. In Multi
+    /// Monitor: leave the window, and pass by every channel held in it.
+    /// </summary>
     public void SkipChannel()
     {
         lock (_cfg)
         {
-            if (_scan is ScanState.Off or ScanState.Survey) return;
-            if (_slot.ScanIndex >= 0) _skipUntil[_slot.ScanIndex] = _scanClock + ScanSkipSeconds;
-            NextCandidateLocked(_slot);
+            if (_scan != ScanState.Stay) return;
+            if (_multi)
+            {
+                foreach (var s in _slots)
+                    if (s.State is SlotState.Settle or SlotState.Look or SlotState.Listen && s.ScanIndex >= 0)
+                        _skipUntil[s.ScanIndex] = _scanClock + ScanSkipSeconds;
+                LeaveWindowLocked();
+                return;
+            }
+            var slot = _slots[0];
+            if (slot.ScanIndex >= 0) _skipUntil[slot.ScanIndex] = _scanClock + ScanSkipSeconds;
+            NextCandidateLocked(slot);
         }
     }
 
     /// <summary>
     /// Leave the channel the scan has stopped on, and keep it out of this scan and later ones
     /// for <see cref="AvoidTime"/>. Returns the channel avoided, or null if the scan was not on one.
+    /// In Multi Monitor it does nothing: a channel is avoided by its slot, with <see cref="AvoidSlot"/>.
     /// </summary>
     public ScanChannel? AvoidChannel()
     {
         lock (_cfg)
         {
-            if (_scan is ScanState.Off or ScanState.Survey || _slot.ScanIndex < 0) return null;
-            var ch = _scanList[_slot.ScanIndex];
-            long until = AvoidTime is { } t ? Environment.TickCount64 + (long)t.TotalMilliseconds : long.MaxValue;
-            _avoided[AvoidKey(ch.FrequencyHz)] = until;
-            _avoidUntil[_slot.ScanIndex] = until;
-            NextCandidateLocked(_slot);
+            if (_scan != ScanState.Stay || _multi) return null;
+            var slot = _slots[0];
+            if (slot.ScanIndex < 0) return null;
+            var ch = _scanList[slot.ScanIndex];
+            AvoidLocked(slot.ScanIndex);
+            NextCandidateLocked(slot);
             return ch;
         }
+    }
+
+    private void AvoidLocked(int index)
+    {
+        long until = AvoidTime is { } t ? Environment.TickCount64 + (long)t.TotalMilliseconds : long.MaxValue;
+        _avoided[AvoidKey(_scanList[index].FrequencyHz)] = until;
+        _avoidUntil[index] = until;
+    }
+
+    /// <summary>
+    /// Multi Monitor: let go the channel this slot (0 to 3) holds and pass it by for <see cref="ScanSkipSeconds"/>.
+    /// The other slots carry on. With the mode off the first slot is the one channel, and this is <see cref="SkipChannel"/>.
+    /// </summary>
+    public void SkipSlot(int slot)
+    {
+        lock (_cfg)
+        {
+            if (!_multi)
+            {
+                if (slot == 0) SkipChannel();
+                return;
+            }
+            if (HeldLocked(slot) is not { } s) return;
+            _skipUntil[s.ScanIndex] = _scanClock + ScanSkipSeconds;
+            ReleaseLocked(s);
+        }
+    }
+
+    /// <summary>
+    /// Multi Monitor: let go the channel this slot (0 to 3) holds and keep it out of this scan and later ones for
+    /// <see cref="AvoidTime"/>. The other slots carry on. Returns the channel avoided, or null if the slot held
+    /// none. With the mode off the first slot is the one channel, and this is <see cref="AvoidChannel"/>.
+    /// </summary>
+    public ScanChannel? AvoidSlot(int slot)
+    {
+        lock (_cfg)
+        {
+            if (!_multi) return slot == 0 ? AvoidChannel() : null;
+            if (HeldLocked(slot) is not { } s) return null;
+            var ch = _scanList[s.ScanIndex];
+            AvoidLocked(s.ScanIndex);
+            ReleaseLocked(s);
+            return ch;
+        }
+    }
+
+    // The slot of that number if a Multi Monitor scan has it holding a channel.
+    private MonitorSlot? HeldLocked(int slot)
+    {
+        var slots = _slots;
+        if (_scan != ScanState.Stay || slot < 0 || slot >= slots.Length) return null;
+        var s = slots[slot];
+        return s.State == SlotState.Listen && s.ScanIndex >= 0 && s.ScanIndex < _scanList.Count ? s : null;
     }
 
     /// <summary>Put every avoided frequency back in the scan.</summary>
@@ -406,23 +701,74 @@ public sealed class Receiver : IReceiver
         if (_window == 0) Interlocked.Increment(ref _passes);
         var w = _plan[_window];
         _surveySkip = 0;
-        if (Math.Abs(_source.CenterHz - w.CenterHz) > 1)
+        bool retune = Math.Abs(_source.CenterHz - w.CenterHz) > 1;
+        if (retune)
         {
             _flushUntilRetuned = true;
             _source.Tune(w.CenterHz);
             _surveySkip = (int)(SurveySettleSeconds * _rate);
         }
         _scan = ScanState.Survey;
-        _slot.ScanIndex = -1;
+        var slots = _slots;
+        for (int k = 0; k < slots.Length; k++)
+        {
+            var slot = slots[k];
+            if (k == 0 && !_multi)
+            {
+                // The one channel: it stays the first slot's, between channels too.
+                slot.State = SlotState.Free;
+                slot.ScanIndex = -1;
+                slot.SquelchOpen = false;
+            }
+            else if (slot.State != SlotState.Leaving || retune) FreeLocked(slot);     // one still fading goes on where the radio has not moved
+        }
+        _candidates.Clear();
+        _stayed = _leaving = _resurveying = false;
+        StartSurveyLocked();
+    }
+
+    // The same window is looked over from the start, without moving the radio.
+    private void SurveyAgainLocked()
+    {
+        _scan = ScanState.Survey;
+        _surveySkip = 0;
+        _candidates.Clear();
+        _stayed = _leaving = _resurveying = false;
+        StartSurveyLocked();
+    }
+
+    private void StartSurveyLocked()
+    {
         _fftFill = 0;
         _surveyCount = 0;
-        foreach (int c in w.Channels) _acc[c] = 0;
-        _slot.SquelchOpen = false;
+        foreach (int c in _plan[_window].Channels) _acc[c] = 0;
+    }
+
+    // Between windows: look over the new one, and go to what is active in it.
+    private void SurveyLocked(ReadOnlySpan<float> re, ReadOnlySpan<float> im)
+    {
+        if (!SurveyFramesLocked(re, im)) return;
+        double best = FindActiveLocked();
+        double shown = Volatile.Read(ref _level);
+        Volatile.Write(ref _level, best > shown ? best : shown + 0.3 * (best - shown));
+        if (!_multi)
+        {
+            NextCandidateLocked(_slots[0]);
+            return;
+        }
+        if (_candidates.Count == 0)
+        {
+            NextWindowLocked();
+            return;
+        }
+        _scan = ScanState.Stay;
+        _resurveyIn = ResurveySeconds;
+        FillSlotsLocked();
     }
 
     // Look at every channel of the window at once: a few FFTs of the whole span, and the power
-    // in each channel's bins.
-    private void SurveyLocked(ReadOnlySpan<float> re, ReadOnlySpan<float> im)
+    // in each channel's bins. True once enough of them have been added up.
+    private bool SurveyFramesLocked(ReadOnlySpan<float> re, ReadOnlySpan<float> im)
     {
         int n = re.Length, pos = 0, size = _fft.Size;
         if (_surveySkip > 0)
@@ -460,27 +806,38 @@ public sealed class Receiver : IReceiver
                 }
                 _acc[c] += sum;
             }
-            if (++_surveyCount < SurveyFrames) continue;
-
-            // Which channels are above the squelch level? Strongest first.
-            double gain = _source.GainDb, best = -140;
-            long now = Environment.TickCount64;
-            var found = new List<(double level, int index)>();
-            foreach (int c in w.Channels)
-            {
-                double level = 10 * Math.Log10(_acc[c] / (SurveyFrames * _fftNorm) + 1e-14) - gain + LevelOffsetDb;
-                best = Math.Max(best, level);
-                if (level >= SquelchDb && _scanClock >= _skipUntil[c] && now >= _avoidUntil[c]) found.Add((level, c));
-            }
-            double shown = Volatile.Read(ref _level);
-            Volatile.Write(ref _level, best > shown ? best : shown + 0.3 * (best - shown));
-            _candidates.Clear();
-            foreach (var (_, index) in found.OrderByDescending(f => f.level)) _candidates.Enqueue(index);
-            NextCandidateLocked(_slot);
-            return;
+            if (++_surveyCount >= SurveyFrames) return true;
         }
+        return false;
     }
 
+    // Which channels of the window are above the squelch level, and not passed by, avoided or in a slot
+    // already? They become the candidates, strongest first. Returns the highest level in the window.
+    private double FindActiveLocked()
+    {
+        var w = _plan[_window];
+        double gain = _source.GainDb, best = -140;
+        long now = Environment.TickCount64;
+        var found = new List<(double level, int index)>();
+        foreach (int c in w.Channels)
+        {
+            double level = 10 * Math.Log10(_acc[c] / (SurveyFrames * _fftNorm) + 1e-14) - gain + LevelOffsetDb;
+            best = Math.Max(best, level);
+            if (level >= SquelchDb && _scanClock >= _skipUntil[c] && now >= _avoidUntil[c] && !InSlotLocked(c)) found.Add((level, c));
+        }
+        _candidates.Clear();
+        foreach (var (_, index) in found.OrderByDescending(f => f.level)) _candidates.Enqueue(index);
+        return best;
+    }
+
+    private bool InSlotLocked(int index)
+    {
+        foreach (var s in _slots)
+            if (s.ScanIndex == index && s.State is SlotState.Settle or SlotState.Look or SlotState.Listen) return true;
+        return false;
+    }
+
+    // One channel at a time: the slot goes to the next candidate, or the scan to the next window.
     private void NextCandidateLocked(MonitorSlot slot)
     {
         if (_candidates.Count == 0)
@@ -488,8 +845,13 @@ public sealed class Receiver : IReceiver
             NextWindowLocked();
             return;
         }
-        slot.ScanIndex = _candidates.Dequeue();
-        var ch = _scanList[slot.ScanIndex];
+        StartCandidateLocked(slot, _candidates.Dequeue());
+    }
+
+    private void StartCandidateLocked(MonitorSlot slot, int index)
+    {
+        slot.ScanIndex = index;
+        var ch = _scanList[index];
         ConfigureLocked(slot, ch.Mode, ch.BandwidthHz);
         // Inside the window already: only the channel filter moves.
         slot.FrequencyHz = ch.FrequencyHz;
@@ -498,46 +860,177 @@ public sealed class Receiver : IReceiver
         slot.Channel.SetOffset(slot.OffsetHz);
         slot.ResetSquelch();
         slot.ResetDigital();
-        _scan = ScanState.Settle;
+        // In Multi Monitor a slot has a seat only once it holds the channel: one that is only trying moves nobody.
+        if (_multi) slot.Sound.Leave();
+        _scan = ScanState.Stay;
+        slot.State = SlotState.Settle;
         slot.ScanTimer = 0;
         slot.ScanSawSignal = false;
+        slot.Quiet = false;
+        slot.Level = -140;
     }
 
-    /// <summary>One block's worth of listening to a scan candidate. Returns whether the audio may pass.</summary>
-    private bool ScanStepLocked(MonitorSlot slot, double level, bool open, double seconds)
+    // Multi Monitor: candidates go to free slots, lowest first. With none free, the slot that has been quiet
+    // longest (its signal gone, in its hang time) gives way; if every slot is busy the candidate waits.
+    private void FillSlotsLocked()
+    {
+        var slots = _slots;
+        long now = Environment.TickCount64;
+        while (_candidates.Count > 0)
+        {
+            int c = _candidates.Peek();
+            // Taken, skipped or avoided since the window was looked over.
+            if (InSlotLocked(c) || _scanClock < _skipUntil[c] || now < _avoidUntil[c])
+            {
+                _candidates.Dequeue();
+                continue;
+            }
+            MonitorSlot? slot = null, quiet = null;
+            foreach (var s in slots)
+            {
+                if (s.State == SlotState.Free)
+                {
+                    slot = s;
+                    break;
+                }
+                if (s.State == SlotState.Listen && s.Quiet && (quiet is null || s.ScanTimer > quiet.ScanTimer)) quiet = s;
+            }
+            if (slot is null)
+            {
+                if (quiet is null) return;
+                ReleaseLocked(quiet);
+                if (quiet.State != SlotState.Free) return;      // still fading: the candidate has it in a moment
+                slot = quiet;
+            }
+            StartCandidateLocked(slot, _candidates.Dequeue());
+        }
+    }
+
+    // A slot lets its channel go. If it can be heard it is kept running until it has faded out, and is free then.
+    private void ReleaseLocked(MonitorSlot slot)
+    {
+        if (slot.State is SlotState.Free or SlotState.Leaving) return;
+        if (!slot.SquelchOpen && slot.Sound.Gain == 0)
+        {
+            FreeLocked(slot);
+            return;
+        }
+        slot.State = SlotState.Leaving;
+        slot.ScanIndex = -1;
+        slot.SquelchOpen = false;
+        slot.Quiet = false;
+    }
+
+    private static void FreeLocked(MonitorSlot slot)
+    {
+        slot.State = SlotState.Free;
+        slot.ScanIndex = -1;
+        slot.SquelchOpen = false;
+        slot.Quiet = false;
+        slot.Level = -140;
+        slot.Sound.Leave();
+        slot.DigitalVoice.ClearStatus();
+    }
+
+    // The radio has been moved: a slot still fading out has nothing of its channel left to fade.
+    private void CutLeavingLocked()
+    {
+        foreach (var s in _slots)
+            if (s.State == SlotState.Leaving) FreeLocked(s);
+    }
+
+    // Multi Monitor: every slot is let go and nothing new is taken; the scan moves on when they have faded out.
+    private void LeaveWindowLocked()
+    {
+        foreach (var s in _slots) ReleaseLocked(s);
+        _candidates.Clear();
+        _leaving = true;
+        _resurveying = false;
+    }
+
+    // Multi Monitor, once a block while the scan stays in a window, after the slots have been worked: the
+    // resume time, another look over the window when it is due, candidates to slots, and on to the next
+    // window when every slot is free and nothing waits.
+    private void WindowStepLocked(ReadOnlySpan<float> re, ReadOnlySpan<float> im, double seconds)
+    {
+        var slots = _slots;
+        if (_stayed) _stayTime += seconds;
+        if (!_leaving && _stayed && ResumeSeconds is { } limit && _stayTime >= limit)
+        {
+            // Those still busy would be found again at once: without a pause the scan would be straight back.
+            foreach (var s in slots)
+                if (s.State == SlotState.Listen && s.SquelchOpen && s.ScanIndex >= 0)
+                    _skipUntil[s.ScanIndex] = _scanClock + ResumePassBySeconds;
+            LeaveWindowLocked();
+        }
+        if (!_leaving)
+        {
+            if (!_resurveying && (_resurveyIn -= seconds) <= 0)
+            {
+                _resurveying = true;
+                _surveySkip = 0;
+                StartSurveyLocked();
+            }
+            if (_resurveying && SurveyFramesLocked(re, im))
+            {
+                _resurveying = false;
+                _resurveyIn = ResurveySeconds;
+                FindActiveLocked();
+            }
+            FillSlotsLocked();
+        }
+        foreach (var s in slots)
+            if (s.State != SlotState.Free) return;
+        if (_candidates.Count == 0) NextWindowLocked();
+    }
+
+    /// <summary>One block's worth of a slot's part in a scan. Returns whether the audio may pass.</summary>
+    private bool ScanStepLocked(MonitorSlot slot, int seat, double level, bool open, double seconds)
     {
         slot.ScanTimer += seconds;
-        switch (_scan)
+        switch (slot.State)
         {
-            case ScanState.Settle:
+            case SlotState.Settle:
                 // The filters still hold the last channel.
                 if (slot.ScanTimer >= SettleSeconds)
                 {
-                    _scan = ScanState.Look;
+                    slot.State = SlotState.Look;
                     slot.ScanTimer = 0;
                     slot.ResetSquelch();
                 }
                 return false;
-            case ScanState.Look:
+            case SlotState.Look:
                 if (level >= slot.Squelch.ThresholdDb) slot.ScanSawSignal = true;
                 if (open)
                 {
-                    _scan = ScanState.Listen;
+                    slot.State = SlotState.Listen;
                     slot.ScanTimer = 0;
                     slot.ListenTime = 0;
                     slot.ScanHeardVoice = false;
+                    slot.Quiet = false;
+                    // It holds the channel now, and has its seat.
+                    if (!slot.Sound.Holding || slot.Sound.Seat != seat) slot.Sound.Take(seat);
+                    if (!_stayed)
+                    {
+                        _stayed = true;
+                        _stayTime = 0;
+                    }
                     return true;
                 }
                 // Nothing there after all, or only noise: move on. Something there: give the squelch time to make up its mind.
-                if (slot.ScanTimer >= (slot.ScanSawSignal && !slot.Squelch.Noisy ? LookLongestSeconds : LookSeconds)) NextCandidateLocked(slot);
+                if (slot.ScanTimer >= (slot.ScanSawSignal && !slot.Squelch.Noisy ? LookLongestSeconds : LookSeconds))
+                {
+                    if (_multi) FreeLocked(slot);       // the next candidate, if there is one, goes to the lowest free slot
+                    else NextCandidateLocked(slot);
+                }
                 return false;
-            case ScanState.Listen:
+            case SlotState.Listen:
                 // A digital signal with nothing to listen to (a control channel, a repeater sending idle bursts,
                 // an encrypted call) keeps the squelch open for as long as it likes. If a call was heard on this
                 // stop, give it the hang time for a reply and come back soon; if not, leave as soon as it is clear
                 // what the signal is, and pass it by for longer.
                 slot.ListenTime += seconds;
-                if (ResumeSeconds is { } limit && slot.ListenTime >= limit)
+                if (!_multi && ResumeSeconds is { } limit && slot.ListenTime >= limit)
                 {
                     // Still busy, or it would have been left already: without a pause the scan would be straight back.
                     if (slot.ScanIndex >= 0) _skipUntil[slot.ScanIndex] = _scanClock + ResumePassBySeconds;
@@ -546,11 +1039,18 @@ public sealed class Receiver : IReceiver
                 }
                 bool silent = open && slot.DigitalVoice.Status is { NothingToHear: true };
                 if (open && slot.DigitalVoice.Status is { NothingToHear: false }) slot.ScanHeardVoice = true;
+                slot.Quiet = !open || silent;
                 if (open && !silent) slot.ScanTimer = 0;
-                else if (slot.ScanTimer >= (silent && !slot.ScanHeardVoice ? SilentDigitalLookSeconds : ScanHangSeconds))
+                else if (slot.ScanTimer >= (silent && !slot.ScanHeardVoice ? SilentDigitalLookSeconds : _multi ? MultiHangSeconds : ScanHangSeconds))
                 {
                     if (silent && slot.ScanIndex >= 0)
                         _skipUntil[slot.ScanIndex] = _scanClock + (slot.ScanHeardVoice ? AfterCallSkipSeconds : SilentDigitalSkipSeconds);
+                    if (_multi)
+                    {
+                        // Only this slot: the others carry on, and the window is left when all are free.
+                        ReleaseLocked(slot);
+                        return false;
+                    }
                     NextWindowLocked();
                 }
                 return open;
@@ -568,11 +1068,13 @@ public sealed class Receiver : IReceiver
         try
         {
             _queue = new BlockingCollection<Block>(512);
-            _slot.OffsetHz = ScanPlan.SingleOffsetFor(_slot.FrequencyHz);
-            _slot.Channel.SetOffset(_slot.OffsetHz);
+            var slot = _slots[0];
+            slot.OffsetHz = ScanPlan.SingleOffsetFor(slot.FrequencyHz);
+            slot.Channel.SetOffset(slot.OffsetHz);
             _flushUntilRetuned = false;
-            _slot.ResetSquelch();
-            _source.Start(_rate, _slot.FrequencyHz - _slot.OffsetHz);
+            slot.ResetSquelch();
+            IdleSlots();
+            _source.Start(_rate, slot.FrequencyHz - slot.OffsetHz);
         }
         catch
         {
@@ -603,20 +1105,47 @@ public sealed class Receiver : IReceiver
             _audio?.Dispose();
             _audio = null;
         }
-        _slot.SquelchOpen = false;
-        _slot.DigitalVoice.ClearStatus();
+        // Back on one channel, as after StopScan. The DSP thread has ended, or is stuck in a radio that does
+        // not answer and may hold the lock: then the slots are left as they are rather than waited for.
+        if (Monitor.TryEnter(_cfg, 200))
+        {
+            try { OneChannelLocked(fade: false); }
+            finally { Monitor.Exit(_cfg); }
+        }
+        else IdleSlots();
+        foreach (var s in _slots)
+        {
+            s.SquelchOpen = false;
+            s.DigitalVoice.ClearStatus();
+        }
         Volatile.Write(ref _level, -140);
+    }
+
+    // No slot is part of a scan, and only the first has a seat: the state a receiver that is not scanning is in.
+    // Without the lock, for when it cannot be had (Stop) and when no DSP thread is running (Start).
+    private void IdleSlots()
+    {
+        var slots = _slots;
+        for (int k = 0; k < slots.Length; k++)
+        {
+            slots[k].State = SlotState.Free;
+            slots[k].Quiet = false;
+            if (k > 0) slots[k].Sound.Leave();
+        }
+        TakeCentreLocked(slots[0]);
     }
 
     // Stops, and gives back the decoders' memory. The receiver cannot be started again after this.
     public void Dispose()
     {
         var thread = _thread;
+        _disposed = true;           // no more slots are made
         Stop();
         // The decoders belong to the DSP thread: free them only once it has ended. If it will not end
         // (or this is that thread), they are left: a small leak, not a call into freed memory.
         if (thread is not null && (thread == Thread.CurrentThread || !thread.Join(2000))) return;
-        lock (_cfg) _slot.Dispose();
+        lock (_cfg)
+            foreach (var s in _slots) s.Dispose();
     }
 
     // Blocks of samples thrown away because the DSP thread had fallen 512 blocks behind (since the start).
@@ -658,14 +1187,16 @@ public sealed class Receiver : IReceiver
 
     private void Process(Block block)
     {
+        SlotSound[] sounds;
         lock (_cfg)
         {
+            var slots = _slots;
             // After a retune, blocks already queued are from the old frequency.
             if (block.Retuned)
             {
                 _flushUntilRetuned = false;
                 _flushedSeconds = 0;
-                _slot.ResetSquelch();
+                foreach (var s in slots) s.ResetSquelch();
             }
             else if (_flushUntilRetuned)
             {
@@ -675,23 +1206,49 @@ public sealed class Receiver : IReceiver
                 if (_flushedSeconds < FlushLongestSeconds) return;
                 _flushUntilRetuned = false;
                 _flushedSeconds = 0;
-                _slot.ResetSquelch();
+                foreach (var s in slots) s.ResetSquelch();
             }
 
             int n = block.Count;
             double seconds = n / _rate;
+            var i = block.Data.AsSpan(0, n);
+            var q = block.Data.AsSpan(n, n);
             if (_scan != ScanState.Off) _scanClock += seconds;
-            if (_scan == ScanState.Survey)
-            {
-                SurveyLocked(block.Data.AsSpan(0, n), block.Data.AsSpan(n, n));
-                return;
-            }
+            // While a window is looked over nothing is received; only a slot let go a moment ago is still fading out.
+            bool survey = _scan == ScanState.Survey;
+            if (survey) SurveyLocked(i, q);
 
-            ChannelLocked(_slot, block.Data.AsSpan(0, n), block.Data.AsSpan(n, n), seconds);
+            // Every slot that is trying or holding a channel; outside a scan the first. An idle slot costs nothing.
+            int given = 0;
+            bool metered = false;
+            double best = -140;
+            for (int k = 0; k < slots.Length; k++)
+            {
+                var slot = slots[k];
+                if (survey ? slot.State != SlotState.Leaving : slot.State == SlotState.Free && (k != 0 || _scan != ScanState.Off)) continue;
+                if (!ChannelLocked(slot, k, i, q, seconds, out double level)) continue;
+                given++;
+                if (slot.State == SlotState.Leaving) continue;
+                best = metered ? Math.Max(best, level) : level;
+                metered = true;
+            }
+            if (metered)
+            {
+                // The meter falls slowly and rises at once, like a scanner's bar. With several slots it shows the strongest.
+                double shown = Volatile.Read(ref _level);
+                Volatile.Write(ref _level, best > shown ? best : shown + 0.1 * (best - shown));
+            }
+            if (!survey && _multi && _scan == ScanState.Stay) WindowStepLocked(i, q, seconds);
+            if (given == 0) return;
+
+            // The slots may change places under the lock: the mixer gets them as they stood in this block.
+            if (_mixSounds.Length != slots.Length) _mixSounds = new SlotSound[slots.Length];
+            for (int k = 0; k < slots.Length; k++) _mixSounds[k] = slots[k].Sound;
+            sounds = _mixSounds;
         }
 
         // The slots' sound, each through its fade to its place, as one block at the volume and pan.
-        var a = _mixer.Mix(_sounds, _volume, _pan);
+        var a = _mixer.Mix(sounds, _volume, _pan);
         int count = a.Length / 2;
         if (count == 0) return;
         bool open = _mixer.AnyOpen;         // with several slots: any of them
@@ -708,10 +1265,17 @@ public sealed class Receiver : IReceiver
         }
     }
 
-    // One block of the radio's IQ through one slot: its channel, the level (and the meter), its squelch, its
-    // part of a scan and its digital voice. The audio it gives, if any, is handed to the mixer.
-    private void ChannelLocked(MonitorSlot slot, ReadOnlySpan<float> i, ReadOnlySpan<float> q, double seconds)
+    // One block of the radio's IQ through one slot: its channel, its level, its squelch, its part of a scan
+    // and its digital voice. The audio it gives, if any, is handed to the mixer. False if the slot was not
+    // worked after all (it had faded out, and is free).
+    private bool ChannelLocked(MonitorSlot slot, int seat, ReadOnlySpan<float> i, ReadOnlySpan<float> q, double seconds, out double level)
     {
+        level = -140;
+        if (slot.State == SlotState.Leaving && slot.Sound.Gain == 0)
+        {
+            FreeLocked(slot);
+            return false;
+        }
         int max = slot.Channel.MaxAudio(i.Length);
         if (slot.Left.Length < max)
         {
@@ -719,16 +1283,26 @@ public sealed class Receiver : IReceiver
             slot.Right = new float[max];
         }
         int count = slot.Channel.Process(i, q, slot.Left, slot.Right);
-        double level = slot.Channel.LevelDbfs - _source.GainDb + LevelOffsetDb;
+        if (slot.State == SlotState.Leaving)
+        {
+            // Let go while it could be heard: its sound (decoded speech, if that is what it was) goes on under
+            // a shut squelch for the few milliseconds the fade takes.
+            if (count > 0) slot.DigitalVoice.Process(true, false, slot.Channel.Mode, slot.Left, slot.Right, count);
+            slot.Sound.Give(slot.Left.AsSpan(0, count), slot.Right.AsSpan(0, count), false);
+            return true;
+        }
+        level = slot.Channel.LevelDbfs - _source.GainDb + LevelOffsetDb;
         if (slot.Blocked) level = -140;
-        // The meter falls slowly and rises at once, like a scanner's bar.
-        double shown = Volatile.Read(ref _level);
-        Volatile.Write(ref _level, level > shown ? level : shown + 0.1 * (level - shown));
+        slot.Level = level > slot.Level ? level : slot.Level + 0.1 * (level - slot.Level);
         bool open = slot.Squelch.Update(level, seconds, slot.Channel.Roughness, slot.Channel.RoughnessLimit) && !slot.Blocked;
-        if (_scan != ScanState.Off) open = ScanStepLocked(slot, level, open, seconds);
+        if (_scan != ScanState.Off && slot.State != SlotState.Free) open = ScanStepLocked(slot, seat, level, open, seconds);
         slot.SquelchOpen = open;
         // Is there P25, DMR, NXDN, D-STAR or System Fusion on the channel? If so its decoded speech takes the place of the analogue audio.
-        if (count > 0) slot.DigitalVoice.Process(open, _scan is ScanState.Look or ScanState.Settle, slot.Channel.Mode, slot.Left, slot.Right, count);
+        // (A slot let go in this block while it could be heard keeps its speech for the fade.)
+        if (count > 0)
+            slot.DigitalVoice.Process(open || slot.State == SlotState.Leaving, _scan != ScanState.Off && slot.State is SlotState.Look or SlotState.Settle,
+                slot.Channel.Mode, slot.Left, slot.Right, count);
         slot.Sound.Give(slot.Left.AsSpan(0, count), slot.Right.AsSpan(0, count), open);
+        return true;
     }
 }

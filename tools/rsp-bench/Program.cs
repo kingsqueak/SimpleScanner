@@ -13,6 +13,13 @@
 //                                      samples received against asked, blocks dropped, retune time and the
 //                                      processor time used, each second. With no radio= all the free ones.
 //                                      rate= gives each radio's sample rate in turn (7.68 when not given)
+//   rsp-bench monitor <MHz,MHz,...|from-to> [seconds] [squelch dB] [file] [hang=<s>] [resume=<s>] [off] [play]
+//                                      Multi Monitor: scan a list of frequencies (commas) or a range (a dash; the
+//                                      band plan's raster) and print the four slots each second: frequency, mode,
+//                                      level, squelch, digital signal; with the processor time used and the blocks
+//                                      dropped. The file takes the mixed audio as raw 48 kHz 32-bit float, stereo.
+//                                      hang= is the mode's hang time (8 s), resume= the longest stay in a window,
+//                                      "off" scans with the mode off (to compare), "play" also plays the sound
 //   rsp-bench stalltest [MHz] [seconds] [removed|failure]
 //                                      the watchdog: after 5 s the samples are dropped as a jammed USB pipe
 //                                      would (or, with "removed" or "failure", the API's event of that name is
@@ -250,6 +257,131 @@ if (args.Length >= 3 && args[0] == "multi")
     {
         foreach (var rx in rxs) rx.Dispose();
     }
+    return;
+}
+
+if (args.Length >= 2 && args[0] == "monitor")
+{
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    bool modeOff = args.Contains("off"), play = args.Contains("play");
+    string? hangWord = args.FirstOrDefault(a => a.StartsWith("hang="))?[5..], resumeWord = args.FirstOrDefault(a => a.StartsWith("resume="))?[7..];
+    args = args.Where(a => a != "off" && a != "play" && !a.StartsWith("hang=") && !a.StartsWith("resume=")).ToArray();
+    int seconds = args.Length > 2 ? int.Parse(args[2]) : 30;
+    double squelch = args.Length > 3 ? double.Parse(args[3], inv) : -95;
+
+    // A list (162.4,162.55) in each frequency's own mode by the band plan, or a range (154-156) on its raster.
+    var list = new List<ScanChannel>();
+    if (args[1].Contains(',') || !args[1].Contains('-'))
+    {
+        foreach (string word in args[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            double hz = Math.Round(double.Parse(word, inv) * 1e6 / 10) * 10;
+            var band = BandPlan.Find(hz);
+            list.Add(new ScanChannel($"{hz / 1e6:F4}", hz, band.Mode, band.BandwidthHz));
+        }
+    }
+    else
+    {
+        string[] range = args[1].Split('-');
+        double lo = double.Parse(range[0], inv) * 1e6, hi = double.Parse(range[1], inv) * 1e6;
+        for (double f = lo; f <= hi + 1;)
+        {
+            var band = BandPlan.Find(f);
+            double channel = Math.Ceiling(f / band.StepHz - 1e-6) * band.StepHz;
+            if (channel > hi + 1) break;
+            band = BandPlan.Find(channel);
+            if (!band.Blocked) list.Add(new ScanChannel($"{channel / 1e6:F4}", Math.Round(channel / 10) * 10, band.Mode, band.BandwidthHz));
+            f = channel + band.StepHz;
+        }
+    }
+
+    using var rx = new Receiver(NewSource(), playAudio: play) { MultiMonitor = !modeOff };
+    rx.SquelchDb = squelch;
+    rx.AutoSquelch = autoSquelch;
+    rx.Volume = 0.5;
+    if (hangWord is not null) rx.MultiHangSeconds = double.Parse(hangWord, inv);
+    if (resumeWord is not null) rx.ResumeSeconds = double.Parse(resumeWord, inv);
+    using var capture = args.Length > 4 ? File.Create(args[4]) : null;
+    if (capture is not null)
+        rx.AudioOutput += a => capture.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(a));
+    rx.Start();
+    Thread.Sleep(1500);                      // let the gain settle
+    rx.StartScan(list);
+    Console.WriteLine($"{rx.Source.Description} at {rx.SampleRate / 1e6} MS/s: {list.Count} channels in {rx.ScanWindows} windows, squelch {squelch} dB{(autoSquelch ? ", auto" : "")}, "
+        + $"Multi Monitor {(rx.MultiMonitor ? $"on, hang {rx.MultiHangSeconds} s" : "off")}{(rx.ResumeSeconds is { } r ? $", resume {r} s" : "")}, digital {(rx.DigitalAvailable ? "available" : "MISSING")}");
+
+    string[] seats = ["33%L", "33%R", "L   ", "R   "];
+    var me = Process.GetCurrentProcess();
+    var sw = Stopwatch.StartNew();
+    var lastCpu = me.TotalProcessorTime;
+    var cpuStart = lastCpu;
+    double lastT = 0, cpuWithFour = 0, timeWithFour = 0, worstCpu = 0;
+    long lastPasses = 0, firstDrops = rx.DroppedBlocks;
+    int most = 0;
+    var heldSeconds = new int[5];
+    int gen0 = GC.CollectionCount(0), gen2 = GC.CollectionCount(2);
+    var pauseStart = GC.GetTotalPauseDuration();
+    var everHeld = new SortedSet<double>();
+    var tickCpu = lastCpu;
+    double tickT = 0;
+    int tickHeld = 0;
+    for (int s = 1; s <= seconds; s++)
+    {
+        // Ten looks a second: the load with four slots held is taken over the tenths that began and ended with four.
+        for (int tick = 9; tick >= 1; tick--)
+        {
+            Thread.Sleep(Math.Max(0, (int)(s * 1000 - tick * 100 - sw.ElapsedMilliseconds)));
+            me.Refresh();
+            var now = me.TotalProcessorTime;
+            double at = sw.Elapsed.TotalSeconds;
+            int holding = rx.Slots.Count(x => x.Holding);
+            if (holding == 4 && tickHeld == 4)
+            {
+                cpuWithFour += (now - tickCpu).TotalSeconds;
+                timeWithFour += at - tickT;
+            }
+            (tickCpu, tickT, tickHeld) = (now, at, holding);
+        }
+        Thread.Sleep(Math.Max(0, (int)(s * 1000 - sw.ElapsedMilliseconds)));
+        double t = sw.Elapsed.TotalSeconds, dt = t - lastT;
+        me.Refresh();
+        var cpu = me.TotalProcessorTime;
+        double load = (cpu - lastCpu).TotalSeconds / dt * 100;
+        var slots = rx.Slots;
+        int held = slots.Count(x => x.Holding);
+        most = Math.Max(most, held);
+        heldSeconds[held]++;
+        worstCpu = Math.Max(worstCpu, load);
+        if (held == 4 && tickHeld == 4)
+        {
+            cpuWithFour += (cpu - tickCpu).TotalSeconds;
+            timeWithFour += t - tickT;
+        }
+        (tickCpu, tickT, tickHeld) = (cpu, t, held);
+        long p = rx.ScanPasses;
+        var src = rx.Source;
+        Console.WriteLine($"  {t,5:F1} s  cpu {load,4:F0}%  dropped {rx.DroppedBlocks - firstDrops}  passes {p - lastPasses,3}  "
+            + $"LNA {src.ActiveGainStep} gain {src.GainDb:F0} dB{(src.Overloaded ? " OVERLOAD" : "")}  level {rx.LevelDb,5:F0} dB  {(rx.ScanListening ? "holding" : rx.Scanning ? "scanning" : "NOT SCANNING")}");
+        foreach (var x in slots)
+        {
+            if (!x.Holding) continue;
+            everHeld.Add(x.FrequencyHz);
+            Console.WriteLine($"           [{x.Seat}] {seats[x.Seat]}  {x.FrequencyHz / 1e6,9:F4} MHz  {x.Mode,-3} {x.BandwidthHz / 1000,5:F1} kHz  {x.LevelDb,5:F0} dB  {(x.SquelchOpen ? "open" : "shut")}"
+                + $"{(x.Digital is { } d ? "  " + d : "")}{(x.Encrypted ? "  (encrypted)" : "")}{(x.NothingToHear ? "  (nothing to hear)" : "")}");
+        }
+        lastCpu = cpu;
+        lastT = t;
+        lastPasses = p;
+    }
+    me.Refresh();
+    Console.WriteLine($"mean cpu {(me.TotalProcessorTime - cpuStart).TotalSeconds / sw.Elapsed.TotalSeconds * 100:F0}% of one processor, worst second {worstCpu:F0}%"
+        + (timeWithFour > 0 ? $", with four slots held {cpuWithFour / timeWithFour * 100:F0}% (over {timeWithFour:F1} s)" : "")
+        + $"; dropped blocks {rx.DroppedBlocks - firstDrops}; passes {rx.ScanPasses}");
+    Console.WriteLine($"seconds with 0/1/2/3/4 slots held: {string.Join("/", heldSeconds)}; most at once {most}; "
+        + $"frequencies held: {string.Join(" ", everHeld.Select(f => $"{f / 1e6:F4}"))}");
+    Console.WriteLine($"garbage collections {GC.CollectionCount(0) - gen0} (of which full {GC.CollectionCount(2) - gen2}), paused {(GC.GetTotalPauseDuration() - pauseStart).TotalMilliseconds:F1} ms in all"
+        + (play ? $"; audio underruns {rx.AudioUnderruns}" : ""));
+    rx.Stop();
     return;
 }
 

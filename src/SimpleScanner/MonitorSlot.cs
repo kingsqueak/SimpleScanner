@@ -3,6 +3,21 @@ using SimpleScanner.Dsp;
 
 namespace SimpleScanner;
 
+/// <summary>What a slot is doing in a scan.</summary>
+internal enum SlotState
+{
+    /// <summary>Not part of a scan: idle, or (the first slot, outside a scan) simply the channel being received.</summary>
+    Free,
+    /// <summary>Just put on a candidate: its filters still hold the last channel.</summary>
+    Settle,
+    /// <summary>Looking whether the candidate's squelch opens.</summary>
+    Look,
+    /// <summary>It holds the channel: listening, or waiting through the hang time for the signal to come back.</summary>
+    Listen,
+    /// <summary>Let go while it could still be heard: it is kept running for the few milliseconds its fade takes.</summary>
+    Leaving,
+}
+
 /// <summary>
 /// One channel being received out of the radio's span: its filter and demodulator, its squelch,
 /// its digital voice, where it sits, what it is doing, and its part of a scan. The receiver works
@@ -29,6 +44,8 @@ internal sealed class MonitorSlot : IDisposable
 
     // What it is doing.
     public bool SquelchOpen { get; set; }
+    // Its own level meter, in dB: up at once, down slowly.
+    public double Level { get; set; } = -140;
     // One block of its audio, as the channel and the digital voice leave it.
     public float[] Left { get; set; } = [];
     public float[] Right { get; set; } = [];
@@ -37,7 +54,10 @@ internal sealed class MonitorSlot : IDisposable
     public SlotSound Sound { get; } = new();
 
     // Its part of a scan.
+    public SlotState State { get; set; }
     public int ScanIndex { get; set; } = -1;
+    // While listening: the signal is gone (or has nothing to hear) and the hang time is running, counted in ScanTimer.
+    public bool Quiet { get; set; }
     public double ScanTimer { get; set; }
     public double ListenTime { get; set; }
     public bool ScanSawSignal { get; set; }

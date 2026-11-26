@@ -3,9 +3,41 @@ using SimpleScanner.Radio;
 
 namespace SimpleScanner.Tests;
 
-/// <summary>A pretend radio: noise, plus one carrier on a chosen frequency, delivered at real speed.</summary>
+/// <summary>
+/// One more signal of the pretend radio. It can be switched on and off, moved and made stronger or weaker
+/// while the radio runs. Plain, or with a tone on it (amplitude modulation, half depth), or frequency
+/// modulated with a recording of a discriminator (see Data/README.md), which is repeated.
+/// </summary>
+internal sealed class FakeCarrier
+{
+    public double Hz;
+    public volatile bool On = true;
+    public double Level = 0.05;             // its amplitude; full scale is 1
+    public double ToneHz;                   // 0 for none
+    public float[]? Deviation;              // at 24 kHz, in units of DeviationHz
+    public double DeviationHz = 2500;
+
+    // The generator's: where the carrier and the tone are in their turn, and the place in the recording.
+    internal double Re = 1, Im, ToneRe = 1, ToneIm;
+    internal int At, Part;
+}
+
+/// <summary>
+/// A pretend radio: noise, plus one carrier on a chosen frequency (<see cref="CarrierHz"/>) and any number
+/// more, each with its own level and switch (<see cref="Add"/>), delivered at real speed.
+/// </summary>
 internal sealed class FakeSource : IIqSource
 {
+    private volatile FakeCarrier[] _carriers = [];
+
+    /// <summary>One more carrier, on from now.</summary>
+    public FakeCarrier Add(double hz, double level = 0.05, double toneHz = 0, float[]? deviation = null)
+    {
+        var c = new FakeCarrier { Hz = hz, Level = level, ToneHz = toneHz, Deviation = deviation };
+        lock (this) _carriers = [.. _carriers, c];
+        return c;
+    }
+
     private Thread? _thread;
     private volatile bool _run, _retuned;
     private double _center;
@@ -97,11 +129,55 @@ internal sealed class FakeSource : IIqSource
                 re[k] = (float)((carrier ? 0.05 * Math.Cos(ph) : 0) + noise * (rng.NextDouble() - 0.5));
                 im[k] = (float)((carrier ? 0.05 * Math.Sin(ph) : 0) + noise * (rng.NextDouble() - 0.5));
             }
+            foreach (var c in _carriers) AddCarrier(c, re, im);
             bool retuned = _retuned && !NeverSaysRetuned;
             _retuned = false;
             Samples?.Invoke(re, im, retuned);
             while (clock.Elapsed.TotalSeconds < sample / SampleRate) Thread.Sleep(0);
         }
+    }
+
+    // One block of one carrier, added to the noise. The carrier is a pointer turned a step with every sample,
+    // so that it runs on unbroken from block to block, through a retune too.
+    private void AddCarrier(FakeCarrier c, float[] re, float[] im)
+    {
+        double offset = Volatile.Read(ref c.Hz) - CenterHz;
+        if (!c.On || Math.Abs(offset) >= SampleRate / 2) return;
+        double step = 2 * Math.PI * offset / SampleRate, cs = Math.Cos(step), sn = Math.Sin(step);
+        double tone = 2 * Math.PI * c.ToneHz / SampleRate, tc = Math.Cos(tone), ts = Math.Sin(tone);
+        double level = Volatile.Read(ref c.Level), x = c.Re, y = c.Im, tx = c.ToneRe, ty = c.ToneIm;
+        var dev = c.Deviation;
+        int up = (int)Math.Round(SampleRate / 24000);       // the recording's samples are this many of the radio's
+        double perUnit = 2 * Math.PI * c.DeviationHz / SampleRate;
+        for (int k = 0; k < re.Length; k++)
+        {
+            double a = level;
+            if (c.ToneHz != 0)
+            {
+                (tx, ty) = (tx * tc - ty * ts, tx * ts + ty * tc);
+                a *= 1 + 0.5 * ty;
+            }
+            (x, y) = (x * cs - y * sn, x * sn + y * cs);
+            if (dev is not null)
+            {
+                // Straight-line interpolation of the discriminator waveform up to the radio's rate; the turn it
+                // adds is small enough for the first terms of the sine and cosine.
+                double d0 = dev[c.At], d1 = dev[(c.At + 1) % dev.Length];
+                double turn = perUnit * (d0 + (d1 - d0) * c.Part / up);
+                double dc = 1 - turn * turn / 2, ds = turn - turn * turn * turn / 6;
+                (x, y) = (x * dc - y * ds, x * ds + y * dc);
+                if (++c.Part == up)
+                {
+                    c.Part = 0;
+                    c.At = (c.At + 1) % dev.Length;
+                }
+            }
+            re[k] += (float)(a * x);
+            im[k] += (float)(a * y);
+        }
+        // The pointers are kept at length one against the creep of rounding.
+        double r = 1 / Math.Sqrt(x * x + y * y), tr = 1 / Math.Sqrt(tx * tx + ty * ty);
+        (c.Re, c.Im, c.ToneRe, c.ToneIm) = (x * r, y * r, tx * tr, ty * tr);
     }
 }
 

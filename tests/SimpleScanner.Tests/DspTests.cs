@@ -6,17 +6,17 @@ public class DspTests
 {
     private const double Fs = 2_400_000;
 
-    /// <summary>A carrier at offsetHz in a 2.4 MS/s stream, modulated by a tone, with a little noise.</summary>
+    /// <summary>A carrier at offsetHz in a 2.4 MS/s stream (or fs), modulated by a tone, with a little noise.</summary>
     private static (float[] re, float[] im) Signal(double seconds, double offsetHz, double amplitude,
-        Func<double, double> phaseDeviation, Func<double, double> envelope, double noise = 1e-4)
+        Func<double, double> phaseDeviation, Func<double, double> envelope, double noise = 1e-4, double fs = Fs)
     {
-        int n = (int)(seconds * Fs);
+        int n = (int)(seconds * fs);
         var re = new float[n];
         var im = new float[n];
         var rng = new Random(1);
         for (int i = 0; i < n; i++)
         {
-            double t = i / Fs;
+            double t = i / fs;
             double ph = 2 * Math.PI * offsetHz * t + phaseDeviation(t);
             double a = amplitude * envelope(t);
             re[i] = (float)(a * Math.Cos(ph) + noise * (rng.NextDouble() - 0.5));
@@ -211,6 +211,187 @@ public class DspTests
         rx.SetOffset(300000);
         Run(rx, re, im);
         Assert.True(rx.LevelDbfs < -6 - 55, $"level {rx.LevelDbfs:F1} dBFS");
+    }
+
+    [Fact]
+    public void TheRadiosRateIsBroughtToTheWideChannelInTwoStages()
+    {
+        // 7.68 MS/s: /8 to 960 kHz with a short filter, then /4 with the shape the single filter had.
+        var stages = ChannelReceiver.WideStages(32);
+        Assert.Equal([8, 4], stages.Select(s => s.Factor));
+        Assert.Equal(43, stages[0].Taps.Length);
+        Assert.Equal(FirDesign.LowPass(960000, 120000, 40000), stages[1].Taps);
+        // A prime factor has no split, and 240 kHz is passed through.
+        Assert.Equal([5], ChannelReceiver.WideStages(5).Select(s => s.Factor));
+        Assert.Equal([1], ChannelReceiver.WideStages(1).Select(s => s.Factor));
+    }
+
+    /// <summary>A filter's gain in dB at hz, running at rate fs.</summary>
+    private static double GainDb(float[] taps, double hz, double fs)
+    {
+        double c = 0, s = 0;
+        for (int i = 0; i < taps.Length; i++)
+        {
+            c += taps[i] * Math.Cos(2 * Math.PI * hz * i / fs);
+            s += taps[i] * Math.Sin(2 * Math.PI * hz * i / fs);
+        }
+        return 10 * Math.Log10(c * c + s * s + 1e-30);
+    }
+
+    [Fact]
+    public void EveryRateGetsAFirstFilterAsGoodAsTheSingleOne()
+    {
+        for (int factor = 1; factor <= 40; factor++)
+        {
+            double fs = factor * 240000.0;
+            var stages = ChannelReceiver.WideStages(factor);
+            Assert.InRange(stages.Length, 1, 2);
+            Assert.Equal(factor, stages.Aggregate(1, (p, s) => p * s.Factor));
+            float[] single = factor == 1 ? [1f] : FirDesign.LowPass(fs, 120000, 40000);
+            double Chain(double hz) => GainDb(stages[0].Taps, hz, fs)
+                + (stages.Length == 2 ? GainDb(stages[1].Taps, hz, fs / stages[0].Factor) : 0);
+            // +-100 kHz as flat as it was.
+            for (double hz = 0; hz <= 100000; hz += 5000)
+                Assert.True(Math.Abs(Chain(hz) - GainDb(single, hz, fs)) < 0.1, $"x{factor}: {hz / 1000} kHz");
+            // Whatever folds into +-100 kHz at 240 kHz is stopped: 59 dB at the very edge of the
+            // stopband (where the single filter has 59.3), 60 beyond it.
+            for (int k = 1; k * 240000 - 100000 <= fs / 2; k++)
+                for (double hz = k * 240000 - 100000; hz <= Math.Min(fs / 2, k * 240000 + 100000); hz += 2000)
+                    Assert.True(Chain(hz) < (hz < 150000 ? -59 : -60), $"x{factor}: {hz / 1000} kHz at {Chain(hz):F1} dB");
+        }
+    }
+
+    /// <summary>Where a broadcast FM channel is tuned in a stream of this rate: 300 kHz up where there is room.</summary>
+    private static double WideTuning(double fs) => fs >= 960000 ? 300000 : 0;
+
+    [Theory]
+    [InlineData(7_680_000)]     // two stages, /8 then /4
+    [InlineData(6_000_000)]     // /5 then /5
+    [InlineData(2_400_000)]     // /5 then /2
+    [InlineData(1_920_000)]     // /4 then /2
+    [InlineData(1_200_000)]     // one
+    [InlineData(240_000)]       // none
+    public void ACarrierReadsTheSameLevelAnywhereInTheWideChannel(double fs)
+    {
+        double tune = WideTuning(fs);
+        foreach (double off in new double[] { -100000, -75000, -40000, -10000, 0, 25000, 60000, 90000, 100000 })
+        {
+            var (re, im) = Signal(0.02, tune + off, 0.1, _ => 0, _ => 1, noise: 0, fs: fs);
+            var rx = new ChannelReceiver(fs);
+            rx.Configure(Mode.Wfm, BandPlan.Wfm);
+            rx.SetOffset(tune);
+            Run(rx, re, im);
+            Assert.True(Math.Abs(rx.LevelDbfs + 20) < 0.1, $"{off / 1000} kHz: {rx.LevelDbfs:F3} dBFS");
+        }
+    }
+
+    [Theory]
+    [InlineData(7_680_000)]
+    [InlineData(6_000_000)]
+    [InlineData(2_400_000)]
+    [InlineData(1_920_000)]
+    [InlineData(1_200_000)]
+    public void StrongSignalsThatWouldFoldOntoTheWideChannelAreRejected(double fs)
+    {
+        // 240 kHz away folds onto the tuned frequency itself; within 100 kHz of a multiple of the
+        // first stage's rate is what that stage alone must stop.
+        var stages = ChannelReceiver.WideStages((int)Math.Round(fs / 240000));
+        var away = new List<double> { 150000, 180000, 240000, 300000, 340000 };
+        if (stages.Length == 2)
+        {
+            double mid = fs / stages[0].Factor;
+            for (int k = 1; k <= 2; k++)
+                foreach (double d in new double[] { -100000, -60000, 0, 60000, 100000 })
+                    away.Add(k * mid + d);
+        }
+        foreach (double d in away.Where(d => d <= fs / 2).SelectMany(d => new[] { d, -d }))
+        {
+            // The two half a distance either side of the middle, so both are well inside the stream.
+            var (re, im) = Signal(0.02, d / 2, 0.5, _ => 0, _ => 1, noise: 0, fs: fs);
+            var rx = new ChannelReceiver(fs);
+            rx.Configure(Mode.Wfm, BandPlan.Wfm);
+            rx.SetOffset(-d / 2);
+            Run(rx, re, im);
+            Assert.True(rx.LevelDbfs < -6 - 60, $"{d / 1000} kHz away: {rx.LevelDbfs:F1} dBFS");
+        }
+        // Right at the edge of the stopband (folding onto the band's edge) the single filter had
+        // 59.3 dB; so does the second stage.
+        foreach (double d in new double[] { 140000, 142500, 145000, -142500 })
+        {
+            var (re, im) = Signal(0.02, d / 2, 0.5, _ => 0, _ => 1, noise: 0, fs: fs);
+            var rx = new ChannelReceiver(fs);
+            rx.Configure(Mode.Wfm, BandPlan.Wfm);
+            rx.SetOffset(-d / 2);
+            Run(rx, re, im);
+            Assert.True(rx.LevelDbfs < -6 - 59, $"{d / 1000} kHz away: {rx.LevelDbfs:F1} dBFS");
+        }
+    }
+
+    [Fact]
+    public void TheOutputDoesNotDependOnHowTheInputIsCut()
+    {
+        const double fs = 7_680_000;
+        var (re, im) = Signal(0.1, 300000, 0.1, t => 37500.0 / 1000 * Math.Sin(2 * Math.PI * 1000 * t), _ => 1, noise: 0.01, fs: fs);
+        var whole = new ChannelReceiver(fs);
+        whole.Configure(Mode.Wfm, BandPlan.Wfm);
+        whole.SetOffset(300000);
+        var expected = Run(whole, re, im, 16384);
+
+        var cut = new ChannelReceiver(fs);
+        cut.Configure(Mode.Wfm, BandPlan.Wfm);
+        cut.SetOffset(300000);
+        var rng = new Random(3);
+        var got = new List<float>();
+        var l = new float[cut.MaxAudio(20000)];
+        var r = new float[cut.MaxAudio(20000)];
+        for (int i = 0; i < re.Length;)
+        {
+            int n = Math.Min(rng.Next(1, 20000), re.Length - i);
+            int k = cut.Process(re.AsSpan(i, n), im.AsSpan(i, n), l, r);
+            got.AddRange(l.AsSpan(0, k).ToArray());
+            i += n;
+        }
+        Assert.Equal(expected.Length, got.Count);
+        // The mixer's phasor is pulled back onto the unit circle once a block, which changes
+        // the last bits; nothing else may differ.
+        double worst = expected.Zip(got, (x, y) => Math.Abs(x - y)).Max();
+        Assert.True(worst < 1e-4, $"differs by {worst:G3}");
+    }
+
+    [Fact]
+    public void ConfigureClearsBothStagesOfTheFirstFilter()
+    {
+        const double fs = 7_680_000;
+        var (re, im) = Signal(0.01, 300000, 0.5, _ => 0, _ => 1, noise: 0, fs: fs);
+        var rx = new ChannelReceiver(fs);
+        rx.Configure(Mode.Wfm, BandPlan.Wfm);
+        rx.SetOffset(300000);
+        Run(rx, re, im);
+        Assert.InRange(rx.LevelDbfs, -6.2, -5.9);
+        // After Configure, silence in gives silence out: nothing of the carrier is left in either stage.
+        rx.Configure(Mode.Wfm, BandPlan.Wfm);
+        var zeros = new float[2000];
+        rx.Process(zeros, zeros, new float[rx.MaxAudio(2000)], new float[rx.MaxAudio(2000)]);
+        Assert.Equal(-140, rx.LevelDbfs, 6);
+    }
+
+    [Theory]
+    [InlineData(7_680_000)]
+    [InlineData(1_920_000)]
+    [InlineData(1_200_000)]
+    [InlineData(240_000)]
+    public void NarrowFmRecoversAToneAtAnyRate(double fs)
+    {
+        double tune = fs >= 960000 ? 300000 : 30000;
+        var (re, im) = Signal(0.4, tune, 0.1, t => 1500.0 / 1000 * Math.Sin(2 * Math.PI * 1000 * t), _ => 1, fs: fs);
+        var rx = new ChannelReceiver(fs);
+        rx.Configure(Mode.Nfm, BandPlan.NfmNarrow);
+        rx.SetOffset(tune);
+        var audio = Run(rx, re, im);
+        Assert.InRange(audio.Length, 19000, 19300);
+        Assert.InRange(Tone(audio, 1000), 0.35, 0.65);
+        Assert.True(Tone(audio, 2000) < 0.03);
+        Assert.InRange(rx.LevelDbfs, -20.5, -19.5);
     }
 
     [Fact]

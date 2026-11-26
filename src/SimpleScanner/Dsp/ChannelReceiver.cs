@@ -10,8 +10,9 @@ public delegate void SamplesHandler(ReadOnlySpan<float> samples);
 /// and give 48 kHz audio (left and right; the same in both except for stereo broadcast FM)
 /// and the channel's level.
 ///
-/// The input rate must be a multiple of 240 kHz. The first stage brings any such rate to
-/// 240 kHz, wide enough for broadcast FM. Narrow modes go on to 48 kHz through the channel
+/// The input rate must be a multiple of 240 kHz. The first filter brings any such rate to
+/// 240 kHz, wide enough for broadcast FM, in two stages where that is cheaper (see
+/// <see cref="WideStages"/>). Narrow modes go on to 48 kHz through the channel
 /// filter and are demodulated there; broadcast FM is demodulated at 240 kHz and its audio
 /// brought down to 48 kHz.
 /// </summary>
@@ -22,6 +23,7 @@ public sealed class ChannelReceiver
 
     private readonly double _inputRate;
     private readonly Mixer _mixer = new();
+    private readonly ComplexFirDecimator? _toMid;      // the first of two stages to 240 kHz, where there are two
     private readonly ComplexFirDecimator _toWide;
     private ComplexFirDecimator? _toNarrow;
     private FirDecimator? _wfmAudio, _wfmDiff;
@@ -33,7 +35,7 @@ public sealed class ChannelReceiver
     private Deemphasis? _deemph;
     private Biquad[] _highPass = [], _lowPass = [];
     private float _audioGain = 1;
-    private float[] _re = [], _im = [], _wRe = [], _wIm = [], _nRe = [], _nIm = [], _disc = [], _sub = [], _hf = [], _mag = [];
+    private float[] _re = [], _im = [], _mRe = [], _mIm = [], _wRe = [], _wIm = [], _nRe = [], _nIm = [], _disc = [], _sub = [], _hf = [], _mag = [];
     private Biquad[] _roughPass = [];
     private double _roughPower, _roughMean, _roughScale = 1;
     private long _roughCount;
@@ -44,11 +46,58 @@ public sealed class ChannelReceiver
         if (factor < 1 || Math.Abs(factor * WideRate - inputRate) > 1)
             throw new ArgumentException($"The sample rate must be a multiple of {WideRate} Hz.", nameof(inputRate));
         _inputRate = inputRate;
-        // Pass +-100 kHz; everything that would fold back into that after decimation is stopped.
-        _toWide = new ComplexFirDecimator(
-            factor == 1 ? [1f] : FirDesign.LowPass(inputRate, 120000, 40000), factor);
+        var stages = WideStages(factor);
+        if (stages.Length == 2) _toMid = new ComplexFirDecimator(stages[0].Taps, stages[0].Factor);
+        _toWide = new ComplexFirDecimator(stages[^1].Taps, stages[^1].Factor);
         Configure(Mode.Nfm, 11000);
     }
+
+    /// <summary>
+    /// The filters that take a rate of <paramref name="factor"/> times 240 kHz down to 240 kHz,
+    /// first to last: one or two. Either way +-100 kHz is passed flat and everything that would
+    /// fold back into it is stopped by 60 dB (59.4 right at the edge of the band, as before).
+    ///
+    /// One filter does it all at the input rate: -6 dB at 120 kHz, 40 kHz of transition. At
+    /// 7.68 MS/s that is 697 taps, and its cost per input sample is much the same at any rate.
+    /// Two are cheaper where the factor splits: the first brings the rate down to a few times
+    /// 240 kHz with a short filter whose transition runs from 120 kHz up to 120 kHz short of
+    /// that middle rate (only what lies within 120 kHz of a multiple of the middle rate folds
+    /// onto the wanted band; what folds anywhere else is left to the second). The second is
+    /// the single filter's shape at the middle rate. For 7.68 MS/s: 43 taps /8, then 89 taps /4.
+    /// The split is the one with the fewest multiplications per input sample, and is used only
+    /// where it costs no more than four fifths of the single filter.
+    /// </summary>
+    internal static (float[] Taps, int Factor)[] WideStages(int factor)
+    {
+        if (factor == 1) return [([1f], 1)];
+        double fs = (double)factor * WideRate;
+        var single = FirDesign.LowPass(fs, PassHz + EdgeHz, 2 * EdgeHz);
+        double singleCost = (single.Length + PerOutputCost) / factor, bestCost = double.MaxValue;
+        (float[] Taps, int Factor)[] best = [(single, factor)];
+        for (int second = 2; second <= factor / 2; second++)
+        {
+            if (factor % second != 0) continue;
+            int first = factor / second;
+            double mid = (double)second * WideRate;
+            var t1 = FirDesign.LowPass(fs, mid / 2, mid - 2 * (PassHz + EdgeHz), FirstStageAttenDb);
+            var t2 = FirDesign.LowPass(mid, PassHz + EdgeHz, 2 * EdgeHz);
+            double cost = (t1.Length + PerOutputCost) / first + (t2.Length + PerOutputCost) / factor;
+            if (cost < bestCost && cost < 0.8 * singleCost)
+            {
+                bestCost = cost;
+                best = [(t1, first), (t2, second)];
+            }
+        }
+        return best;
+    }
+
+    private const double PassHz = 100000, EdgeHz = 20000;
+    // The Kaiser design's estimate falls a little short of its target at some lengths; this
+    // keeps the first filter's stopband past 60 dB at every split.
+    private const double FirstStageAttenDb = 63;
+    // What one output costs beyond its multiplications, in multiplications: the call, the
+    // vector sum and the odd taps at the end.
+    private const double PerOutputCost = 8;
 
     public Mode Mode { get; private set; }
     public double BandwidthHz { get; private set; }
@@ -119,6 +168,7 @@ public sealed class ChannelReceiver
     {
         Mode = mode;
         BandwidthHz = bandwidthHz;
+        _toMid?.Reset();
         _toWide.Reset();
         _am.Reset();
         // Above the edge of the channel filter there is nothing of a transmission left.
@@ -183,10 +233,20 @@ public sealed class ChannelReceiver
         inIm.CopyTo(_im);
         _mixer.Process(_re.AsSpan(0, n), _im.AsSpan(0, n));
 
-        int maxW = _toWide.MaxOutput(n);
+        ReadOnlySpan<float> xRe = _re.AsSpan(0, n), xIm = _im.AsSpan(0, n);
+        if (_toMid is not null)
+        {
+            int maxM = _toMid.MaxOutput(n);
+            Ensure(ref _mRe, maxM);
+            Ensure(ref _mIm, maxM);
+            int m = _toMid.Process(xRe, xIm, _mRe, _mIm);
+            xRe = _mRe.AsSpan(0, m);
+            xIm = _mIm.AsSpan(0, m);
+        }
+        int maxW = _toWide.MaxOutput(xRe.Length);
         Ensure(ref _wRe, maxW);
         Ensure(ref _wIm, maxW);
-        int w = _toWide.Process(_re.AsSpan(0, n), _im.AsSpan(0, n), _wRe, _wIm);
+        int w = _toWide.Process(xRe, xIm, _wRe, _wIm);
         if (w == 0) return 0;
 
         int count;

@@ -62,18 +62,8 @@ public sealed class Receiver : IReceiver
     private float[] _left = [], _right = [], _frames = [];
     private static readonly float[] Silence = new float[2 * Cushion];
 
-    // Digital voice, all on the DSP thread under _cfg.
-    private const int VoicePrime = ChannelReceiver.AudioRate * 220 / 1000;      // one voice superframe and a little
-    private readonly P25Decoder? _p25 = P25Decoder.TryCreate();
-    private readonly DmrDecoder? _dmr = DmrDecoder.TryCreate();
-    private readonly NxdnDecoder? _nxdn = NxdnDecoder.TryCreate();
-    private readonly DstarDecoder? _dstar = DstarDecoder.TryCreate();
-    private readonly YsfDecoder? _ysf = YsfDecoder.TryCreate();
-    private readonly Upsampler _voiceUp = new(8000, 6);
-    private readonly FloatFifo _voice = new(ChannelReceiver.AudioRate * 3);
-    private readonly float[] _voice8k = new float[2048], _voice48k = new float[2048 * 6];
-    private bool _voicePlaying, _wasOpen;
-    private volatile IDigitalStatus? _digital;
+    // Digital voice, all on the DSP thread under _cfg (but its status and availability).
+    private readonly DigitalVoice _digitalVoice = new();
 
     // Scan state, all under _cfg.
     private IReadOnlyList<ScanChannel> _scanList = [];
@@ -107,14 +97,7 @@ public sealed class Receiver : IReceiver
             Failed?.Invoke(why);
         };
         _channel.SetOffset(_offsetHz);
-        _channel.DiscriminatorTap = d =>
-        {
-            _p25?.Feed(d, _channel.DiscriminatorHzPerUnit);
-            _dmr?.Feed(d, _channel.DiscriminatorHzPerUnit);
-            _nxdn?.Feed(d, _channel.DiscriminatorHzPerUnit);
-            _dstar?.Feed(d, _channel.DiscriminatorHzPerUnit);
-            _ysf?.Feed(d, _channel.DiscriminatorHzPerUnit);
-        };
+        _channel.DiscriminatorTap = d => _digitalVoice.Feed(d, _channel.DiscriminatorHzPerUnit);
 
         // FFT bins about 2 kHz wide: a few to each narrow channel.
         int size = 256;
@@ -243,25 +226,14 @@ public sealed class Receiver : IReceiver
     public double BandwidthHz => _channel.BandwidthHz;
 
     /// <summary>The digital signal on the channel now (P25, DMR, NXDN, D-STAR or System Fusion), or null for none.</summary>
-    public IDigitalStatus? Digital => _digital;
+    public IDigitalStatus? Digital => _digitalVoice.Status;
     /// <summary>False when the digital voice library could not be loaded.</summary>
-    public bool DigitalAvailable => _p25 is not null && _dmr is not null && _nxdn is not null && _dstar is not null && _ysf is not null;
+    public bool DigitalAvailable => _digitalVoice.DigitalAvailable;
     /// <summary>False when the AMBE+2 speech decoder is not installed: DMR calls are shown, not heard.</summary>
-    public bool DmrVoiceAvailable => _dmr is { VoiceAvailable: true };
+    public bool DmrVoiceAvailable => _digitalVoice.DmrVoiceAvailable;
 
     // The channel changed or its signal went: whatever the decoder was following is over.
-    private void ResetDigitalLocked()
-    {
-        _p25?.SignalLost();
-        _dmr?.SignalLost();
-        _nxdn?.SignalLost();
-        _dstar?.SignalLost();
-        _ysf?.SignalLost();
-        _voiceUp.Reset();
-        _voice.Clear();
-        _voicePlaying = false;
-        _digital = null;
-    }
+    private void ResetDigitalLocked() => _digitalVoice.Reset();
 
     /// <summary>Choosing a mode by hand ends a scan.</summary>
     public void SetMode(Mode mode, double bandwidthHz)
@@ -586,8 +558,8 @@ public sealed class Receiver : IReceiver
                     NextWindowLocked();
                     return false;
                 }
-                bool silent = open && _digital is { NothingToHear: true };
-                if (open && _digital is { NothingToHear: false }) _scanHeardVoice = true;
+                bool silent = open && _digitalVoice.Status is { NothingToHear: true };
+                if (open && _digitalVoice.Status is { NothingToHear: false }) _scanHeardVoice = true;
                 if (open && !silent) _scanTimer = 0;
                 else if (_scanTimer >= (silent && !_scanHeardVoice ? SilentDigitalLookSeconds : ScanHangSeconds))
                 {
@@ -646,7 +618,7 @@ public sealed class Receiver : IReceiver
             _audio = null;
         }
         _squelchOpen = false;
-        _digital = null;
+        _digitalVoice.ClearStatus();
         Volatile.Write(ref _level, -140);
     }
 
@@ -658,14 +630,7 @@ public sealed class Receiver : IReceiver
         // The decoders belong to the DSP thread: free them only once it has ended. If it will not end
         // (or this is that thread), they are left: a small leak, not a call into freed memory.
         if (thread is not null && (thread == Thread.CurrentThread || !thread.Join(2000))) return;
-        lock (_cfg)
-        {
-            _p25?.Dispose();
-            _dmr?.Dispose();
-            _nxdn?.Dispose();
-            _dstar?.Dispose();
-            _ysf?.Dispose();
-        }
+        lock (_cfg) _digitalVoice.Dispose();
     }
 
     // Blocks of samples thrown away because the DSP thread had fallen 512 blocks behind (since the start).
@@ -703,44 +668,6 @@ public sealed class Receiver : IReceiver
             try { Process(block); }
             finally { ArrayPool<float>.Shared.Return(block.Data); }
         }
-    }
-
-    // After the channel has been demodulated: is there P25, DMR, NXDN, D-STAR or System Fusion on it, and if so put its decoded
-    // speech in place of the analogue audio.
-    private void DigitalLocked(bool open, int count)
-    {
-        if (_wasOpen && !open && _scan != ScanState.Look && _scan != ScanState.Settle) ResetDigitalLocked();
-        _wasOpen = open;
-        if (_channel.Mode != Mode.Nfm) return;
-
-        int n;
-        while (_p25 is not null && (n = _p25.ReadVoice(_voice8k)) > 0)
-            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
-        while (_dmr is not null && (n = _dmr.ReadVoice(_voice8k)) > 0)
-            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
-        while (_nxdn is not null && (n = _nxdn.ReadVoice(_voice8k)) > 0)
-            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
-        while (_dstar is not null && (n = _dstar.ReadVoice(_voice8k)) > 0)
-            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
-        while (_ysf is not null && (n = _ysf.ReadVoice(_voice8k)) > 0)
-            _voice.Write(_voice48k.AsSpan(0, _voiceUp.Process(_voice8k.AsSpan(0, n), _voice48k)));
-        // System Fusion before NXDN: its frames are proved by a 40-bit sync and a CRC, NXDN's by little, and an
-        // NXDN frame or two can turn up by chance in a System Fusion signal.
-        _digital = _p25 is { Active: true } ? _p25.Status : _dmr is { Active: true } ? _dmr.Status
-            : _ysf is { Active: true } ? _ysf.Status : _nxdn is { Active: true } ? _nxdn.Status
-            : _dstar is { Active: true } ? _dstar.Status : null;
-        bool active = _digital is not null;
-        if (!active && !_voicePlaying)
-        {
-            _voice.Clear();
-            return;
-        }
-        // P25 speech arrives nine frames at a time, every 180 ms (DMR's three at a time): hold some before starting to play.
-        if (!_voicePlaying && _voice.Count >= VoicePrime) _voicePlaying = true;
-        var left = _left.AsSpan(0, count);
-        left.Clear();
-        if (_voicePlaying && _voice.Read(left) < count) _voicePlaying = false;
-        left.CopyTo(_right);
     }
 
     private void Process(Block block)
@@ -792,7 +719,8 @@ public sealed class Receiver : IReceiver
             open = _squelch.Update(level, seconds, _channel.Roughness, _channel.RoughnessLimit) && !_blocked;
             if (_scan != ScanState.Off) open = ScanStepLocked(level, open, seconds);
             _squelchOpen = open;
-            if ((_p25 is not null || _dmr is not null || _nxdn is not null || _dstar is not null || _ysf is not null) && count > 0) DigitalLocked(open, count);
+            // Is there P25, DMR, NXDN, D-STAR or System Fusion on the channel? If so its decoded speech takes the place of the analogue audio.
+            if (count > 0) _digitalVoice.Process(open, _scan is ScanState.Look or ScanState.Settle, _channel.Mode, _left, _right, count);
         }
         if (count == 0) return;
 

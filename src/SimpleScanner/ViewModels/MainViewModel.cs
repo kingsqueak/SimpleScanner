@@ -129,10 +129,14 @@ public sealed partial class MainViewModel : ObservableObject
     public IReadOnlyList<Choice> ResumeTimes { get; } =
         [new("15s", 15), new("30s", 30), new("1min", 60), new("3min", 180), new("5min", 300), new("10min", 600), new("Hold", 0)];
 
+    /// <summary>Multi Monitor: how long a slot keeps its channel after the signal has dropped, in seconds; one for every radio.</summary>
+    public IReadOnlyList<Choice> MultiHangTimes { get; } = [new("2s", 2), new("5s", 5), new("8s", 8), new("10s", 10), new("15s", 15)];
+
     /// <summary>The small window is showing: the display and one row of buttons.</summary>
     [ObservableProperty] private bool _isMini;
     [ObservableProperty] private Choice _selectedAvoidTime;
     [ObservableProperty] private Choice _selectedResumeTime;
+    [ObservableProperty] private Choice _selectedMultiHangTime;
     /// <summary>What the group selector's button says: the groups ticked, or that all are shown.</summary>
     [ObservableProperty] private string _groupsText = AllGroups;
     [ObservableProperty] private MemoryRow? _selectedMemory;
@@ -186,12 +190,15 @@ public sealed partial class MainViewModel : ObservableObject
         _loading = true;
         _selectedAvoidTime = AvoidTimes.FirstOrDefault(a => (int)a.Value == settings.AvoidMinutes) ?? AvoidTimes[0];
         _selectedResumeTime = ResumeTimes.FirstOrDefault(r => (int)r.Value == settings.ResumeSeconds) ?? ResumeTimes[^1];
+        _selectedMultiHangTime = MultiHangTimes.FirstOrDefault(h => (int)h.Value == settings.MultiHangSeconds)
+            ?? MultiHangTimes.First(h => (int)h.Value == Settings.DefaultMultiHangSeconds);
         _isMini = settings.Mini;
         _loading = false;
         foreach (var r in radios)
         {
             r.SetAvoidTime(_selectedAvoidTime);
             r.SetResumeTime(_selectedResumeTime);
+            r.SetMultiHangTime(_selectedMultiHangTime);
         }
         RefreshMemories(_groups[_radio]);
         _loading = true;
@@ -777,6 +784,14 @@ public sealed partial class MainViewModel : ObservableObject
         _dirty = true;
     }
 
+    /// <summary>Takes effect at once, on every radio, on the slots holding a channel as well.</summary>
+    partial void OnSelectedMultiHangTimeChanged(Choice value)
+    {
+        if (_loading) return;
+        foreach (var r in RadioList) r.SetMultiHangTime(value);
+        _dirty = true;
+    }
+
     /// <summary>A change of timer applies to what is avoided from now on; those already avoided keep the time they had.</summary>
     partial void OnSelectedAvoidTimeChanged(Choice value)
     {
@@ -871,6 +886,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (first.ChosenSerial is { Length: > 0 } chosen) _settings.RadioSerial = chosen;
         _settings.AvoidMinutes = (int)SelectedAvoidTime.Value;
         _settings.ResumeSeconds = (int)SelectedResumeTime.Value;
+        _settings.MultiHangSeconds = (int)SelectedMultiHangTime.Value;
         _settings.Groups = GroupsOf(first);       // the shared ones of before, for a build from before
         _settings.Group = null;
         _settings.AudioDevice = SelectedAudioDevice == DefaultDevice ? null : SelectedAudioDevice;

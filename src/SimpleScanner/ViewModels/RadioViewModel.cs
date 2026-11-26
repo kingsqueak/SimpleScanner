@@ -28,6 +28,12 @@ public sealed partial class RadioViewModel : ObservableObject
     private List<MemoryChannel> _scanMembers = [];
     private bool _loading;
     private int _ticks;
+    // Multi Monitor: the rows are showing a scan's slots (otherwise they are empty); what they say about a
+    // frequency is to be worked out again; and what the line above them was last made from.
+    private bool _rowsShown, _relabel;
+    private int _headerHeld = -1;
+    private string? _headerBand;
+    private double _headerRate = -1;
 
     public IReadOnlyList<Choice> Steps { get; } =
     [
@@ -60,7 +66,9 @@ public sealed partial class RadioViewModel : ObservableObject
     [ObservableProperty] private bool _isEncrypted;
     [ObservableProperty] private bool _stereoOn;
     [ObservableProperty] private bool _blocked;
-    [ObservableProperty] private bool _isOn;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSlots))]
+    private bool _isOn;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private double _volume;
     /// <summary>The speaker is silenced; the volume setting is left as it is. Not kept between runs.</summary>
@@ -90,7 +98,19 @@ public sealed partial class RadioViewModel : ObservableObject
     [ObservableProperty] private decimal? _ppm = 0;
     /// <summary>The radio in use has a bias T (not known until it has been started once).</summary>
     [ObservableProperty] private bool _hasBiasT = true;
-    [ObservableProperty] private bool _isScanning;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSlots))]
+    [NotifyPropertyChangedFor(nameof(CanAvoidChannel))]
+    [NotifyCanExecuteChangedFor(nameof(AvoidChannelCommand))]
+    private bool _isScanning;
+    /// <summary>Multi Monitor: a scan or search holds up to four active channels of a window at once. Kept with this radio's settings.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSlots))]
+    [NotifyPropertyChangedFor(nameof(CanAvoidChannel))]
+    [NotifyCanExecuteChangedFor(nameof(AvoidChannelCommand))]
+    private bool _multiMonitor;
+    /// <summary>Multi Monitor: the line above the four rows, how many are held and the band ("MULTI · 2 of 4 · Airband").</summary>
+    [ObservableProperty] private string _slotsHeader = "";
     [ObservableProperty] private bool _isSearching;
     /// <summary>This is the radio the controls work: its strip is marked among the others.</summary>
     [ObservableProperty] private bool _isSelected;
@@ -98,6 +118,13 @@ public sealed partial class RadioViewModel : ObservableObject
     [ObservableProperty] private string _name = "Radio";
     public string SearchText => IsSearching ? "Stop search" : "Search";
     public string ScanText => IsScanning ? "Stop" : "Scan";
+
+    /// <summary>Multi Monitor: the four rows, one for each seat in seat order (33% left, 33% right, hard left, hard right); the same four objects for the life of the radio.</summary>
+    public IReadOnlyList<SlotViewModel> Slots { get; }
+    /// <summary>The display shows the four rows in place of the big frequency: the mode is on and this radio is on and scanning or searching.</summary>
+    public bool ShowSlots => MultiMonitor && IsScanning && IsOn;
+    /// <summary>The main Avoid has something to do: a scan is stopped on a channel, and not in Multi Monitor, where avoiding is done from a row.</summary>
+    public bool CanAvoidChannel => IsScanning && !MultiMonitor;
 
     public bool IsAm => !AutoMode && Mode == Mode.Am;
     public bool IsNfm => !AutoMode && Mode == Mode.Nfm;
@@ -136,7 +163,9 @@ public sealed partial class RadioViewModel : ObservableObject
         _memories = memories;
         _post = post ?? (a => Dispatcher.UIThread.Post(a));
         _levelOffsetDb = settings.LevelOffsetDb;
+        Slots = Enumerable.Range(0, SlotMixer.Seats).Select(k => new SlotViewModel(k, SkipSlot, AvoidSlot, LabelAt)).ToArray();
         _loading = true;
+        MultiMonitor = settings.MultiMonitor;
         Pan = double.IsFinite(settings.Pan) ? Math.Clamp(settings.Pan, -1, 1) : 0;
         _antennas = _rx.Source.Antennas;
         _selectedAntenna = _antennas.Contains(settings.Antenna) || _antennas.Count == 0 ? settings.Antenna : _antennas[0];
@@ -169,6 +198,7 @@ public sealed partial class RadioViewModel : ObservableObject
         _rx.AutoSquelch = AutoSquelch;
         _rx.StereoEnabled = StereoOn;     // said here too: off is the button's resting state, so setting it above told the receiver nothing
         _rx.LevelOffsetDb = settings.LevelOffsetDb;
+        _rx.MultiMonitor = MultiMonitor;
         ApplyFrequency(settings.BandwidthHz);
         _rx.Failed += why => _post(() =>
         {
@@ -200,6 +230,7 @@ public sealed partial class RadioViewModel : ObservableObject
         s.FmNotch = FmNotch;
         s.Ppm = (double)(Ppm ?? 0);
         s.LevelOffsetDb = _levelOffsetDb;
+        s.MultiMonitor = MultiMonitor;
     }
 
     // ---- tuning ---------------------------------------------------------------------------
@@ -246,9 +277,7 @@ public sealed partial class RadioViewModel : ObservableObject
         _loading = false;
         _rx.SetMode(mode, pick.Value);
         Blocked = _rx.Blocked;
-        string width = mode == Mode.Wfm ? "" : pick.Value < 9000 || (mode == Mode.Nfm && pick.Value < 13000)
-            ? (mode == Mode.Am ? " 8.33k" : " 12.5k") : " 25k";
-        ModeText = (mode switch { Mode.Am => "AM", Mode.Wfm => "WFM", _ => "NFM" }) + width;
+        ModeText = ModeLabel(mode, pick.Value);
         OnPropertyChanged(nameof(IsAm));
         OnPropertyChanged(nameof(IsNfm));
         OnPropertyChanged(nameof(IsWfm));
@@ -311,21 +340,43 @@ public sealed partial class RadioViewModel : ObservableObject
     /// </summary>
     private void ShowLabel()
     {
-        // In a scan only the channels being scanned speak for the frequency; otherwise all stored ones.
-        var here = (IsScanning && !_searching ? _scanMembers : _memories.Channels)
-            .Where(c => Math.Abs(c.FrequencyHz - FrequencyHz) < 100).ToList();
-        if (Picked is not null && here.Remove(Picked)) here.Insert(0, Picked);
-        var label = ChannelLabel.For(here);
-        var band = BandPlan.Find(FrequencyHz);
-        BandName = label.Title ?? (band.Name.Length > 0 ? band.Name : "—");
+        var label = LabelAt(FrequencyHz);
+        BandName = label.Title ?? "";
         DetailText = label.Detail;
         InfoText = label.Info;
     }
+
+    /// <summary>
+    /// What is stored about a frequency, for the display or a Multi Monitor row: the name, whose it is and the
+    /// particulars. Where nothing is stored the band's name stands in, so the title is never null.
+    /// </summary>
+    private ChannelLabel LabelAt(double hz)
+    {
+        // In a scan only the channels being scanned speak for the frequency; otherwise all stored ones.
+        var here = (IsScanning && !_searching ? _scanMembers : _memories.Channels)
+            .Where(c => Math.Abs(c.FrequencyHz - hz) < 100).ToList();
+        if (Picked is not null && here.Remove(Picked)) here.Insert(0, Picked);
+        var label = ChannelLabel.For(here);
+        if (label.Title is not null) return label;
+        var band = BandPlan.Find(hz);
+        return label with { Title = band.Name.Length > 0 ? band.Name : "—" };
+    }
+
+    /// <summary>The receive mode and channel width in words, as the display shows them ("NFM 12.5k").</summary>
+    internal static string ModeLabel(Mode mode, double bandwidthHz)
+    {
+        bool narrow = bandwidthHz < 9000 || (mode == Mode.Nfm && bandwidthHz < 13000);
+        return mode switch { Mode.Am => narrow ? "AM 8.33k" : "AM 25k", Mode.Wfm => "WFM", _ => narrow ? "NFM 12.5k" : "NFM 25k" };
+    }
+
+    /// <summary>A signal level as the meter's figure says it ("-87 dB").</summary>
+    internal static string LevelLabel(double db) => $"{db:F0} dB";
 
     /// <summary>The stored channels have changed: show again what is stored for this frequency, unless a scan is showing its own.</summary>
     public void StoreChanged()
     {
         if (!IsScanning) ShowLabel();
+        _relabel = true;
     }
 
     /// <summary>The stored channels were read again from the file and every channel is a new object: find the picked one among them.</summary>
@@ -354,6 +405,8 @@ public sealed partial class RadioViewModel : ObservableObject
         _searching = false;
         _scanMembers = members;
         Picked = null;
+        _relabel = true;
+        _headerHeld = -1;      // the line above the rows says again whether it scans or searches
         _rx.ScanSkipSeconds = 10;
         _rx.StartScan(list);
         IsScanning = _rx.Scanning;
@@ -365,6 +418,8 @@ public sealed partial class RadioViewModel : ObservableObject
         Status = "";
         EnsureSquelch();
         _searching = true;
+        _relabel = true;
+        _headerHeld = -1;      // the line above the rows says again whether it scans or searches
         _rx.ScanSkipSeconds = 600;
         _rx.StartScan(list);
         IsScanning = _rx.Scanning;
@@ -386,8 +441,25 @@ public sealed partial class RadioViewModel : ObservableObject
     /// Leave the channel the scan has stopped on and keep its frequency out of scans and searches
     /// for the Avoid Timer chosen in Settings. Nothing is stored: closing the app clears them all.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanAvoidChannel))]
     private void AvoidChannel() => _rx.AvoidChannel();
+
+    /// <summary>A Multi Monitor row's Skip: let go the channel that slot holds and pass it by for a while; the others carry on.</summary>
+    private void SkipSlot(int slot) => _rx.SkipSlot(slot);
+
+    /// <summary>A Multi Monitor row's Avoid: let go the channel that slot holds and keep it out as the main Avoid does.</summary>
+    private void AvoidSlot(int slot) => _rx.AvoidSlot(slot);
+
+    /// <summary>How long a Multi Monitor slot keeps its channel after the signal has dropped. Takes effect at once.</summary>
+    public void SetMultiHangTime(Choice choice) => _rx.MultiHangSeconds = choice.Value;
+
+    partial void OnMultiMonitorChanged(bool value)
+    {
+        if (!ShowSlots) ClearRows();
+        if (_loading) return;
+        _rx.MultiMonitor = value;
+        Dirty = true;
+    }
 
     /// <summary>How long Avoid keeps a frequency out, in minutes; 0 is until the app is closed. Applies to what is avoided from now on.</summary>
     public void SetAvoidTime(Choice choice)
@@ -409,8 +481,7 @@ public sealed partial class RadioViewModel : ObservableObject
         Mode = _rx.Mode;
         _loading = false;
         ShowLabel();
-        bool narrow = _rx.BandwidthHz < 9000 || (_rx.Mode == Mode.Nfm && _rx.BandwidthHz < 13000);
-        ModeText = _rx.Mode switch { Mode.Am => narrow ? "AM 8.33k" : "AM 25k", Mode.Wfm => "WFM", _ => narrow ? "NFM 12.5k" : "NFM 25k" };
+        ModeText = ModeLabel(_rx.Mode, _rx.BandwidthHz);
         EntryText = (FrequencyHz / 1e6).ToString("0.#####", CultureInfo.InvariantCulture);
         Blocked = _rx.Blocked;
     }
@@ -418,6 +489,7 @@ public sealed partial class RadioViewModel : ObservableObject
     partial void OnIsScanningChanged(bool value)
     {
         if (!value) IsSearching = false;
+        if (!ShowSlots) ClearRows();
         OnPropertyChanged(nameof(ScanText));
     }
 
@@ -715,6 +787,8 @@ public sealed partial class RadioViewModel : ObservableObject
                     DetailText = InfoText = "";
                 }
             }
+            if (ShowSlots) ShowRows();
+            else ClearRows();
             Overloaded = src.Overloaded;
             IsStereo = _rx.Stereo;
             var digital = _rx.Digital;
@@ -734,8 +808,51 @@ public sealed partial class RadioViewModel : ObservableObject
             IsEncrypted = false;
             LevelText = "";
             GainText = "";
+            ClearRows();
         }
         _ticks++;
+    }
+
+    /// <summary>Multi Monitor: bring the four rows and the line above them up to date with the receiver's slots.</summary>
+    private void ShowRows()
+    {
+        var slots = _rx.Slots;
+        bool relabel = _relabel;
+        _relabel = false;
+        int held = 0;
+        double first = 0;
+        for (int k = 0; k < Slots.Count; k++)
+        {
+            if (k < slots.Count && slots[k] is { Holding: true } s)
+            {
+                if (held++ == 0) first = s.FrequencyHz;
+                Slots[k].Show(s, relabel);
+            }
+            else Slots[k].Clear();
+        }
+        _rowsShown = true;
+        // Remade only when what it says has changed: the count and the band, or with nothing held how fast it scans.
+        string? band = held > 0 ? BandPlan.Find(first).Name : null;
+        double rate = held > 0 ? -1 : _passRate;
+        if (held == _headerHeld && ReferenceEquals(band, _headerBand) && rate == _headerRate) return;
+        _headerHeld = held;
+        _headerBand = band;
+        _headerRate = rate;
+        SlotsHeader = held > 0
+            ? $"MULTI · {held} of {Slots.Count}" + (band is { Length: > 0 } ? $" · {band}" : "")
+            : $"MULTI · 0 of {Slots.Count} · {(_searching ? "Searching" : "Scanning")} · {_passRate:F0} passes/s";
+    }
+
+    /// <summary>Multi Monitor: empty the rows (once), outside a scan or with the mode off.</summary>
+    private void ClearRows()
+    {
+        if (!_rowsShown) return;
+        _rowsShown = false;
+        foreach (var row in Slots) row.Clear();
+        _headerHeld = -1;
+        _headerBand = null;
+        _headerRate = -1;
+        SlotsHeader = "";
     }
 
     /// <summary>Stop the radio and let it go (a helper program is ended).</summary>

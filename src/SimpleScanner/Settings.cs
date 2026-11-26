@@ -29,6 +29,8 @@ public sealed class RadioSettings
     public bool Stereo { get; set; } = true;
     /// <summary>The memory groups ticked for this radio: the ones it shows and scans. Empty is all of them; null (never set) takes the groups that were shared.</summary>
     public List<string>? Groups { get; set; }
+    /// <summary>Multi Monitor: a scan or search holds up to four active channels of a window at once.</summary>
+    public bool MultiMonitor { get; set; }
 }
 
 /// <summary>What is kept between runs, in Application Support (macOS), ~/.local/share (Linux)
@@ -89,6 +91,9 @@ public sealed class Settings
     public int AvoidMinutes { get; set; } = 30;
     /// <summary>Seconds a scan stays on a busy channel before it carries on; 0 is until the signal drops.</summary>
     public int ResumeSeconds { get; set; }
+    /// <summary>Multi Monitor: seconds a slot keeps its channel after the signal has dropped, for every radio.</summary>
+    public int MultiHangSeconds { get; set; } = DefaultMultiHangSeconds;
+    public const int DefaultMultiHangSeconds = 8;
     /// <summary>The RadioReference browser's account name and the place last looked at (numbers are RadioReference's own).
     /// The password is not kept here: see <see cref="RadioReference.RrPassword"/>.</summary>
     public sealed class RrPlace

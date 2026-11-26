@@ -655,6 +655,152 @@ public class MultiMonitorTests
         return x;
     }
 
+    // ---- one signal, one slot ----
+
+    /// <summary>A tone as a discriminator recording: one second at 24 kHz, in units of the carrier's DeviationHz.</summary>
+    private static float[] Sine(double hz, double depth = 1)
+    {
+        var x = new float[24000];
+        for (int i = 0; i < x.Length; i++) x[i] = (float)(depth * Math.Sin(2 * Math.PI * hz * i / 24000));
+        return x;
+    }
+
+    /// <summary>Nine narrow FM channels 12.5 kHz apart, named by their place from the middle one: "-4" to "+4".</summary>
+    private static ScanChannel[] Raster(double middleHz) =>
+        Enumerable.Range(-4, 9).Select(k => new ScanChannel($"{k:+0;-0;0}", middleHz + 12500 * k, Mode.Nfm, BandPlan.NfmNarrow)).ToArray();
+
+    [Fact]
+    public void OneWideSignalOnAFinerRasterTakesOneSlot()
+    {
+        // A broadcast station (75 kHz... here 50 kHz of deviation) on a raster of 100 kHz with channels 200 kHz
+        // wide: the channel on it and the one each side all hold it, and the two beyond touch it.
+        var source = new FakeSource();
+        source.Add(100.3e6, 0.05, deviation: Sine(1000)).DeviationHz = 50000;
+        using var rx = Make(source);
+        rx.ScanSkipSeconds = 1.0;
+        rx.Start();
+        rx.StartScan(Enumerable.Range(0, 7).Select(k => new ScanChannel($"100.{k}", 100.0e6 + 100e3 * k, Mode.Wfm, BandPlan.Wfm)).ToArray());
+        Assert.Equal(1, rx.ScanWindows);
+
+        // One slot, on the channel where it is strongest, and it stays one.
+        Assert.True(Wait(() => Held(rx) == "100.3 - - -", 3), Held(rx));
+        Stays(rx, "100.3 - - -", 1.0);
+
+        // Skipped, it is not back at once on the next point of the raster: nothing is held until the skip is over.
+        rx.SkipSlot(0);
+        Assert.True(Wait(() => Held(rx) == "- - - -", 1), Held(rx));
+        Stays(rx, "- - - -", 0.6);
+        Assert.True(Wait(() => Held(rx) == "100.3 - - -", 2), Held(rx));
+        rx.Stop();
+    }
+
+    [Fact]
+    public void SwitchingTheModeOnDoesNotHandOutWhatTheLastLookQueued()
+    {
+        // With the mode off the scan stops on the station's strongest point and keeps the other points of the
+        // raster as its next candidates. Switched on, those are not given the other slots.
+        var source = new FakeSource();
+        source.Add(100.3e6, 0.05, deviation: Sine(1000)).DeviationHz = 50000;
+        using var rx = Make(source, multi: false);
+        rx.Start();
+        rx.StartScan(Enumerable.Range(0, 7).Select(k => new ScanChannel($"100.{k}", 100.0e6 + 100e3 * k, Mode.Wfm, BandPlan.Wfm)).ToArray());
+        Assert.True(Wait(() => rx.ScanListening && Held(rx) == "100.3 - - -", 3), Held(rx));
+        Thread.Sleep(100);
+        rx.MultiMonitor = true;
+        Stays(rx, "100.3 - - -", 1.0);
+        rx.Stop();
+    }
+
+    [Fact]
+    public void ACandidateThatNeverOpensDoesNotHideTheSignalBesideIt()
+    {
+        // In the middle channel two carriers 3 kHz apart: strong, but to the auto squelch it is noise (the
+        // discriminator jumps at every beat), so the squelch never opens there. In the next channel a clean
+        // signal 15 dB weaker, which the strong one would keep out of every look as its skirt.
+        var source = new FakeSource();
+        source.Add(155.3e6 - 1500, 0.035);
+        source.Add(155.3e6 + 1500, 0.031);
+        source.Add(155.3125e6, 0.008, deviation: Sine(1300, 0.8));
+        using var rx = Make(source);
+        rx.SquelchDb = -80;
+        rx.AutoSquelch = true;
+        rx.Start();
+        rx.StartScan(Raster(155.3e6));
+        // The strong one is tried, found to be nothing, and the window is looked over again without it.
+        Assert.True(Wait(() => Held(rx) == "+1 - - -", 2), Held(rx));
+        Assert.True(rx.Slots[0].SquelchOpen);
+        // It is tried again every second or so, finds nothing each time, and the weak one keeps its slot.
+        Stays(rx, "+1 - - -", 2.5);
+        rx.Stop();
+    }
+
+    [Fact]
+    public void TwoSignalsInNeighbouringChannelsStillTakeTwoSlots()
+    {
+        // Two transmitters 12.5 kHz apart, 3 dB between them: each is its own signal.
+        var source = new FakeSource();
+        source.Add(155.3e6, 0.05, deviation: Sine(900, 0.8));
+        source.Add(155.3125e6, 0.035, deviation: Sine(1300, 0.8));
+        using var rx = Make(source);
+        rx.SquelchDb = -80;
+        rx.Start();
+        rx.StartScan(Raster(155.3e6));
+        Assert.True(Wait(() => Held(rx) == "0 +1 - -", 3), Held(rx));
+        Stays(rx, "0 +1 - -", 0.8);
+        Assert.True(rx.Slots[0].SquelchOpen && rx.Slots[1].SquelchOpen);
+        rx.Stop();
+    }
+
+    [Fact]
+    public void AWeakSignalBesideAStrongOneWaitsUntilTheStrongOneHasGone()
+    {
+        // 40 dB weaker and in the next channel: while the strong one is on the air it cannot be told from its
+        // skirt, and gets no slot. (It is well over the squelch level, and without the guard it would have one.)
+        var source = new FakeSource();
+        var strong = source.Add(155.3e6, 0.05, deviation: Sine(900, 0.8));
+        source.Add(155.3125e6, 0.0005, deviation: Sine(1300, 0.8));
+        using var rx = Make(source);
+        rx.SquelchDb = -80;
+        rx.MultiHangSeconds = 1.0;
+        rx.Start();
+        rx.StartScan(Raster(155.3e6));
+        Assert.True(Wait(() => Held(rx) == "0 - - -", 3), Held(rx));
+        Stays(rx, "0 - - -", 1.0);
+
+        // The strong one stops: the weak one has a slot at once, while the first is still in its hang time.
+        strong.On = false;
+        Assert.True(Wait(() => Held(rx) == "0 +1 - -", 0.9), Held(rx));
+        Assert.True(Wait(() => rx.Slots[1].SquelchOpen, 1));
+        Assert.InRange(rx.Slots[1].LevelDb, -72, -60);
+        Assert.True(Wait(() => Held(rx) == "- +1 - -", 2), Held(rx));
+
+        // And when the strong one comes back, the weak one keeps the slot it has.
+        strong.On = true;
+        Assert.True(Wait(() => Held(rx) == "0 +1 - -", 1), Held(rx));
+        Stays(rx, "0 +1 - -", 0.5);
+        rx.Stop();
+    }
+
+    [Theory]
+    [InlineData(-60)]
+    [InlineData(-80)]
+    [InlineData(-100)]
+    public void ASignalWiderThanItsChannelTakesOneSlotWhateverTheSquelch(double squelchDb)
+    {
+        // The P25 test recording has stretches of full-scale noise, which as a radio signal is 5 kHz of
+        // deviation in an 11 kHz channel: in the channels beside it it reaches 14 dB under its own level, two
+        // channels off 42 dB under, three 48, four 65. Without the guard those take the other three slots.
+        var source = new FakeSource();
+        source.Add(155.3e6, 0.05, deviation: Disc("p25_call_24k.raw"));
+        using var rx = new Receiver(source, playAudio: false, sampleRate: 2.4e6)
+            { SquelchDb = squelchDb, MultiMonitor = true, MultiHangSeconds = 2, SilentDigitalLookSeconds = 60 };
+        rx.Start();
+        rx.StartScan(Raster(155.3e6));
+        Assert.True(Wait(() => Held(rx) == "0 - - -", 3), Held(rx));
+        Stays(rx, "0 - - -", 3.5);                  // the recording is 1.6 s long: twice through
+        rx.Stop();
+    }
+
     [Fact]
     public void TwoDigitalSignalsAreDecodedSideBySide()
     {

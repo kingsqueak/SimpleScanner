@@ -56,6 +56,23 @@ public sealed class Receiver : IReceiver
 
     private const double ResurveySeconds = 0.2;      // Multi Monitor: how often a window with a slot held is looked over again
 
+    // Multi Monitor: one signal, one slot. A look over the window finds a strong signal in more channels than
+    // its own: in every channel that overlaps it, and, weaker, in the channels beside it (its skirts, and what
+    // the look itself spreads). Such a channel is not a candidate: see ShadowedLocked. How much weaker than a
+    // stronger channel a channel must be to be taken for its skirt depends on how near it is:
+    private const double BesideMarginDb = 10;        // right beside it: the space between the two is under half the narrower one's width
+    private const double SkirtMarginDb = 30;         // near it: centres closer than NearReach times the sum of the two widths
+    private const double FarSkirtMarginDb = 45;      // further off: centres closer than FarReach times that sum
+    private const double NearReach = 1.5, FarReach = 3;
+    // A channel overlapping one that is on the air but passed by or avoided is the same signal over again
+    // unless it is clearly the stronger of the two.
+    private const double SameSignalDb = 3;
+    // A candidate that was put in a slot and did not open its squelch is nothing to hear: for this long it is
+    // neither tried again nor allowed to keep other channels out. And if such a one kept others out of the
+    // last look, the window is looked over again before it is left, at most this many times in one stay.
+    private const double EmptySeconds = 1;
+    private const int LookAgainMost = 3;
+
     // What the scan is doing with the radio: looking over a window, or staying on it while one slot or more
     // tries or holds a channel of it. What each slot is doing is the slot's own (SlotState).
     private enum ScanState { Off, Survey, Stay }
@@ -98,11 +115,21 @@ public sealed class Receiver : IReceiver
     // slot let go, waiting for them to fade), and (Multi Monitor) when it is looked over next.
     private bool _stayed, _leaving, _resurveying;
     private double _stayTime, _resurveyIn;
+    // The guard's: since the last look a candidate turned out to be nothing; that look left a channel out
+    // for a stronger one; a look before leaving has been asked for and is not finished; how many of those.
+    private bool _lookFailed, _shadowed, _lookAgain;
+    private int _looksAgain;
+    private double[] _emptyUntil = [];
     private long _passes;
     private readonly Fft _fft;
     private readonly float[] _fftWindow, _fftRe, _fftIm, _workRe, _workIm;
     private readonly double _fftNorm;
     private double[] _acc = [];
+    // From the last look over a window: every channel's level, and what became of it (see FindActiveLocked).
+    private double[] _found = [];
+    private byte[] _mark = [];
+    private const byte NotWanted = 0, Wanted = 1, Taken = 2;
+    private double _widest;                 // the widest channel of the scan list
 
     public Receiver(IIqSource source, bool playAudio = true, double sampleRate = DefaultSampleRate)
     {
@@ -462,7 +489,9 @@ public sealed class Receiver : IReceiver
                         if (_scan == ScanState.Stay)
                         {
                             if (slots[0].State != SlotState.Listen) slots[0].Sound.Leave();
-                            _resurveyIn = ResurveySeconds;
+                            // What the last look queued was not chosen for this mode: look again, now.
+                            _candidates.Clear();
+                            _resurveyIn = 0;
                             _resurveying = _leaving = false;
                         }
                     }
@@ -535,6 +564,10 @@ public sealed class Receiver : IReceiver
             for (int i = 0; i < _scanList.Count; i++)
                 _avoided.TryGetValue(AvoidKey(_scanList[i].FrequencyHz), out _avoidUntil[i]);
             _acc = new double[_scanList.Count];
+            _found = new double[_scanList.Count];
+            _mark = new byte[_scanList.Count];
+            _emptyUntil = new double[_scanList.Count];
+            _widest = _scanList.Max(c => c.BandwidthHz);
             SquelchEnabled = true;
             _scanClock = 0;
             Interlocked.Exchange(ref _passes, 0);
@@ -580,6 +613,8 @@ public sealed class Receiver : IReceiver
         TakeCentreLocked(slots[0]);
         _candidates.Clear();
         _stayed = _leaving = _resurveying = false;
+        _lookFailed = _shadowed = _lookAgain = false;
+        _looksAgain = 0;
     }
 
     // The one channel being received holds the first seat, and being alone there it plays in the centre.
@@ -724,6 +759,8 @@ public sealed class Receiver : IReceiver
         }
         _candidates.Clear();
         _stayed = _leaving = _resurveying = false;
+        _lookFailed = _shadowed = _lookAgain = false;
+        _looksAgain = 0;
         StartSurveyLocked();
     }
 
@@ -734,6 +771,8 @@ public sealed class Receiver : IReceiver
         _surveySkip = 0;
         _candidates.Clear();
         _stayed = _leaving = _resurveying = false;
+        _lookFailed = _shadowed = _lookAgain = false;
+        _looksAgain = 0;
         StartSurveyLocked();
     }
 
@@ -813,6 +852,7 @@ public sealed class Receiver : IReceiver
 
     // Which channels of the window are above the squelch level, and not passed by, avoided or in a slot
     // already? They become the candidates, strongest first. Returns the highest level in the window.
+    // In Multi Monitor a channel that is only more of a signal already accounted for is left out.
     private double FindActiveLocked()
     {
         var w = _plan[_window];
@@ -823,11 +863,65 @@ public sealed class Receiver : IReceiver
         {
             double level = 10 * Math.Log10(_acc[c] / (SurveyFrames * _fftNorm) + 1e-14) - gain + LevelOffsetDb;
             best = Math.Max(best, level);
-            if (level >= SquelchDb && _scanClock >= _skipUntil[c] && now >= _avoidUntil[c] && !InSlotLocked(c)) found.Add((level, c));
+            // Multi Monitor: one that was tried a moment ago and was nothing counts as not there at all.
+            if (_multi && _scanClock < _emptyUntil[c]) level = -140;
+            bool wanted = level >= SquelchDb && _scanClock >= _skipUntil[c] && now >= _avoidUntil[c] && !InSlotLocked(c);
+            if (wanted) found.Add((level, c));
+            _found[c] = level;
+            _mark[c] = wanted ? Wanted : NotWanted;
         }
         _candidates.Clear();
-        foreach (var (_, index) in found.OrderByDescending(f => f.level)) _candidates.Enqueue(index);
+        _lookFailed = _shadowed = false;
+        foreach (var (level, index) in found.OrderByDescending(f => f.level))
+        {
+            if (_multi && ShadowedLocked(index, level))
+            {
+                _shadowed = true;
+                continue;
+            }
+            _mark[index] = Taken;
+            _candidates.Enqueue(index);
+        }
         return best;
+    }
+
+    // Multi Monitor: is this channel, found active in the look just made, only more of a signal that another
+    // channel of the window stands for? Called for the channels wanted, strongest first, so that those marked
+    // Taken are stronger candidates. It is left out (not passed by: the next look decides afresh) when
+    // - it overlaps a channel a slot is trying or holding: the slot has that stretch of the band. Two channels
+    //   overlap when their centres are no further apart than half the sum of their widths; channels that just
+    //   touch count, because a signal as wide as a channel, on a raster of half that, fills three channels of
+    //   which the outer two touch;
+    // - it overlaps a stronger candidate, or one on the air that is passed by or avoided (so that a station
+    //   skipped is not back at once on the next point of the raster);
+    // - it does not overlap but is near a channel on the air, whatever is being done with that one, and is
+    //   weaker than it by more than the margin for that distance: a skirt.
+    private bool ShadowedLocked(int index, double level)
+    {
+        var channels = _plan[_window].Channels;         // in order of frequency, one after another in the list
+        int first = channels[0], last = channels[^1];
+        var a = _scanList[index];
+        double squelch = SquelchDb;
+        for (int dir = -1; dir <= 1; dir += 2)
+            for (int t = index + dir; t >= first && t <= last; t += dir)
+            {
+                var b = _scanList[t];
+                double apart = Math.Abs(b.FrequencyHz - a.FrequencyHz), sum = a.BandwidthHz + b.BandwidthHz;
+                if (apart >= FarReach * (a.BandwidthHz + _widest)) break;       // no channel further off reaches this one
+                if (apart >= FarReach * sum) continue;
+                double other = _found[t];
+                if (apart <= sum / 2)
+                {
+                    if (InSlotLocked(t)) return true;
+                    if (other < squelch) continue;
+                    if (_mark[t] == Taken || (_mark[t] == NotWanted && other >= level - SameSignalDb)) return true;
+                    continue;
+                }
+                if (other < squelch) continue;
+                bool beside = apart - sum / 2 < Math.Min(a.BandwidthHz, b.BandwidthHz) / 2;
+                if (other - level > (beside ? BesideMarginDb : apart < NearReach * sum ? SkirtMarginDb : FarSkirtMarginDb)) return true;
+            }
+        return false;
     }
 
     private bool InSlotLocked(int index)
@@ -975,13 +1069,33 @@ public sealed class Receiver : IReceiver
             {
                 _resurveying = false;
                 _resurveyIn = ResurveySeconds;
+                _lookAgain = false;
                 FindActiveLocked();
             }
             FillSlotsLocked();
         }
         foreach (var s in slots)
             if (s.State != SlotState.Free) return;
-        if (_candidates.Count == 0) NextWindowLocked();
+        if (_candidates.Count > 0) return;
+        if (!_leaving)
+        {
+            // A candidate that turned out to be nothing may have kept a weaker channel out of the last look:
+            // one more look, without it, before the window is left.
+            if (_lookAgain) return;
+            if (_lookFailed && _shadowed && _looksAgain < LookAgainMost)
+            {
+                _looksAgain++;
+                _lookAgain = true;
+                if (!_resurveying)
+                {
+                    _resurveying = true;
+                    _surveySkip = 0;
+                    StartSurveyLocked();
+                }
+                return;
+            }
+        }
+        NextWindowLocked();
     }
 
     /// <summary>One block's worth of a slot's part in a scan. Returns whether the audio may pass.</summary>
@@ -1020,7 +1134,14 @@ public sealed class Receiver : IReceiver
                 // Nothing there after all, or only noise: move on. Something there: give the squelch time to make up its mind.
                 if (slot.ScanTimer >= (slot.ScanSawSignal && !slot.Squelch.Noisy ? LookLongestSeconds : LookSeconds))
                 {
-                    if (_multi) FreeLocked(slot);       // the next candidate, if there is one, goes to the lowest free slot
+                    if (_multi)
+                    {
+                        // The next candidate, if there is one, goes to the lowest free slot. This one is left alone
+                        // for a moment, and meanwhile keeps no other channel out (see FindActiveLocked).
+                        if (slot.ScanIndex >= 0) _emptyUntil[slot.ScanIndex] = _scanClock + EmptySeconds;
+                        _lookFailed = true;
+                        FreeLocked(slot);
+                    }
                     else NextCandidateLocked(slot);
                 }
                 return false;

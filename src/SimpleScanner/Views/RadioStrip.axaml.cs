@@ -1,6 +1,9 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
+using SimpleScanner.Controls;
 using SimpleScanner.ViewModels;
 
 namespace SimpleScanner.Views;
@@ -12,9 +15,15 @@ public partial class RadioStrip : UserControl
     {
         InitializeComponent();
         // On the way down, so the radio is selected before a button in the strip does its work.
-        AddHandler(PointerPressedEvent, (_, _) =>
+        AddHandler(PointerPressedEvent, (_, e) =>
         {
-            if (DataContext is RadioViewModel radio && TopLevel.GetTopLevel(this)?.DataContext is MainViewModel main) main.Select(radio);
+            if (DataContext is not RadioViewModel radio || TopLevel.GetTopLevel(this)?.DataContext is not MainViewModel main) return;
+            bool selecting = !radio.IsSelected;
+            main.Select(radio);
+            // The click that selects a radio stops here when it lands on the frequency: it is not also a step of the
+            // digit under it. (A click low on a leading blank took 100 MHz off, which came out as 100 kHz and, on
+            // 2026-11-26, as a radio that would not start after a jam.) The buttons still work at the first click.
+            if (selecting && (e.Source as Visual)?.FindAncestorOfType<FrequencyReadout>(includeSelf: true) is not null) e.Handled = true;
         }, RoutingStrategies.Tunnel, handledEventsToo: true);
     }
 }

@@ -220,7 +220,7 @@ With more than one RSP plugged in, the scanner can run them together.
 ## How it works
 
 - Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its own Scan, Skip and Avoid buttons.
-- Click a strip to select that radio. Tune, Mode, Filter, Audio, Search and the Scan row on Operate work the radio selected.
+- Click a strip to select that radio. Tune, Mode, Filter, Audio, Search and the Scan row on Operate work the radio selected. A click on the frequency of a radio that is not selected only selects it; once it is selected, its digits tune by wheel or click as the big display's do.
 - Each radio has its own ticked groups. The groups shown are those of the radio selected, and the heading says whose they are.
 - **Scan** starts and stops the radio selected and leaves the others as they are: one can sit on a fixed channel while another scans.
 - When two radios scan channels they have in common, those are shared out between them, so each is visited by one radio and the scan comes round sooner. They are shared out again when one stops.

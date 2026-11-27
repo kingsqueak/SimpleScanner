@@ -66,6 +66,9 @@ public interface IIqSource : IDisposable
     int GainStep { get; set; }
     /// <summary>The highest step at the present frequency.</summary>
     int MaxGainStep { get; }
+    /// <summary>The highest step this model has on any band: the range of the gain setting, which
+    /// scanning from band to band does not change.</summary>
+    int MostGainSteps { get; }
     /// <summary>The step in use now (differs from <see cref="GainStep"/> under automatic gain).</summary>
     int ActiveGainStep { get; }
     /// <summary>Total gain ahead of the samples, in dB, for turning sample levels into signal levels.</summary>

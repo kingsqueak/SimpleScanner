@@ -700,6 +700,7 @@ public sealed class RemoteReceiver : IReceiver
         }
 
         public int MaxGainStep => S.MaxGainStep;
+        public int MostGainSteps => S.MostGainSteps;
         public int ActiveGainStep => S.ActiveGainStep;
         public double GainDb => S.GainDb;
         public bool Overloaded => S.Overloaded;

@@ -801,7 +801,11 @@ public sealed partial class RadioViewModel : ObservableObject
             var digital = _rx.Digital;
             DigitalText = digital?.ToString() ?? "";
             IsEncrypted = digital is { Encrypted: true };
-            MaxGainStep = src.MaxGainStep;
+            // The model's range, not the band's: the slider pulls its value down to a lower maximum and
+            // that would be written back as the setting, so a scan through a band with fewer steps lost
+            // the user's step (reported 2026-11-27). The radio uses the band's highest step there itself.
+            // 0 is a helper that has not reported yet.
+            if (src.MostGainSteps > 0) MaxGainStep = src.MostGainSteps;
             LevelText = Blocked ? "" : $"{Level:F0} dB";
             GainText = $"LNA {src.ActiveGainStep}/{src.MaxGainStep} · gain {src.GainDb:F0} dB · retune {src.LastRetuneMs:F0} ms";
         }

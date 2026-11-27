@@ -375,6 +375,38 @@ public class RadioViewModelTests
         }
     }
 
+    // Reported 2026-11-27: with Auto gain off and the step at 6 (a preamp at the antenna), scanning
+    // changed it. The gain slider's maximum followed the band, and the slider pulled its value down
+    // to a lower one and wrote that back as the setting. The maximum is now the model's.
+    [Fact]
+    public async Task ScanningThroughABandWithFewerStepsLeavesTheGainSettingAlone()
+    {
+        var source = new FakeSource { MostGainSteps = 8, MaxStepAt = hz => hz < 420e6 ? 8 : 5 };   // as an RSP2
+        var vhf = new MemoryChannel { Name = "VHF", FrequencyHz = 155.0e6 };
+        var uhf = new MemoryChannel { Name = "UHF", FrequencyHz = 460.0e6 };
+        var vm = Make(source, new RadioSettings { AutoGain = false, GainStep = 6, SquelchDb = -60 }, Store(vhf, uhf), out var rx);
+        using (rx)
+        {
+            await vm.TogglePowerCommand.ExecuteAsync(null);
+            vm.StartScan([vhf, uhf], [new("VHF", 155.0e6, Mode.Nfm, BandPlan.NfmNarrow), new("UHF", 460.0e6, Mode.Nfm, BandPlan.NfmNarrow)]);
+            bool sawUhf = false, sawVhf = false;
+            Assert.True(Wait(() =>
+            {
+                vm.Tick();
+                Assert.Equal(8, vm.MaxGainStep);
+                if (source.CenterHz > 420e6) sawUhf = true;
+                else if (sawUhf) sawVhf = true;
+                return sawUhf && sawVhf;
+            }, 5), "the scan did not go from UHF back to VHF");
+            Assert.Equal(6, vm.GainStep);
+            Assert.Equal(6, source.GainStep);
+            var back = new RadioSettings();
+            vm.WriteTo(back);
+            Assert.Equal(6, back.GainStep);
+            Assert.False(back.AutoGain);
+        }
+    }
+
     [Fact]
     public async Task ARadioThatWillNotStartSaysWhy()
     {

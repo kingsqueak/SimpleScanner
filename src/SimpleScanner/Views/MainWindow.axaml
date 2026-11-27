@@ -520,12 +520,26 @@
                   <ListBox Grid.Row="1" Grid.Column="1" Classes="segs" ItemsSource="{Binding Radio.Antennas}" SelectedItem="{Binding Radio.SelectedAntenna}"
                            IsVisible="{Binding ShownIsHere}" ToolTip.Tip="The antenna socket the radio listens on" />
                   <TextBlock Grid.Row="2" Text="Gain (LNA step)" Classes="label" IsVisible="{Binding ShownIsHere}" />
-                  <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="10" IsVisible="{Binding ShownIsHere}">
-                    <Slider Minimum="0" Maximum="{Binding Radio.MaxGainStep}" Value="{Binding Radio.GainStep}" Width="160"
-                            TickFrequency="1" IsSnapToTickEnabled="True"
-                            ToolTip.Tip="Front-end attenuation: 0 is the most gain. With Auto gain on, this is the most gain the scanner may use." />
-                    <TextBlock Text="{Binding Radio.GainStep, StringFormat={}{0:0}}" FontSize="12" MinWidth="16" VerticalAlignment="Center" />
-                  </StackPanel>
+                  <!-- A slider for each radio, the selected one's shown. One slider moved from radio to radio
+                       pulled its value down to the next radio's lower maximum (an RSP1's 3) and wrote that
+                       into the radio it was leaving (an RSP1A's 6 became 3; reported 2026-11-27). -->
+                  <ItemsControl Grid.Row="2" Grid.Column="1" ItemsSource="{Binding RadioList}" IsVisible="{Binding ShownIsHere}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <Panel />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:RadioViewModel">
+                        <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding IsSelected}">
+                          <Slider Minimum="0" Maximum="{Binding MaxGainStep}" Value="{Binding GainStep}" Width="160"
+                                  TickFrequency="1" IsSnapToTickEnabled="True"
+                                  ToolTip.Tip="Front-end attenuation: 0 is the most gain. With Auto gain on, this is the most gain the scanner may use. A band with fewer steps uses its highest one; the step set here comes back on bands that have it." />
+                          <TextBlock Text="{Binding GainStep, StringFormat={}{0:0}}" FontSize="12" MinWidth="16" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                   <TextBlock Grid.Row="3" Text="Auto gain" Classes="label" IsVisible="{Binding ShownIsHere}" />
                   <CheckBox Grid.Row="3" Grid.Column="1" Classes="switch" IsChecked="{Binding Radio.AutoGain}" IsVisible="{Binding ShownIsHere}"
                             Content="Less gain on overload, back when it clears" Foreground="{DynamicResource TextMuted}" FontSize="11"

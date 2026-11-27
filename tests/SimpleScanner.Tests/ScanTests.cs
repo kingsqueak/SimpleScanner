@@ -70,7 +70,9 @@ internal sealed class FakeSource : IIqSource
     public double Ppm { get; set; }
     public bool AutoGain { get; set; }
     public int GainStep { get; set; }
-    public int MaxGainStep => 0;
+    public Func<double, int> MaxStepAt = _ => 0;   // the highest step at a centre frequency
+    public int MaxGainStep => MaxStepAt(CenterHz);
+    public int MostGainSteps { get; set; }
     public int ActiveGainStep => 0;
     public double GainDb => 0;
     public bool Overloaded => false;

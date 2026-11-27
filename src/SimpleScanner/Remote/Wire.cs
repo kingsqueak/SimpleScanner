@@ -95,6 +95,7 @@ internal sealed record ReceiverStatus
     public bool AutoGain { get; init; }
     public int GainStep { get; init; }
     public int MaxGainStep { get; init; }
+    public int MostGainSteps { get; init; }
     public int ActiveGainStep { get; init; }
     public double GainDb { get; init; }
     public bool Overloaded { get; init; }

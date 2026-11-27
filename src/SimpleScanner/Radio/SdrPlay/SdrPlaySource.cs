@@ -184,6 +184,7 @@ public sealed unsafe class SdrPlaySource : IIqSource
     public double LastRetuneMs => Volatile.Read(ref _lastRetuneMs);
     public int ActiveGainStep => _activeStep;
     public int MaxGainStep => MaxLnaState(CenterHz);
+    public int MostGainSteps => MostLnaStates();
     /// <summary>The IF gain reduction the service's AGC has settled on, in dB.</summary>
     public int IfGainReductionDb => _ifGr;
 
@@ -446,8 +447,10 @@ public sealed unsafe class SdrPlaySource : IIqSource
                 RetuneTrace?.Invoke(centerHz, _tuneCallMs, _tuneCallMs, $"refused {Native.ErrorText(err)}");
             }
             if (farMove) _auto.Reset();
-            // Each band has its own number of LNA states; one that does not exist here is refused.
-            if (_activeStep > MaxLnaState(centerHz)) SetLna(MaxLnaState(centerHz));
+            // Each band has its own number of LNA states; one that does not exist here is refused. With
+            // the gain set by hand, the step set comes back on a band that has it.
+            if (!_autoGain) SetLna(Math.Min(_gainStep, MaxLnaState(centerHz)));
+            else if (_activeStep > MaxLnaState(centerHz)) SetLna(MaxLnaState(centerHz));
         }
     }
 
@@ -935,4 +938,13 @@ public sealed unsafe class SdrPlaySource : IIqSource
             return hz < 60e6 ? 6 : hz < 1000e6 ? 9 : 8;
         return hz < 12e6 ? 18 : hz < 50e6 ? 19 : hz < 60e6 ? 24 : hz < 250e6 ? 26 : hz < 420e6 ? 27 : hz < 1000e6 ? 20 : 18;
     }
+
+    /// <summary>The highest LNA state on any band (the most of <see cref="MaxLnaState"/>).</summary>
+    private int MostLnaStates() => _device.HwVer switch
+    {
+        Native.HwRsp1 => 3,
+        Native.HwRsp2 => 8,
+        Native.HwRspDx or Native.HwRspDxR2 => 27,
+        _ => 9,
+    };
 }

@@ -217,6 +217,7 @@ internal sealed class ReceiverHost
             AutoGain = src.AutoGain,
             GainStep = src.GainStep,
             MaxGainStep = src.MaxGainStep,
+            MostGainSteps = src.MostGainSteps,
             ActiveGainStep = src.ActiveGainStep,
             GainDb = src.GainDb,
             Overloaded = src.Overloaded,

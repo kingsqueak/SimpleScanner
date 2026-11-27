@@ -201,7 +201,7 @@
                 <Button Classes="seg small" Content="Skip" Command="{Binding SkipCommand}"
                         ToolTip.Tip="Let go of this row's channel and pass it by for a while; the other rows carry on" />
                 <Button Classes="seg small" Content="Avoid" Command="{Binding AvoidCommand}"
-                        ToolTip.Tip="Let go of this row's channel and keep it out of the scan for the Avoid Timer set in Settings" />
+                        ToolTip.Tip="Let go of this row's channel and keep it out of the scan for the time set in Avoid for, on Settings" />
               </StackPanel>
             </Grid>
           </DataTemplate>

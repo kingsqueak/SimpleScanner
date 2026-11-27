@@ -18,7 +18,7 @@ public partial class MainWindow : Window
     }
 
     // The full window's and the small window's least and usual sizes.
-    private const double FullMinWidth = 700, FullMinHeight = 634, FullWidth = 1130, FullHeight = 664;
+    private const double FullMinWidth = 820, FullMinHeight = 740, FullWidth = 1130, FullHeight = 760;
     private const double MiniMinWidth = 300, MiniMinHeight = 170, MiniWidth = 520, MiniHeight = 262;
 
     /// <summary>Put the window where it was when it was last closed, at the size it had, full or small as it was.</summary>
@@ -85,33 +85,60 @@ public partial class MainWindow : Window
             area.Y + Math.Max(0, (area.Height - (int)(ClientSize.Height * screen.Scaling)) / 2));
     }
 
-    private int _tab;
+    // The deck: its three cards in one row when there is room for them; otherwise Scan and Audio side by side
+    // over Tune, which then has the width for its controls in one line.
+    private bool? _wideDeck;
 
-    /// <summary>The Memory Mgr tab is a button in the tab strip: it opens the channel editor and the tab that was showing comes back.</summary>
-    // Operate's right-hand column: the user groups have up to half of it, so the active frequencies under them stay in view.
-    private void OnGroupsColumnSized(object? sender, SizeChangedEventArgs e) =>
-        GroupsScroll.MaxHeight = Math.Max(60, e.NewSize.Height * 0.5 - 20);
+    private void OnDeckSized(object? sender, SizeChangedEventArgs e)
+    {
+        bool wide = e.NewSize.Width >= 1000;
+        if (_wideDeck == wide) return;
+        _wideDeck = wide;
+        Deck.ColumnDefinitions = new ColumnDefinitions(wide ? "*,1.4*,*" : "*,*");
+        Deck.RowDefinitions = new RowDefinitions(wide ? "Auto" : "Auto,Auto");
+        Place(ScanCard, 0, 0, 1);
+        Place(TuneCard, wide ? 0 : 1, wide ? 1 : 0, wide ? 1 : 2);
+        Place(AudioCard, 0, wide ? 2 : 1, 1);
+    }
+
+    private static void Place(Control card, int row, int column, int span)
+    {
+        Grid.SetRow(card, row);
+        Grid.SetColumn(card, column);
+        Grid.SetColumnSpan(card, span);
+    }
+
+    // The deck's line about the groups scanned opens Groups.
+    private void OnShowGroups(object? sender, RoutedEventArgs e) => Tabs.SelectedItem = GroupsTab;
+
+    // Store, on the deck and on Search: Channels, with the name box ready to type in.
+    private void OnStore(object? sender, RoutedEventArgs e)
+    {
+        Tabs.SelectedItem = ChannelsTab;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => StoreName.Focus(), Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void OnOpenChannels(object? sender, RoutedEventArgs e) =>
+        // After the click is over, so the main window does not take the focus back from the editor.
+        Avalonia.Threading.Dispatcher.UIThread.Post(OpenChannels);
+
+    private void OnOpenHelp(object? sender, RoutedEventArgs e) => Avalonia.Threading.Dispatcher.UIThread.Post(() => OpenHelp());
+
+    // The correction's − and + buttons: a tenth of a ppm at a time.
+    private void OnPpmDown(object? sender, RoutedEventArgs e) => StepPpm(-0.1m);
+    private void OnPpmUp(object? sender, RoutedEventArgs e) => StepPpm(0.1m);
+
+    private void StepPpm(decimal by)
+    {
+        if (DataContext is MainViewModel main) main.Radio.Ppm = Math.Clamp(Math.Round((main.Radio.Ppm ?? 0) + by, 1), -100, 100);
+    }
 
     private void OnTabChanged(object? sender, SelectionChangedEventArgs e)
     {
         // Lists and choosers inside the tabs send this event up too.
         if (!ReferenceEquals(e.Source, Tabs)) return;
-        if (ReferenceEquals(Tabs.SelectedItem, HelpTab))
-        {
-            Tabs.SelectedIndex = _tab;
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => OpenHelp());
-            return;
-        }
-        if (!ReferenceEquals(Tabs.SelectedItem, MemoryTab))
-        {
-            _tab = Tabs.SelectedIndex;
-            // Settings lists the radios: look for them as it is shown, so one just plugged in is there.
-            if (Tabs.SelectedItem is TabItem { Header: "Settings" } && DataContext is MainViewModel main) main.RefreshRadios();
-            return;
-        }
-        Tabs.SelectedIndex = _tab;
-        // After the click is over, so the main window does not take the focus back from the editor.
-        Avalonia.Threading.Dispatcher.UIThread.Post(OpenChannels);
+        // Radio lists the radios: look for them as it is shown, so one just plugged in is there.
+        if (ReferenceEquals(Tabs.SelectedItem, RadioTab) && DataContext is MainViewModel main) main.RefreshRadios();
     }
 
     private HelpWindow? _help;

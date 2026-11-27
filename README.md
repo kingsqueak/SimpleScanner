@@ -16,8 +16,12 @@ digital voice modes, and several radios at once.
 - Several radios at once, each with its own display, groups and scan (see "Several radios" below)
 - Multi Monitor: a scan that finds several active channels within one tuning of the radio plays
   up to four at once, each from its own place between the speakers (see "Multi Monitor" below)
-- Under the groups on the Operate tab, the frequencies of the groups chosen, each with a tick to
-  take it in or out of the scan. A change of tick is taken up by a running scan at once
+- The controls used all the time (Scan, Tune, Audio) always in view under the display; groups,
+  channels, search, radio and app settings in tabs below them
+- On the Groups tab, the frequencies of the groups chosen, each with a tick to take it in or out
+  of the scan. A change of tick is taken up by a running scan at once
+- Light and Dark: the window follows the macOS appearance, or keeps to one (Settings); the
+  display stays dark like a scanner's LCD, or follows the Light look
 - Import of RadioReference frequency downloads (the CSV file of a county or an agency), and a
   channel editor: filter the list, edit any field, put channels in groups, and a groups editor
   to make, rename and delete groups (a group made there stays, empty, until channels are put in it)
@@ -58,24 +62,25 @@ the scan stops on. Trunked-system frequencies in a download are stored unticked.
 
 ### Several radios
 
-With more than one RSP plugged in, the scanner can run them together. On the Settings tab, choose a
-radio in the Receiver box and tick "Use" for each one wanted; they are started at the next launch.
+With more than one RSP plugged in, the scanner can run them together. On the Radio tab, choose a
+radio in the Receiver box and switch on "Use at start" for each one wanted; they are started at the next launch.
 Each radio, the first included, runs in a helper process of its own, started and ended by the
 program (the SDRplay API gives a process one radio, and a radio whose USB link jams is restarted in
 a fresh helper).
 
 - Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its
-  own Scan, Skip and Avoid buttons. Click a strip to select that radio. Tune, Mode, Filter, Audio,
-  Search and the Scan row on the Operate tab work the radio selected.
-- Each radio has its own ticked groups. The groups shown on Operate and on Scan Groups are those
-  of the radio selected, and the heading says whose they are.
+  own Scan, Skip and Avoid buttons. Click a strip, or its name after "Controls for"
+  above the deck, to select that radio. The Scan, Tune and Audio cards and the tabs work the radio
+  selected.
+- Each radio has its own ticked groups. The groups shown on the Groups tab are those of the radio
+  selected, and the tab says whose they are.
 - Scan starts and stops the radio selected and leaves the others as they are: one can sit on a
   fixed station while another scans. Each radio scans every ticked channel of its own groups,
   whatever the others scan: radios given the same groups both scan them.
-- A channel's own Scan tick (on Scan Groups, and in the frequency list on Operate) is the same for
+- A channel's own Scan tick (on Channels, and in the frequency list on Groups) is the same for
   every radio.
 - Each radio keeps its own settings (antenna, gain, squelch, volume and the rest) under its serial
-  number, and has a Pan slider on the Settings tab to put its sound to the left or the right.
+  number, and has a Pan slider on the Radio tab to put its sound to the left or the right.
 - The small window shows every radio's strip.
 
 With one radio the window is as it was, with the one large display.

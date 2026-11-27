@@ -18,15 +18,15 @@ SimpleScanner is a communications scanner for SDRplay RSP receivers. It receives
 
 - Plug the radio in and start SimpleScanner. With more than one radio plugged in, it asks which to use.
 - Press the round power button on the display. It turns green when the radio is running.
-- On the **Operate** tab, type a frequency in MHz in the Tune box and press Enter. A NOAA weather channel (162.400 to 162.550) or a broadcast FM station is a good first test.
+- In the **Tune** box under the display, type a frequency in MHz and press Enter. A NOAA weather channel (162.400 to 162.550) or a broadcast FM station is a good first test.
 - Slide **Squelch** until the green mark on the level bar sits just above the bar's resting level. The RX lamp lights when the squelch opens.
-- Set **Volume**. On an RSPdx, check on the **Settings** tab that **Antenna** is the socket your antenna is on.
+- Set **Volume**. On an RSPdx, check on the **Radio** tab that **Antenna** is the socket your antenna is on.
 
 ## Then fill it with channels
 
-- Open **Memory Mgr** and load the frequencies for your area: **Import RadioReference CSV…** for a downloaded file, or **RadioReference online…** to browse by place. **RadioReference** explains both.
-- Or tune to something by hand and keep it with **Store** on the **Scan Groups** tab.
-- Tick the groups you want on **Scan Groups** and press **Scan**.
+- Open the **Channel editor** (at the right end of the tab row) and load the frequencies for your area: **Import RadioReference CSV…** for a downloaded file, or **RadioReference online…** to browse by place. **RadioReference** explains both.
+- Or tune to something by hand and keep it with **Store**.
+- Tick the groups you want on the **Groups** tab and press **Scan**.
 
 # The display
 
@@ -47,20 +47,23 @@ The button with two arrows shrinks the window to the display alone, with Mute, S
 
 # Tuning and listening
 
-The **Operate** tab works the radio.
+The controls used all the time sit under the display, always in view, in three cards: **Scan**, **Tune** and **Audio**. In a narrow window Tune moves under the other two and keeps its controls on one line.
+
+What is used less, or takes more setting up, is in the tabs below them: **Groups**, **Channels**, **Search**, **Radio** and **Settings**. The **Channel editor** and **?** (Help) at the right end of the tab row open windows of their own.
 
 ## Tune
 
-- Type a frequency in MHz and press Enter or **Go**. The receiver covers 0.1 to 2000 MHz.
+- Type a frequency in MHz and press Enter. The receiver covers 0.1 to 2000 MHz.
 - The arrow buttons move one step. **Step** sets the size; Auto uses the usual channel spacing of the band.
 - Or tune on the display's digits with the mouse wheel.
+- **Store** keeps the frequency on the display: it opens the **Channels** tab with the name box ready.
 
 ## Mode and filter
 
 - **Auto** takes the mode and filter from a United States band plan: AM on the airband, FM elsewhere.
 - **AM**, **NFM** (narrow FM: public service, business, marine, weather, amateur) and **WFM** (broadcast FM) set it by hand.
 - **Stereo** receives broadcast FM in stereo when the station sends it. Mono is quieter on a weak station.
-- **Filter** is the channel filter. Use the narrow one where channels are 12.5 kHz (FM) or 8.33 kHz (AM) apart.
+- **Filter** is the channel filter, the row of buttons after Stereo. Use the narrow one where channels are 12.5 kHz (FM) or 8.33 kHz (AM) apart.
 - There is no SSB or CW reception.
 
 ## Audio and squelch
@@ -83,16 +86,23 @@ A stored channel is a frequency with a name and what is known about it. Channels
 - **Auto groups by location**: made by the program, one for each location in use (a town, a county, statewide, nationwide).
 - **Auto groups by tag**: made by the program, one for each tag in use (Fire Dispatch, Law Tac, Aircraft…).
 
-## The Scan Groups tab
+## The Groups tab
 
-- Tick one or several groups to show and scan. With none ticked, nothing is. **All groups** ticks every one; **No groups** unticks every one, to start again from a few.
-- The list at the right shows the channels of the ticked groups. Tick a channel to include it in the scan; select one to tune to it.
-- **Store** keeps the frequency on the display under the name typed beside it. With one group shown it goes in that group; otherwise in "My channels".
+- Tick one or several groups to show and scan. With none ticked, nothing is. **All** ticks every one; **None** unticks every one, to start again from a few.
+- The user groups, the location groups and the tag groups each have a column. The number beside a group is how many stored channels it holds.
+- **In the scan**, at the right, lists the frequencies of the ticked groups, each with a tick. Untick one to leave it out of the scan. It is the channel's own Scan tick, the same one as on Channels. A change takes effect at once, also on a running scan.
+- The filter box shows only the groups and frequencies whose names hold what is typed. It changes no ticks.
+- The line under Scan on the deck says which groups are ticked and how many frequencies are to be scanned; clicking it opens this tab.
+
+## The Channels tab
+
+- The stored channels of the ticked groups, as a table: Scan tick, frequency, name, mode, groups and place, tag. Choosing one tunes to it.
+- **Store** keeps the frequency on the display under the name typed. With one group ticked it goes in that group; otherwise in "My channels", or where it already was.
 - **Delete** removes the selected channel.
 
-## The channel editor (Memory Mgr)
+## The channel editor
 
-**Memory Mgr** opens the channel editor in a window of its own.
+**Channel editor**, at the right end of the tab row, opens the channel editor in a window of its own.
 
 - **Filter**: type any words from the name, agency, description, tag, tone, callsign or frequency. The box beside it shows one group only, or the channels in no group.
 - Click a column heading to sort; drag a heading's edge to change its width.
@@ -114,8 +124,8 @@ A stored tone or code (PL, DPL, NAC, color code) is shown on the display but is 
 
 - The scan stops on a channel while there is a signal above the squelch mark, and for two seconds after.
 - **Skip** leaves the channel the scan has stopped on and carries on.
-- **Avoid** leaves it and keeps it out of the scan for the **Avoid Timer** set on Settings (30 minutes, 1 hour, or the full session). Closing the app clears every avoid.
-- **Resume Timer** (Settings) is the longest the scan stays on a busy channel before it carries on, from 15 seconds to 10 minutes, or **Hold** to stay until the signal drops. A channel left this way is passed by for ten seconds so the others get a turn.
+- **Avoid** leaves it and keeps it out of the scan for the time set in **Avoid for** on Settings (30 minutes, 1 hour, or the full session). Closing the app clears every avoid.
+- **Resume after** (Settings) is the longest the scan stays on a busy channel before it carries on, from 15 seconds to 10 minutes, or **Hold** to stay until the signal drops. A channel left this way is passed by for ten seconds so the others get a turn.
 
 ## Multi Monitor
 
@@ -124,24 +134,21 @@ With **Multi** on, a scan that finds several active channels in the stretch of b
 - **The stretch of band.** The radio watches about 6.4 MHz from one tuning. Only channels inside that stretch can be heard together; the scan moves to the next stretch when the one it is on has gone quiet.
 - **Four rows.** While the radio scans in this mode, its display gives way to four rows, one for each place: **33% L**, **33% R**, **Hard L** and **Hard R**. Each row shows the channel it holds, its details, its level, and a lamp: **RX** lit while the signal is heard, **WAIT** outlined while the channel is kept for a reply.
 - **Places.** A signal heard alone plays in the centre. When a second one starts, each glides to its own place, and back to the centre when it is alone again.
-- **Hang time.** After a signal drops, its row keeps the channel for the **Multi Monitor Hang Time** set on Settings (2 to 15 seconds, 8 to begin with), so that the reply is heard on the same row. The one hang time applies to every radio.
-- **Resume Timer.** In this mode the Resume Timer limits the whole stay in one stretch of band, not each channel. For long conversations set it long, or to **Hold**.
+- **Hang time.** After a signal drops, its row keeps the channel for the **Multi hang time** set on Settings (2 to 15 seconds, 8 to begin with), so that the reply is heard on the same row. The one hang time applies to every radio.
+- **Resume after.** In this mode the Resume after time limits the whole stay in one stretch of band, not each channel. For long conversations set it long, or to **Hold**.
 - **One signal, one row.** A strong signal also shows up on the channels right beside it. Such a channel is not given a row of its own, and a much weaker signal on the next channel waits until the stronger one stops.
 - **Skip and Avoid.** Each row has its own **Skip** and **Avoid** for the channel it holds; the others carry on. The main **Skip** leaves the whole stretch of band and passes by every channel held in it for a while. The main **Avoid** is not used in this mode.
-- **Pan.** A radio's **Pan** on Settings is applied on top of the places: off centre it squeezes all four towards one side. Keep it in the middle for the full spread.
+- **Pan.** A radio's **Pan** on the Radio tab is applied on top of the places: off centre it squeezes all four towards one side. Keep it in the middle for the full spread.
 - Digital voice is decoded on each row, so up to four digital calls can be heard at once. Linked repeaters often carry the same call: two rows, or two radios, may then play the same voice.
-
-## The frequency list on Operate
-
-Under the groups at the right of Operate are the frequencies of the ticked groups, each with a tick. Untick one to leave it out of the scan. It is the channel's own Scan tick, the same one as on Scan Groups. A change takes effect at once, also on a running scan.
 
 ## Search
 
 The **Search** tab looks through a range of frequencies for anything above the squelch mark.
 
 - Type the lowest and the highest frequency in MHz and press the search button.
-- It uses the band's usual channel spacing unless a Step is chosen on Operate.
-- **Skip** leaves a frequency out for ten minutes. To keep one, go to Scan Groups and press **Store**.
+- **Quick ranges** fill in a common range with one click: airband, the 2 m and 70 cm amateur bands, VHF high, marine, NOAA weather and UHF.
+- It uses the band's usual channel spacing unless a Step is chosen in Tune.
+- **Skip** leaves a frequency out for ten minutes. **Store** keeps the one it has stopped on: it opens Channels with the name box ready.
 
 # Digital voice
 
@@ -161,7 +168,7 @@ Digital voice is recognised by itself on any narrow FM channel. Nothing has to b
 
 # RadioReference
 
-RadioReference (radioreference.com) keeps a database of who uses which frequency. SimpleScanner can take frequencies from it in two ways, both reached from the channel editor (**Memory Mgr**):
+RadioReference (radioreference.com) keeps a database of who uses which frequency. SimpleScanner can take frequencies from it in two ways, both reached from the **Channel editor**:
 
 - **Import RadioReference CSV…** reads a file you downloaded from the website yourself.
 - **RadioReference online…** asks RadioReference's web service directly and lets you browse by place.
@@ -227,19 +234,19 @@ With more than one RSP plugged in, the scanner can run them together.
 
 ## Setting it up
 
-- On the **Settings** tab, choose a radio in the **Receiver** box and tick **Use**. Do this for each radio wanted.
+- On the **Radio** tab, choose a radio in the **Receiver** box and switch on **Use at start**. Do this for each radio wanted.
 - Close and start the app. The radios ticked are started together from then on, whenever they are plugged in.
-- With none ticked, the radio used last is used, as with one radio.
+- With none switched on, the radio used last is used, as with one radio.
 
 ## How it works
 
 - Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its own Scan, Skip and Avoid buttons.
-- Click a strip to select that radio. Tune, Mode, Filter, Audio, Search and the Scan row on Operate work the radio selected. A click on the frequency of a radio that is not selected only selects it; once it is selected, its digits tune by wheel or click as the big display's do.
-- Each radio has its own ticked groups. The groups shown are those of the radio selected, and the heading says whose they are.
+- Click a strip, or the radio's name after **Controls for** above the deck, to select that radio; its strip is outlined. The Scan, Tune and Audio cards and the Groups, Channels, Search and Radio tabs work the radio selected. A click on the frequency of a radio that is not selected only selects it; once it is selected, its digits tune by wheel or click as the big display's do.
+- Each radio has its own ticked groups. The groups shown are those of the radio selected, and the Groups tab says whose they are.
 - **Scan** starts and stops the radio selected and leaves the others as they are: one can sit on a fixed channel while another scans.
 - Each radio scans every ticked channel of its own groups, whatever the other radios scan. The stored channels are common to all: give two radios the same groups and both scan them; give each its own and they divide the work as you choose.
 - A channel's own Scan tick is the same for every radio.
-- Each radio keeps its own settings (antenna, gain, squelch, volume and the rest) under its serial number. **Pan** on Settings puts a radio's sound to the left or the right, to tell them apart by ear.
+- Each radio keeps its own settings (antenna, gain, squelch, volume and the rest) under its serial number. **Pan** on the Radio tab puts a radio's sound to the left or the right, to tell them apart by ear.
 - Each radio runs in a helper process of its own, started and ended by the program: the SDRplay software gives a program one radio, and a radio that stops working is restarted in a fresh helper (see **Troubleshooting**).
 
 ## USB: each radio needs room on the bus
@@ -254,25 +261,28 @@ With more than one RSP plugged in, the scanner can run them together.
 
 # Settings
 
-## Output
+## The Radio tab
 
-Which sound device the audio goes to. It can be changed while receiving. **Refresh** looks again after one is plugged in.
+The settings of one radio: the one chosen in the **Receiver** box, which is the one selected when it is running.
 
-## Radio
-
-- **Auto gain**: the scanner steps the radio's front-end attenuation up on overload and back down when it clears.
-- **LNA step**: front-end attenuation; 0 is the most gain. With Auto gain on, this is the most gain the scanner may use.
 - **Receiver**: the radio these settings belong to, when more than one is plugged in. A radio another program is using is not listed.
+- **Use at start**: run this radio whenever it is plugged in (see **Several radios**). Takes effect at the next start.
 - **Antenna**: the antenna socket, on models with more than one that the app can switch (see **Hardware**).
-- **Use**: run this radio whenever it is plugged in (see **Several radios**). Takes effect at the next start.
-- **MW/FM broadcast notch**: switches in the radio's notch filters for the AM (medium wave, about 0.5 to 1.7 MHz) and FM (88 to 108 MHz) broadcast bands, so strong broadcast stations cannot overload it while it listens elsewhere. One switch covers both bands. Turn it off to listen to AM or FM broadcast stations.
-- **Correction**: frequency correction in parts per million. Leave at 0 unless signals on known frequencies all read off by the same proportion.
+- **Gain (LNA step)**: front-end attenuation; 0 is the most gain. With Auto gain on, this is the most gain the scanner may use.
+- **Auto gain**: the scanner steps the radio's front-end attenuation up on overload and back down when it clears.
+- **Correction**: frequency correction in parts per million, a tenth at a time with − and +. Leave at 0 unless signals on known frequencies all read off by the same proportion.
+- **MW/FM notch**: switches in the radio's notch filters for the AM (medium wave, about 0.5 to 1.7 MHz) and FM (88 to 108 MHz) broadcast bands, so strong broadcast stations cannot overload it while it listens elsewhere. One switch covers both bands. Turn it off to listen to AM or FM broadcast stations.
+- **Bias-T**: puts DC (about 4.7 V) on the antenna socket to power a masthead preamplifier or an active antenna. On an RSPdx it is on Antenna B only. Leave it off unless something on that socket needs the power.
 - **Pan**: where this radio's sound sits between the left and right speaker.
-- **Enable bias T**: puts DC (about 4.7 V) on the antenna socket to power a masthead preamplifier or an active antenna. On an RSPdx it is on Antenna B only. Leave it off unless something on that socket needs the power.
 
-## Scan
+## The Settings tab
 
-**Avoid Timer** and **Resume Timer**: see **Scanning and searching**. **Multi Monitor Hang Time**: see **Multi Monitor** under **Scanning and searching**.
+For the whole app.
+
+- **Output**: which sound device the audio goes to. It can be changed while receiving. **Refresh** looks again after one is plugged in.
+- **Appearance**: **System** follows the Mac's Light or Dark appearance, and changes with it; **Light** or **Dark** keeps to one.
+- **Display in Light**: in the Light appearance the display **Stays dark**, like a scanner's LCD, or **Follows** it, dark amber on cream.
+- **Avoid for** and **Resume after**: see **Scanning and searching**. **Multi hang time**: see **Multi Monitor** under **Scanning and searching**.
 
 # Hardware
 
@@ -305,7 +315,7 @@ A scanner is only as good as its antenna. A discone or a wideband scanner antenn
 
 - **"No SDRplay radio found"**: check the cable, and that no other program (or another copy of SimpleScanner) has the radio.
 - **"The SDRplay API is not installed"**: install it from sdrplay.com/api and start again.
-- **Running but silent**: check Mute, Volume, the Output device on Settings, and that the squelch mark is below the signal. Check the Antenna socket chosen.
+- **Running but silent**: check Mute, Volume, the Output device on Settings, and that the squelch mark is below the signal. Check the Antenna socket chosen on the Radio tab.
 - **The scan never stops, or stops on noise**: the squelch mark is too high, or too low. Set it just above the bar's resting level, or switch on Auto squelch.
 - **OVERLOAD shows often**: leave Auto gain on, raise the LNA step, and switch on the MW/FM broadcast notch.
 - **A digital call is shown but silent**: it is encrypted (ENCRYPTED shows), or it is a kind the app shows without decoding, or this build has no AMBE+2 codec ("no voice codec").

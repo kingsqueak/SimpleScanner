@@ -97,7 +97,7 @@
                   ToolTip.Tip="Leave the channel this radio's scan has stopped on and carry on" />
           <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}" IsEnabled="{Binding CanAvoidChannel}" Margin="0"
                   ToolTip.ShowOnDisabled="True"
-                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and keep it out of the scan for the Avoid Timer set in Settings. In Multi Monitor each of its rows has its own Avoid." />
+                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and keep it out of the scan for the time set in Avoid for, on Settings. In Multi Monitor each of its rows has its own Avoid." />
         </StackPanel>
       </StackPanel>
 
@@ -154,7 +154,7 @@
                 <Button Classes="seg small" Content="Skip" Command="{Binding SkipCommand}"
                         ToolTip.Tip="Let go of this line's channel and pass it by for a while; the other lines carry on" />
                 <Button Classes="seg small" Content="Avoid" Command="{Binding AvoidCommand}"
-                        ToolTip.Tip="Let go of this line's channel and keep it out of the scan for the Avoid Timer set in Settings" />
+                        ToolTip.Tip="Let go of this line's channel and keep it out of the scan for the time set in Avoid for, on Settings" />
               </StackPanel>
             </Grid>
           </DataTemplate>

@@ -91,6 +91,10 @@ public sealed class Settings
     public List<string>? Groups { get; set; }
     /// <summary>Sound output device by name; null is the system's default.</summary>
     public string? AudioDevice { get; set; }
+    /// <summary>The look: "System" follows the macOS appearance; "Light" or "Dark" keeps to one.</summary>
+    public string Appearance { get; set; } = "System";
+    /// <summary>In the Light look the display follows it (dark amber on cream); otherwise it stays dark, as a scanner's LCD.</summary>
+    public bool DisplayFollowsLight { get; set; }
     /// <summary>Widths of the channel editor's columns that the user has changed, by column key.</summary>
     public Dictionary<string, double>? ChannelColumns { get; set; }
     /// <summary>Minutes an avoided frequency stays out of the scan; 0 is until the app is closed.</summary>

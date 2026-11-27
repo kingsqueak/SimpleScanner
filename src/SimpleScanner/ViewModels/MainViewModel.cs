@@ -1,5 +1,7 @@
 using SimpleScanner.Radio;
 using System.Globalization;
+using Avalonia;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -23,6 +25,13 @@ public sealed partial class MemoryRow(MemoryChannel channel, Action changed) : O
         ? string.Join(" · ", new[] { Channel.Agency, tag }.Where(t => !string.IsNullOrEmpty(t)))
         : string.Join(", ", Channel.Groups));
 
+    /// <summary>The Channels table's columns.</summary>
+    public string FrequencyText => (Channel.FrequencyHz / 1e6).ToString("0.0000", CultureInfo.InvariantCulture);
+    public string ModeText => Channel.Mode?.ToString().ToUpperInvariant() ?? "Auto";
+    /// <summary>The channel's own groups, then its location (the group the program makes from it).</summary>
+    public string GroupsText => string.Join(", ", Channel.Groups.Append(Channel.Location ?? "").Where(g => g.Length > 0));
+    public string TagText => Channel.Tag ?? "";
+
     public bool Scan
     {
         get => Channel.Scan;
@@ -35,6 +44,9 @@ public sealed partial class MemoryRow(MemoryChannel channel, Action changed) : O
         }
     }
 }
+
+/// <summary>A stretch of band the Search tab can fill in with one click.</summary>
+public sealed record SearchRange(string Label, string From, string To);
 
 /// <summary>
 /// A frequency of the selected radio's groups, as a line under the user groups on Operate. Its tick is
@@ -78,6 +90,10 @@ public sealed partial class GroupRow(string name, bool selected, Action changed)
     public bool IsPlace { get; } = MemoryStore.IsPlaceGroup(name);
     /// <summary>What the selector shows: a tag's or a location's group goes by the tag or location alone, under its own heading.</summary>
     public string Label => MemoryStore.GroupLabel(Name);
+    /// <summary>How many stored channels the group holds.</summary>
+    [ObservableProperty] private int _count;
+    /// <summary>The group matches the filter on the Groups tab.</summary>
+    [ObservableProperty] private bool _isShown = true;
 
     public bool Selected
     {
@@ -146,6 +162,82 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _searchFrom = "144";
     [ObservableProperty] private string _searchTo = "148";
 
+    // ---- the look ----------------------------------------------------------------------------
+
+    public const string StaysDark = "Stays dark", Follows = "Follows";
+    /// <summary>Settings, Appearance: follow the Mac, or keep to Light or Dark.</summary>
+    public IReadOnlyList<string> Appearances { get; } = ["System", "Light", "Dark"];
+    [ObservableProperty] private string _selectedAppearance = "System";
+    /// <summary>Settings, Display in Light: the display stays dark like a scanner's LCD, or follows the Light look.</summary>
+    public IReadOnlyList<string> DisplayLooks { get; } = [StaysDark, Follows];
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayVariant))]
+    private string _selectedDisplayLook = StaysDark;
+    /// <summary>The look the radios' displays are drawn in: always Dark, or the window's own.</summary>
+    public ThemeVariant DisplayVariant => SelectedDisplayLook == Follows ? ThemeVariant.Default : ThemeVariant.Dark;
+
+    partial void OnSelectedAppearanceChanged(string value)
+    {
+        ApplyAppearance(value);
+        if (_loading) return;
+        _settings.Appearance = value;
+        _dirty = true;
+    }
+
+    partial void OnSelectedDisplayLookChanged(string value)
+    {
+        if (_loading) return;
+        _settings.DisplayFollowsLight = value == Follows;
+        _dirty = true;
+    }
+
+    /// <summary>Give the whole app the look chosen ("System" follows the macOS appearance).</summary>
+    public static void ApplyAppearance(string look)
+    {
+        if (Application.Current is { } app)
+            app.RequestedThemeVariant = look switch { "Light" => ThemeVariant.Light, "Dark" => ThemeVariant.Dark, _ => ThemeVariant.Default };
+    }
+
+    // ---- the deck and the Groups tab ----------------------------------------------------------
+
+    /// <summary>The deck's line about what is scanned: the groups ticked for the radio selected.</summary>
+    [ObservableProperty] private string _groupsSummary = "";
+    /// <summary>How many frequencies of those groups are ticked to be scanned.</summary>
+    [ObservableProperty] private int _activeCount;
+    /// <summary>The Groups tab's filter: only the groups and frequencies whose names hold this are shown.</summary>
+    [ObservableProperty] private string _groupFilter = "";
+    /// <summary>The frequency list as shown: all of it, or those matching the filter.</summary>
+    [ObservableProperty] private IReadOnlyList<ActiveFrequency> _shownActive = [];
+
+    partial void OnGroupFilterChanged(string value) => ApplyFilter();
+    partial void OnActiveFrequenciesChanged(IReadOnlyList<ActiveFrequency> value) => ApplyFilter();
+
+    private void ApplyFilter()
+    {
+        string f = GroupFilter.Trim();
+        bool Has(string text) => text.Contains(f, StringComparison.OrdinalIgnoreCase);
+        foreach (var g in GroupRows) g.IsShown = f.Length == 0 || Has(g.Label);
+        ShownActive = f.Length == 0 ? ActiveFrequencies : ActiveFrequencies.Where(a => Has(a.Name) || a.Frequency.StartsWith(f, StringComparison.Ordinal)).ToList();
+    }
+
+    public IReadOnlyList<SearchRange> SearchRanges { get; } =
+    [
+        new("Airband 118–137", "118", "137"), new("2 m 144–148", "144", "148"), new("VHF high 148–174", "148", "174"),
+        new("Marine 156–162", "156", "162.025"), new("NOAA 162.40–162.55", "162.4", "162.55"),
+        new("70 cm 420–450", "420", "450"), new("UHF 450–470", "450", "470"),
+    ];
+
+    [RelayCommand]
+    private void SetSearchRange(SearchRange range)
+    {
+        SearchFrom = range.From;
+        SearchTo = range.To;
+    }
+
+    /// <summary>The deck's "Controls for" buttons: make this radio the one the controls work, as clicking its display does.</summary>
+    [RelayCommand]
+    private void SelectRadio(RadioViewModel radio) => Select(radio);
+
     public System.Collections.ObjectModel.ObservableCollection<MemoryRow> Memories { get; } = [];
     /// <summary>Every memory group with its tick. None ticked means all groups are shown and scanned.</summary>
     public System.Collections.ObjectModel.ObservableCollection<GroupRow> GroupRows { get; } = [];
@@ -195,6 +287,9 @@ public sealed partial class MainViewModel : ObservableObject
         _selectedMultiHangTime = MultiHangTimes.FirstOrDefault(h => (int)h.Value == settings.MultiHangSeconds)
             ?? MultiHangTimes.First(h => (int)h.Value == Settings.DefaultMultiHangSeconds);
         _isMini = settings.Mini;
+        _selectedAppearance = Appearances.Contains(settings.Appearance) ? settings.Appearance : "System";
+        _selectedDisplayLook = settings.DisplayFollowsLight ? Follows : StaysDark;
+        ApplyAppearance(_selectedAppearance);
         _loading = false;
         foreach (var r in radios)
         {
@@ -372,6 +467,7 @@ public sealed partial class MainViewModel : ObservableObject
             ActiveFrequencies = lines.Select(l => new ActiveFrequency(l.Place, (l.Hz / 1e6).ToString("0.0000", CultureInfo.InvariantCulture),
                 l.Name, l.Scan, ActiveTicked)).ToList();
         ActiveTitle = $"Active Frequencies ({lines.Count(l => l.Scan)})";
+        ActiveCount = lines.Count(l => l.Scan);
     }
 
     private bool _ticking;
@@ -385,7 +481,7 @@ public sealed partial class MainViewModel : ObservableObject
         ScanTicksChanged();
     }
 
-    // A channel's Scan tick has changed, here or in the list on Scan Groups: the radios that are scanning take it up at once.
+    // A channel's Scan tick has changed, here or in a list on Groups or Channels: the radios that are scanning take it up at once.
     private void ScanTicksChanged()
     {
         if (_ticking) return;
@@ -439,7 +535,11 @@ public sealed partial class MainViewModel : ObservableObject
             HasAutoGroups = AutoGroupRows.Count > 0;
             HasPlaceGroups = PlaceGroupRows.Count > 0;
         }
+        foreach (var row in GroupRows) row.Count = _memories.Channels.Count(c => MemoryStore.InGroup(c, row.Name));
         var shown = SelectedGroups;
+        var labels = shown.Select(MemoryStore.GroupLabel).ToList();
+        GroupsSummary = labels.Count == 0 ? "No groups ticked" : labels.Count <= 2 ? string.Join(", ", labels)
+            : $"{labels[0]}, {labels[1]}  +{labels.Count - 2}";
         GroupsText = shown.Count == 0 ? NoGroups : shown.Count == GroupRows.Count ? AllGroups : shown.Count == 1 ? shown[0] : $"{shown.Count} groups";
         Memories.Clear();
         // A channel in several of the groups shown appears once, under the first of them.
@@ -450,6 +550,7 @@ public sealed partial class MainViewModel : ObservableObject
             Memories.Add(new MemoryRow(c, ScanTicksChanged));
         _loading = false;
         RefreshActive();
+        ApplyFilter();
     }
 
     /// <summary>The stored channels, for the channel editor.</summary>
@@ -681,7 +782,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         if (ScanListOf(radio) is not (var members, var list))
         {
-            radio.Status = SelectedGroups.Count == 0 ? "No groups are ticked: tick one or more on Scan Groups"
+            radio.Status = SelectedGroups.Count == 0 ? "No groups are ticked: tick one or more on Groups"
                 : "No channels are ticked for scanning in the groups shown";
             return;
         }

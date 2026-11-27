@@ -18,6 +18,8 @@ public partial class HelpWindow : Window
         VersionText.Text = AppInfo.Title;
         Sections.ItemsSource = _sections.Select(s => s.Title).ToList();
         Sections.SelectedIndex = 0;
+        // The section is drawn in the look's colours: drawn again when the Mac's appearance changes.
+        ActualThemeVariantChanged += (_, _) => OnSectionChanged(null, null!);
     }
 
     /// <summary>Show the section with this title, if there is one.</summary>

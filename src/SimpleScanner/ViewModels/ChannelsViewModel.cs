@@ -176,6 +176,12 @@ public sealed partial class ColumnHead(string key, string title, double width) :
     [ObservableProperty] private GridLength _width = width > 0 ? new GridLength(width) : GridLength.Star;
 }
 
+/// <summary>A user group as the Groups editor lists it: its name and how many stored channels are in it.</summary>
+public sealed record GroupEntry(string Name, int Count)
+{
+    public string CountText => Count == 1 ? "1 channel" : $"{Count} channels";
+}
+
 /// <summary>A file that has been read and waits for the user to name the group its channels go in.</summary>
 public sealed record PendingImport(string FileName, List<MemoryChannel> Channels)
 {
@@ -243,6 +249,11 @@ public sealed partial class ChannelsViewModel : ObservableObject
     /// <summary>A real group is chosen in the filter, so it can be renamed or deleted.</summary>
     [ObservableProperty] private bool _isGroupChosen;
     [ObservableProperty] private string _groupNewName = "";
+    /// <summary>The user's groups, for the Groups editor; the one selected there is the one the filter shows.</summary>
+    [ObservableProperty] private IReadOnlyList<GroupEntry> _editorGroups = [];
+    [ObservableProperty] private GroupEntry? _editorGroup;
+    /// <summary>The name typed in the Groups editor for a group to make.</summary>
+    [ObservableProperty] private string _groupToMake = "";
     /// <summary>One of <see cref="DuplicateChoices"/>. When it is not "Off" the list holds only channels that have
     /// a duplicate, set by set.</summary>
     [ObservableProperty] private string _duplicateMode = DuplicateChoices[0];
@@ -329,6 +340,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
         string keep = GroupFilter;
         GroupChoices = Choices();
         GroupFilter = GroupChoices.Contains(keep) ? keep : AllGroups;
+        RefreshEditorGroups();
         _loading = false;
 
         string[] words = Filter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -371,7 +383,25 @@ public sealed partial class ChannelsViewModel : ObservableObject
         // A tag's or a location's group is made by the program: there is nothing to rename or delete.
         IsGroupChosen = value != AllGroups && value != NoGroup && !MemoryStore.IsAutoGroup(value);
         GroupNewName = IsGroupChosen ? value : "";
+        if (EditorGroup?.Name != value) EditorGroup = EditorGroups.FirstOrDefault(g => g.Name == value);
         if (!_loading) Reload();
+    }
+
+    // A group picked in the Groups editor is shown in the list, ready to be renamed or deleted.
+    partial void OnEditorGroupChanged(GroupEntry? value)
+    {
+        if (value is not null && value.Name != GroupFilter) GroupFilter = value.Name;
+    }
+
+    // The Groups editor's list, with the counts as they are now.
+    private void RefreshEditorGroups()
+    {
+        var counts = new Dictionary<string, int>();
+        foreach (var c in _store.Channels)
+            foreach (string g in c.Groups)
+                counts[g] = counts.GetValueOrDefault(g) + 1;
+        EditorGroups = _store.GroupNames().Where(n => !MemoryStore.IsAutoGroup(n)).Select(n => new GroupEntry(n, counts.GetValueOrDefault(n))).ToList();
+        EditorGroup = EditorGroups.FirstOrDefault(g => g.Name == GroupFilter);
     }
 
     // ---- sorting ----------------------------------------------------------------------------
@@ -483,12 +513,42 @@ public sealed partial class ChannelsViewModel : ObservableObject
     private void RefreshGroupChoices()
     {
         var choices = Choices();
+        RefreshEditorGroups();      // the counts change with the members, the names or not
         if (choices.SequenceEqual(GroupChoices)) return;
         _loading = true;
         string keep = GroupFilter;
         GroupChoices = choices;
         GroupFilter = choices.FirstOrDefault(c => MemoryStore.SameGroup(c, keep)) ?? AllGroups;
         _loading = false;
+    }
+
+    /// <summary>
+    /// Make a group with the name typed in the Groups editor. It is kept with no channels in it until some
+    /// are put in it (tick it beside the selected channels), and until it is deleted.
+    /// </summary>
+    [RelayCommand]
+    private void MakeGroup()
+    {
+        string name = GroupToMake.Trim();
+        if (name.Length == 0)
+        {
+            Status = "Type a name for the new group first";
+            return;
+        }
+        if (!NameAllowed(name)) return;
+        if (_store.GroupNames().FirstOrDefault(g => string.Equals(g, name, StringComparison.CurrentCultureIgnoreCase)) is { } there)
+        {
+            Status = $"There is already a group called \"{there}\"";
+            GroupFilter = there;
+            return;
+        }
+        _store.KeptGroups.Add(name);
+        _dirty = true;
+        Flush();
+        GroupToMake = "";
+        GroupFilter = name;
+        RefreshTicks();
+        Status = $"Group \"{name}\" made. Select channels in the list and tick it at the right to put them in it.";
     }
 
     /// <summary>Put the selected channels in a group with the name typed, making it if it is new.</summary>
@@ -523,6 +583,12 @@ public sealed partial class ChannelsViewModel : ObservableObject
         }
         if (!NameAllowed(name)) return;
         bool merged = _store.GroupNames().Contains(name);
+        int kept = _store.KeptGroups.IndexOf(old);
+        if (kept >= 0)
+        {
+            if (_store.KeptGroups.Contains(name)) _store.KeptGroups.RemoveAt(kept);
+            else _store.KeptGroups[kept] = name;
+        }
         int n = 0;
         foreach (var c in _store.Channels)
         {
@@ -558,6 +624,7 @@ public sealed partial class ChannelsViewModel : ObservableObject
         if (!IsGroupChosen) return;
         string old = GroupFilter;
         int n = _store.Channels.Count(c => c.Groups.Remove(old));
+        _store.KeptGroups.Remove(old);
         _dirty = true;
         Flush();
         Status = $"Group \"{old}\" deleted; its {n} channel{(n == 1 ? " is" : "s are")} still stored";

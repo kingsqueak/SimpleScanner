@@ -67,6 +67,11 @@ public sealed class MemoryStore
 
     private readonly string _path;
     public List<MemoryChannel> Channels { get; private set; } = [];
+    /// <summary>
+    /// Groups made by name in the channel editor's Groups editor. Each stays, with or without channels in
+    /// it, until it is deleted there; other groups exist only as long as a channel is in them.
+    /// </summary>
+    public List<string> KeptGroups { get; private set; } = [];
     /// <summary>Counts the saves, so a window can tell that another has changed the channels.</summary>
     public int Version { get; private set; }
 
@@ -80,6 +85,7 @@ public sealed class MemoryStore
             if (!File.Exists(store._path)) return store;
             using var db = store.Open();
             store.Channels = Read(db);
+            store.KeptGroups = ReadGroups(db);
             store._stamp = Changes(db);
         }
         catch (Exception e) when (e is SqliteException or IOException or UnauthorizedAccessException) { }
@@ -123,6 +129,21 @@ public sealed class MemoryStore
                     add.ExecuteNonQuery();
                 }
             }
+            using (var clear = db.CreateCommand())
+            {
+                clear.CommandText = "DELETE FROM groups";
+                clear.ExecuteNonQuery();
+            }
+            using (var add = db.CreateCommand())
+            {
+                add.CommandText = "INSERT OR IGNORE INTO groups (name) VALUES ($name)";
+                var name = add.Parameters.Add("$name", SqliteType.Text);
+                foreach (string g in KeptGroups)
+                {
+                    name.Value = g;
+                    add.ExecuteNonQuery();
+                }
+            }
             long stamp = Changes(db);
             all.Commit();
             _stamp = stamp;
@@ -152,6 +173,11 @@ public sealed class MemoryStore
             BEGIN UPDATE meta SET value = value + 1 WHERE key = 'channels_changes'; END;
         CREATE TRIGGER IF NOT EXISTS channels_removed AFTER DELETE ON channels
             BEGIN UPDATE meta SET value = value + 1 WHERE key = 'channels_changes'; END;
+        CREATE TABLE IF NOT EXISTS groups (name TEXT PRIMARY KEY);
+        CREATE TRIGGER IF NOT EXISTS groups_added AFTER INSERT ON groups
+            BEGIN UPDATE meta SET value = value + 1 WHERE key = 'channels_changes'; END;
+        CREATE TRIGGER IF NOT EXISTS groups_removed AFTER DELETE ON groups
+            BEGIN UPDATE meta SET value = value + 1 WHERE key = 'channels_changes'; END;
         """;
 
     // Opened for each piece of work and closed after it: the RadioReference browser has the same file open.
@@ -179,6 +205,16 @@ public sealed class MemoryStore
         using var cmd = db.CreateCommand();
         cmd.CommandText = "SELECT value FROM meta WHERE key = 'channels_changes'";
         return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static List<string> ReadGroups(SqliteConnection db)
+    {
+        var list = new List<string>();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT name FROM groups ORDER BY rowid";
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(r.GetString(0));
+        return list;
     }
 
     private static List<MemoryChannel> Read(SqliteConnection db)
@@ -252,6 +288,7 @@ public sealed class MemoryStore
             long now = Changes(db);
             if (now == _stamp) return false;
             Channels = Read(db);
+            KeptGroups = ReadGroups(db);
             _stamp = now;
         }
         catch (Exception e) when (e is SqliteException or IOException or UnauthorizedAccessException) { return false; }
@@ -266,9 +303,9 @@ public sealed class MemoryStore
     /// <summary>Every stored channel on this frequency: one frequency is often shared by several users.</summary>
     public List<MemoryChannel> FindAll(double hz) => Channels.Where(c => Math.Abs(c.FrequencyHz - hz) < 100).ToList();
 
-    /// <summary>Every group name in use, in order.</summary>
+    /// <summary>Every group name in use, and those kept with no channel in them, in order.</summary>
     public List<string> GroupNames() =>
-        Channels.SelectMany(c => c.Groups).Distinct().Order(StringComparer.CurrentCultureIgnoreCase).ToList();
+        Channels.SelectMany(c => c.Groups).Concat(KeptGroups).Distinct().Order(StringComparer.CurrentCultureIgnoreCase).ToList();
 
     // ---- groups made by the program -----------------------------------------------------------
     // Every tag in use is also a group, without anyone making it: its members are the channels

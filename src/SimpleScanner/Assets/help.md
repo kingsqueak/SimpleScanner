@@ -99,7 +99,7 @@ A stored channel is a frequency with a name and what is known about it. Channels
 - Select a channel to edit its fields at the right. **Receive as** sets the mode and filter used for that channel.
 - Select several (Shift or Command click) to tick or untick them for scanning, delete them, or put them in a group. **Add to group** makes the group if it is new.
 - Double-click a channel to tune the radio to it.
-- **Rename or delete group**: deleting a group leaves its channels stored.
+- **Groups ▾** is the groups editor: every group you made, with how many channels are in it. Pick one to show its channels, rename it or delete it. **New group** makes an empty group, which stays until you delete it; to fill it, select channels and tick it at the right. Deleting a group leaves its channels stored.
 - **Duplicates** lists the channels stored more than once, set by set. Choose what counts as the same channel; **Select the extras** selects all but the fullest of each set, ready for Delete. Nothing is deleted until you press Delete.
 
 ## What is not used yet

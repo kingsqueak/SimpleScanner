@@ -17,7 +17,8 @@ digital voice modes, and several radios at once.
 - Under the groups on the Operate tab, the frequencies of the groups chosen, each with a tick to
   take it in or out of the scan. A change of tick is taken up by a running scan at once
 - Import of RadioReference frequency downloads (the CSV file of a county or an agency), and a
-  channel editor: filter the list, edit any field, put channels in groups
+  channel editor: filter the list, edit any field, put channels in groups, and a groups editor
+  to make, rename and delete groups (a group made there stays, empty, until channels are put in it)
 - A duplicate checker in the channel editor: lists the channels stored more than once (same
   frequency and name, with or without the description, or the same frequency alone), set by set
   with every field, to edit them apart or select the extras and delete them

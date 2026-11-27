@@ -14,22 +14,52 @@
       <Button DockPanel.Dock="Right" Classes="seg" Content="RadioReference online…" Click="OnOnlineClick" Margin="6,0,0,0"
               ToolTip.Tip="Browse radioreference.com by place and load the categories you tick. Needs your own RadioReference account with a Premium subscription." />
       <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" Classes="label" Margin="12,0,0,0" />
-      <Button DockPanel.Dock="Right" Classes="seg" Content="Rename or delete group ▾" IsEnabled="{Binding IsGroupChosen}" Margin="6,0,0,0"
-              ToolTip.Tip="Rename or delete the group chosen in the box beside this. Choose a group there first.">
+      <Button DockPanel.Dock="Right" Classes="seg" Content="Groups ▾" Margin="6,0,0,0"
+              ToolTip.Tip="The groups editor: make a new group, and rename or delete one">
         <Button.Flyout>
           <Flyout Placement="BottomEdgeAlignedRight">
-            <StackPanel Spacing="8" Width="320">
-              <TextBlock Text="{Binding GroupFilter}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <StackPanel Spacing="8" Width="340">
+              <TextBlock Text="Groups" FontWeight="SemiBold" />
+              <!-- The user's groups; picking one shows its channels in the list -->
+              <ListBox ItemsSource="{Binding EditorGroups}" SelectedItem="{Binding EditorGroup}" MaxHeight="240"
+                       ToolTip.Tip="Pick a group to show its channels in the list and to rename or delete it">
+                <ListBox.Styles>
+                  <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="8,3" />
+                    <Setter Property="MinHeight" Value="0" />
+                  </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:GroupEntry">
+                    <DockPanel>
+                      <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" Classes="label" Margin="8,0,0,0" />
+                      <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <DockPanel>
-                <Button DockPanel.Dock="Right" Classes="seg" Content="Rename" Command="{Binding RenameGroupCommand}" Margin="6,0,0,0"
-                        ToolTip.Tip="Give the group this name. If another group already has the name, the two become one." />
-                <TextBox Text="{Binding GroupNewName}" PlaceholderText="New name">
+                <Button DockPanel.Dock="Right" Classes="seg" Content="New group" Command="{Binding MakeGroupCommand}" Margin="6,0,0,0"
+                        ToolTip.Tip="Make a group with this name. It stays, empty, until channels are put in it: select them in the list and tick the group at the right." />
+                <TextBox Text="{Binding GroupToMake}" PlaceholderText="Name of a new group">
                   <TextBox.KeyBindings>
-                    <KeyBinding Gesture="Enter" Command="{Binding RenameGroupCommand}" />
+                    <KeyBinding Gesture="Enter" Command="{Binding MakeGroupCommand}" />
                   </TextBox.KeyBindings>
                 </TextBox>
               </DockPanel>
-              <Button Classes="seg" Content="Delete this group" Command="{Binding DeleteGroupCommand}" HorizontalAlignment="Left" />
+              <Border Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" />
+              <StackPanel Spacing="8" IsEnabled="{Binding IsGroupChosen}">
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Classes="seg" Content="Rename" Command="{Binding RenameGroupCommand}" Margin="6,0,0,0"
+                          ToolTip.Tip="Give the group picked above this name. If another group already has the name, the two become one." />
+                  <TextBox Text="{Binding GroupNewName}" PlaceholderText="Pick a group above to rename it">
+                    <TextBox.KeyBindings>
+                      <KeyBinding Gesture="Enter" Command="{Binding RenameGroupCommand}" />
+                    </TextBox.KeyBindings>
+                  </TextBox>
+                </DockPanel>
+                <Button Classes="seg" Content="Delete this group" Command="{Binding DeleteGroupCommand}" HorizontalAlignment="Left" />
+              </StackPanel>
               <TextBlock Classes="label" TextWrapping="Wrap"
                          Text="Deleting a group leaves its channels stored, in any other groups they are in. To remove the channels too, select them in the list first and use Delete." />
             </StackPanel>

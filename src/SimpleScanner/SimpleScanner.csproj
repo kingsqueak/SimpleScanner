@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <Version>0.1.6</Version>
+    <Version>0.1.7</Version>
     <Product>SimpleScanner</Product>
     <ApplicationIcon>Assets/icon.ico</ApplicationIcon>
   </PropertyGroup>

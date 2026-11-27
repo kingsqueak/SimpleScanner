@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // SimpleScanner's audio output: one playback device fed from a ring buffer. miniaudio does the
 // device work (Core Audio, WASAPI, PulseAudio/ALSA) and converts our rate to the device's.
 #define MINIAUDIO_IMPLEMENTATION

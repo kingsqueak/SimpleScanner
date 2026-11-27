@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 namespace SimpleScanner.Dsp;
 
 /// <summary>A fixed-size queue of samples; when full, the oldest are overwritten. One thread.</summary>

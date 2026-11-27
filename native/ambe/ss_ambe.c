@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // SimpleScanner's AMBE+2 speech decoder (3600 x 2450 bit/s: DMR, NXDN, and others that carry the
 // same 49 parameter bits). The decoder is mbelib's (ISC, see mbelib/); this file only gives it
 // an instance and a plain call.

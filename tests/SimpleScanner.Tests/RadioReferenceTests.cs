@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 using System.Net;
 using System.Text;
 using SimpleScanner.Dsp;
@@ -82,7 +85,7 @@ public class RadioReferenceTests
         return call switch
         {
             "getCountryList" => Envelope(call, Countries),
-            "getUserData" => Envelope(call, Item("return", ("username", "kc2rgw"), ("subExpireDate", "2027-03-01"))),
+            "getUserData" => Envelope(call, Item("return", ("username", "listener1"), ("subExpireDate", "2030-01-01"))),
             "getCountryInfo" => Envelope(call, Item("return", ("coid", "1"), ("countryName", "United States"), ("countryCode", "US"),
                 ("agencyList", List("agencyList", Item("item", ("aid", "900"), ("aName", "Federal Aviation Administration"), ("aType", "1")))),
                 ("stateList", List("stateList",
@@ -125,7 +128,7 @@ public class RadioReferenceTests
     private static (RrClient Client, Service Service) Signed(string password = "right")
     {
         var service = new Service { Answer = Answer };
-        var client = new RrClient(new RrCache(":memory:"), service) { Auth = new RrAuth("kc2rgw", password, "the-key") };
+        var client = new RrClient(new RrCache(":memory:"), service) { Auth = new RrAuth("listener1", password, "the-key") };
         return (client, service);
     }
 
@@ -204,7 +207,7 @@ public class RadioReferenceTests
         {
             var service = new Service { Answer = Answer };
             using (var cache = new RrCache(path))
-            using (var client = new RrClient(cache, service) { Auth = new RrAuth("kc2rgw", "right", "k") })
+            using (var client = new RrClient(cache, service) { Auth = new RrAuth("listener1", "right", "k") })
             {
                 await client.GetCountyAsync(1766);
                 await client.GetCountyAsync(1766);
@@ -233,7 +236,7 @@ public class RadioReferenceTests
     {
         var (client, service) = Signed("wrong");
         await Assert.ThrowsAsync<RrException>(() => client.GetCountyAsync(1766));
-        client.Auth = new RrAuth("kc2rgw", "right", "k");
+        client.Auth = new RrAuth("listener1", "right", "k");
         Assert.Equal("Hillsborough", (await client.GetCountyAsync(1766)).Name);
         Assert.Equal(2, service.Count("getCountyInfo"));
     }
@@ -308,7 +311,7 @@ public class RadioReferenceTests
         var place = new Settings.RrPlace();
         var vm = new RadioReferenceViewModel(store, new RrClient(new RrCache(":memory:"), service), place, () => "the-key");
         await vm.OpenAsync();
-        vm.Username = "kc2rgw";
+        vm.Username = "listener1";
         vm.Password = "right";
         await vm.SignInCommand.ExecuteAsync(null);
         return (vm, service, store, place);
@@ -321,7 +324,7 @@ public class RadioReferenceTests
         var vm = new RadioReferenceViewModel(Store(), new RrClient(new RrCache(":memory:"), service), null, () => "the-key");
         await vm.OpenAsync();
         Assert.Equal("United States", vm.SelectedCountry?.Name);
-        vm.Username = "kc2rgw";
+        vm.Username = "listener1";
         vm.Password = "wrong";
         await vm.SignInCommand.ExecuteAsync(null);
         Assert.False(vm.SignedIn);
@@ -388,7 +391,7 @@ public class RadioReferenceTests
             var vm = new RadioReferenceViewModel(Store(), client, null, () => RrKey.Own(folder) ?? "from-environment", keyFolder: folder);
             await vm.OpenAsync();
             Assert.Equal("In use: a key from the environment.", vm.KeyNote);
-            vm.Username = "kc2rgw";
+            vm.Username = "listener1";
             vm.Password = "right";
             await vm.SignInCommand.ExecuteAsync(null);
             Assert.Equal("from-environment", client.Auth?.AppKey);
@@ -414,7 +417,7 @@ public class RadioReferenceTests
     {
         var (vm, _, _, place) = await Browser();
         Assert.True(vm.SignedIn);
-        Assert.Equal("Signed in as kc2rgw · Premium until 1 Mar 2027", vm.AccountText);
+        Assert.Equal("Signed in as listener1 · Premium until 1 Jan 2030", vm.AccountText);
         Assert.Equal(["Maine", "New Hampshire"], vm.States.Select(s => s.Name));
 
         vm.Zip = "03101";
@@ -518,7 +521,7 @@ public class RadioReferenceTests
     {
         var service = new Service { Answer = Answer };
         using var cache = new RrCache(":memory:");
-        var client = new RrClient(cache, service) { Auth = new RrAuth("kc2rgw", "right", "k") };
+        var client = new RrClient(cache, service) { Auth = new RrAuth("listener1", "right", "k") };
         // What a session of browsing leaves in the cache.
         await client.GetCountryAsync(1);
         await client.GetStateAsync(33);

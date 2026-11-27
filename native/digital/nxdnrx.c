@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // SimpleScanner's NXDN receiver (conventional voice, NXDN TS 1-A): FM discriminator samples in;
 // what the call says about itself and its voice frames out.
 //

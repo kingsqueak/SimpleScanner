@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // SimpleScanner's D-STAR receiver (JARL's D-STAR digital voice, "DV" mode): FM discriminator
 // samples in; the callsigns of a transmission, its short text message and its voice frames out.
 //

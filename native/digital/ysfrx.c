@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // SimpleScanner's receiver for Yaesu System Fusion ("C4FM", the amateur radio digital voice mode):
 // FM discriminator samples in; who is talking to whom and the voice frames out.
 //

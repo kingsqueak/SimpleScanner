@@ -124,7 +124,7 @@ build can leave it out:
     dotnet build -p:IncludeAmbe=false
     NO_AMBE=1 scripts/make-dmg.sh
 
-Without it the scanner still follows these signals and shows who is talking; the display says
+The packages on the Releases page include it. Without it the scanner still follows these signals and shows who is talking; the display says
 "no voice codec" and the call is silent.
 
 D-STAR uses the older AMBE codec, whose patents have run out. Its decoder is mbelib's too and
@@ -136,17 +136,42 @@ lives in the same library, so a build without the library has no D-STAR speech e
   an RSPdx and an RSP1 together are what has been tried
 - The SDRplay API 3.x, from <https://www.sdrplay.com/api/>. It is not included.
 
+## Installing
+
+The packages are on the [Releases](https://github.com/kingsqueak/SimpleScanner/releases) page.
+Install the SDRplay API first, on every system.
+
+- **macOS 14 or later**: `SimpleScanner-<version>-arm64.dmg` for Apple silicon, `-x64.dmg` for an
+  Intel Mac. Drag SimpleScanner to Applications. It is not notarized by Apple: the first time,
+  open System Settings > Privacy & Security and press **Open Anyway**.
+- **Windows 10 or 11 (x64)**: `SimpleScanner-<version>-win-x64-setup.exe` installs for your user
+  only, with no administrator password. It is not code-signed, so SmartScreen warns the first time
+  (More info > Run anyway).
+- **Linux, x86-64 or arm64** (arm64 includes a Raspberry Pi 4 or 5 with 64-bit Raspberry Pi OS):
+  the `.deb` for Debian, Ubuntu and Raspberry Pi OS (`sudo apt install ./simplescanner_*.deb`), the
+  `.rpm` for Fedora and openSUSE, the `.pkg.tar.zst` for Arch. The command is `simplescanner`.
+
+Settings and stored channels are kept in `~/Library/Application Support/SimpleScanner` (macOS),
+`%LOCALAPPDATA%\SimpleScanner` (Windows) or `~/.local/share/SimpleScanner` (Linux).
+
+So far SimpleScanner has been used with radios on macOS only. The Windows and Linux packages are
+built and started by the CI, but not yet tried with a radio: reports are welcome.
+
 ## Building
 
     dotnet build
     dotnet test
     dotnet run --project src/SimpleScanner            # add "-- --start" to switch the radios on at launch
-    scripts/make-dmg.sh                                # macOS app and DMG
+    scripts/make-dmg.sh [osx-arm64|osx-x64]            # macOS app and DMG
+    scripts/make-linux.sh                              # deb, rpm and Arch packages for this machine
+    scripts/make-windows.sh                            # Windows program folder (Git Bash, MinGW gcc)
 
-The native libraries are built by the first `dotnet build` on macOS and Linux; they need a C
-compiler (gcc or clang): audio output (`native/audio`, miniaudio behind a small C shim),
+The native libraries are built by the first `dotnet build` on macOS and Linux (on macOS for both
+Apple silicon and Intel; on Windows `scripts/make-windows.sh` builds them with MinGW's gcc); they
+need a C compiler (gcc or clang): audio output (`native/audio`, miniaudio behind a small C shim),
 digital voice (`native/digital`, P25, DMR, NXDN and D-STAR) and the AMBE+2 decoder (`native/ambe`). After
-changing C code, run that library's `build.sh` again.
+changing C code, run that library's `build.sh` again. The packages are built by the Packages
+workflow (`.github/workflows/packages.yml`), run by hand.
 
 `tools/rsp-bench` measures the radio without the window: sample throughput and retune times,
 `rsp-bench listen <MHz> [seconds]` to run the receiver on one frequency, or
@@ -155,8 +180,19 @@ and what kind of signal each is.
 
 ## Licence
 
-GPL-3.0. miniaudio (`native/audio/miniaudio.h`) is public domain or MIT-0, its authors' choice.
-The digital voice library is built on a part of RadioFoundry (`native/digital/radiofoundry`,
-MIT, with an IMBE dequantizer from mbelib, ISC); the D-STAR receiver takes its voice bit table
-from DSD (ISC). The AMBE decoders are mbelib
-(`native/ambe/mbelib`, ISC).
+Copyright (C) 2026 KC2RGW Chris. SimpleScanner is free software under the GNU General Public
+License, version 3 or (at your option) any later version: GPL-3.0-or-later, see [LICENSE](LICENSE).
+
+It includes miniaudio (`native/audio/miniaudio.h`, public domain or MIT-0, its authors' choice);
+a part of RadioFoundry for the digital voice receivers (`native/digital/radiofoundry`, MIT, with an
+IMBE dequantizer from mbelib, ISC); a voice bit table from DSD in the D-STAR receiver (ISC); and the
+mbelib AMBE decoders (`native/ambe/mbelib`, ISC). The app is built on Avalonia, SkiaSharp,
+CommunityToolkit.Mvvm and Microsoft.Data.Sqlite with SQLite, and uses the Inter typeface. Their
+notices ship with the app in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+
+The release packages include the AMBE decoders; see "The AMBE speech codecs" above for the
+patent and for how to build without them.
+
+SDRplay and RSP are SDRplay's names; RadioReference is RadioReference.com's. SimpleScanner is not
+connected with either. Made by KC2RGW. Bug reports and suggestions are welcome in
+[Issues](https://github.com/kingsqueak/SimpleScanner/issues).

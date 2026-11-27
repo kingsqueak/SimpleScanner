@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 namespace SimpleScanner.Dsp;
 
 /// <summary>A complex FFT of a fixed power-of-two size, in place on separate real and imaginary arrays.</summary>

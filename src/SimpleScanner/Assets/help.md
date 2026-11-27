@@ -8,10 +8,12 @@ SimpleScanner is a communications scanner for SDRplay RSP receivers. It receives
 - The SDRplay API, version 3. It is SDRplay's own software and is not part of SimpleScanner: download its installer from sdrplay.com/api and run it before the first start.
 - For the RadioReference browser only: your own radioreference.com account with a Premium subscription, and an application key (see **RadioReference**).
 
-## The first start on a Mac
+## The first start
 
-- Open the disk image and drag SimpleScanner to Applications.
-- The app is not notarized by Apple, so macOS refuses it the first time. Open System Settings > Privacy & Security, find the line about SimpleScanner, and press **Open Anyway**. This is needed once.
+- **Mac** (macOS 14 or later; the arm64 disk image for Apple silicon, x64 for Intel): open the disk image and drag SimpleScanner to Applications. The app is not notarized by Apple, so macOS refuses it the first time. Open System Settings > Privacy & Security, find the line about SimpleScanner, and press **Open Anyway**. This is needed once.
+- **Windows** (10 or 11, x64): run the setup program. It installs for your user only, with no administrator password. It is not code-signed, so SmartScreen warns the first time: More info > Run anyway.
+- **Linux** (x86-64 or arm64, a Raspberry Pi 4 or 5 with 64-bit Raspberry Pi OS included): install the package for your system, for example `sudo apt install ./simplescanner_*.deb`, and start it from the menu or with `simplescanner`.
+- So far the app has been used with radios on macOS only; on Windows and Linux it is new. Reports are welcome at github.com/kingsqueak/SimpleScanner/issues.
 - Close any other SDR program first (SDRconnect, SDRuno, CubicSDR…). A radio can be used by one program at a time, and one that another program holds is not listed.
 
 ## Hear something in five steps
@@ -107,7 +109,7 @@ A stored channel is a frequency with a name and what is known about it. Channels
 - **Filter**: type any words from the name, agency, description, tag, tone, callsign or frequency. The box beside it shows one group only, or the channels in no group.
 - Click a column heading to sort; drag a heading's edge to change its width.
 - Select a channel to edit its fields at the right. **Receive as** sets the mode and filter used for that channel.
-- Select several (Shift or Command click) to tick or untick them for scanning, delete them, or put them in a group. **Add to group** makes the group if it is new.
+- Select several (Shift or Command click, Shift or Ctrl click on Windows and Linux) to tick or untick them for scanning, delete them, or put them in a group. **Add to group** makes the group if it is new.
 - Double-click a channel to tune the radio to it.
 - **Groups ▾** is the groups editor: every group you made, with how many channels are in it. Pick one to show its channels, rename it or delete it. **New group** makes an empty group, which stays until you delete it; to fill it, select channels and tick it at the right. Deleting a group leaves its channels stored.
 - **Duplicates** lists the channels stored more than once, set by set. Choose what counts as the same channel; **Select the extras** selects all but the fullest of each set, ready for Delete. Nothing is deleted until you press Delete.
@@ -280,7 +282,7 @@ The settings of one radio: the one chosen in the **Receiver** box, which is the 
 For the whole app.
 
 - **Output**: which sound device the audio goes to. It can be changed while receiving. **Refresh** looks again after one is plugged in.
-- **Appearance**: **System** follows the Mac's Light or Dark appearance, and changes with it; **Light** or **Dark** keeps to one.
+- **Appearance**: **System** follows the system's Light or Dark appearance, and changes with it; **Light** or **Dark** keeps to one.
 - **Display in Light**: in the Light appearance the display **Stays dark**, like a scanner's LCD, or **Follows** it, dark amber on cream.
 - **Avoid for** and **Resume after**: see **Scanning and searching**. **Multi hang time**: see **Multi Monitor** under **Scanning and searching**.
 
@@ -320,20 +322,22 @@ A scanner is only as good as its antenna. A discone or a wideband scanner antenn
 - **OVERLOAD shows often**: leave Auto gain on, raise the LNA step, and switch on the MW/FM broadcast notch.
 - **A digital call is shown but silent**: it is encrypted (ENCRYPTED shows), or it is a kind the app shows without decoding, or this build has no AMBE+2 codec ("no voice codec").
 - **Stutter with two radios**: the USB bus is too full. See **Several radios**.
-- **A radio stops by itself after a while** (most often an original RSP1, after half an hour or more of scanning): its USB link has jammed, or the SDRplay software reports it unplugged. The app notices within a few seconds, resets the radio's USB connection, and starts it again in a fresh helper with the same settings and scan; the sound drops for about fifteen seconds. If it stops again within a minute the app gives up and says so: unplug the radio, plug it back in, and switch it on. Each event is written to `~/Library/Logs/SimpleScanner.log` (macOS); the USB reset is done on macOS only.
+- **A radio stops by itself after a while** (most often an original RSP1, after half an hour or more of scanning): its USB link has jammed, or the SDRplay software reports it unplugged. The app notices within a few seconds, resets the radio's USB connection, and starts it again in a fresh helper with the same settings and scan; the sound drops for about fifteen seconds. If it stops again within a minute the app gives up and says so: unplug the radio, plug it back in, and switch it on. Each event is written to SimpleScanner.log: in `~/Library/Logs` on macOS, in the settings folder (see **Files and privacy**) on Windows and Linux. The USB reset is done on macOS only; elsewhere the radio is started again without it.
 - **The RadioReference browser will not sign in**: it needs both an application key and a Premium subscription. The line under the account bar says which is missing.
 
 # Files and privacy
 
-- Settings and the database of stored channels are in your Library folder, under Application Support/SimpleScanner. The database (simplescanner.db) also holds what was fetched from RadioReference.
-- The RadioReference application key is in the file radioreference.key in the same folder, readable only by you. The password is kept only if you ask, in the macOS login keychain.
+- Settings and the database of stored channels are in a folder called SimpleScanner: `~/Library/Application Support/SimpleScanner` on macOS, `%LOCALAPPDATA%\SimpleScanner` on Windows, `~/.local/share/SimpleScanner` on Linux. The database (simplescanner.db) also holds what was fetched from RadioReference. Uninstalling the app leaves the folder.
+- The RadioReference application key is in the file radioreference.key in the same folder, readable only by you. The password is kept only if you ask, in the macOS login keychain; on Windows and Linux it is not kept and is asked for at each run.
 - To move your channels to another computer, close the app and copy that folder.
 - The app talks to the network only for RadioReference online, and only when you use it.
 
 # About
 
-SimpleScanner is free software under the GPL-3.0 licence. The source is at github.com/kingsqueak/SimpleScanner.
+Copyright (C) 2026 KC2RGW Chris. SimpleScanner is free software under the GNU General Public License, version 3 or any later version (GPL-3.0-or-later). It comes with no warranty. The source is at github.com/kingsqueak/SimpleScanner.
 
-It builds on miniaudio (audio output), RadioFoundry and DSD (digital voice receivers), and mbelib (speech decoders), each under its own licence, and on Avalonia for the window.
+It builds on miniaudio (audio output), RadioFoundry and DSD (digital voice receivers), and mbelib (speech decoders), each under its own licence, and on Avalonia for the window. Their notices are in THIRD-PARTY-NOTICES.txt, which comes with the app.
+
+The AMBE and AMBE+2 speech decoders may be covered by patents in some countries: see the README.
 
 SDRplay and RSP are SDRplay's names; RadioReference is RadioReference.com's. SimpleScanner is not connected with either.

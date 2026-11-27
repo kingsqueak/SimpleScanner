@@ -9,6 +9,10 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <Version>0.1.7</Version>
     <Product>SimpleScanner</Product>
+    <Authors>KC2RGW Chris</Authors>
+    <Copyright>Copyright (C) 2026 KC2RGW Chris. GPL-3.0-or-later.</Copyright>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/kingsqueak/SimpleScanner</RepositoryUrl>
     <ApplicationIcon>Assets/icon.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -25,6 +29,8 @@
     <AvaloniaResource Include="Assets/icon.png" />
     <!-- The Help text, read by Help.Load -->
     <EmbeddedResource Include="Assets/help.md" LogicalName="SimpleScanner.help.md" />
+    <!-- The licence and the third-party notices go beside the program -->
+    <None Include="../../LICENSE;../../THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

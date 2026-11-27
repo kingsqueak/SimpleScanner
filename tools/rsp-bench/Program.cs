@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 // rsp-bench: measurements on a real SDRplay RSP, without the window. Receive only.
 //
 //   rsp-bench                          sample throughput and retune times

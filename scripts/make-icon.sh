@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 KC2RGW Chris
 # Make the app icons from src/SimpleScanner/Assets/icon.svg:
 #   icon.png      1024 px, the window icon (and the Linux desktop icon)
 #   AppIcon.icns  the macOS bundle's icon

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // SimpleScanner's P25 Phase 1 receiver: FM discriminator samples in, frame events and decoded
 // voice out. The work is RadioFoundry's (MIT; the IMBE dequantizer is from mbelib, ISC; see
 // radiofoundry/): its soft modem finds the symbols, its framer the data units, its P25 layer

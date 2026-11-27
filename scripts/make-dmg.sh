@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 KC2RGW Chris
 # Build SimpleScanner.app and a DMG for macOS.
 # Usage: scripts/make-dmg.sh [rid]   (osx-arm64 for Apple silicon, the default; osx-x64 for Intel)
 # Output: artifacts/mac/SimpleScanner.app and artifacts/SimpleScanner-<version>-<arch>.dmg
@@ -28,10 +30,11 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$stage"
 # (LSMinimumSystemVersion below). Built without this they carry this Mac's own macOS version
 # as their minimum, and an older macOS refuses to load them.
 export MACOSX_DEPLOYMENT_TARGET=14.0
-echo "== native libraries (macOS $MACOSX_DEPLOYMENT_TARGET and later)"
+echo "== native libraries (macOS $MACOSX_DEPLOYMENT_TARGET and later, Apple silicon and Intel)"
 for lib in audio digital $([ -n "${NO_AMBE:-}" ] || echo ambe); do
   sh "native/$lib/build.sh" >/dev/null
 done
+case "$arch" in x64) mach=x86_64 ;; *) mach="$arch" ;; esac
 
 echo "== app ($rid)"
 rm -rf "src/SimpleScanner/obj/Release/net10.0/$rid" "src/SimpleScanner/bin/Release/net10.0/$rid"
@@ -42,7 +45,12 @@ dotnet publish src/SimpleScanner/SimpleScanner.csproj -c Release -r "$rid" --sel
   -p:UseAppHost=true -p:IncludeAmbe="$([ -n "${NO_AMBE:-}" ] && echo false || echo true)" -o "$app/Contents/MacOS"
 find "$app/Contents" -name '*.pdb' -delete
 
-cp LICENSE src/SimpleScanner/Assets/AppIcon.icns "$app/Contents/Resources/"
+cp LICENSE THIRD-PARTY-NOTICES.txt src/SimpleScanner/Assets/AppIcon.icns "$app/Contents/Resources/"
+
+# Every native library must hold code for the Mac this DMG is for.
+for lib in "$app/Contents/MacOS/"*.dylib; do
+  lipo -archs "$lib" | tr ' ' '\n' | grep -qx "$mach" || { echo "$lib has no $mach code: $(lipo -archs "$lib")" >&2; exit 1; }
+done
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -59,6 +67,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$version</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Copyright (C) 2026 KC2RGW Chris. GPL-3.0-or-later.</string>
 </dict>
 </plist>
 PLIST

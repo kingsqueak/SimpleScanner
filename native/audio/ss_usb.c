@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 // A software unplug and replug of a USB device, for a radio whose data pipe has jammed.
 //
 // Seen on SDRplay RSP1s on macOS (2026-11-25): after half an hour to two hours of scanning the
@@ -7,7 +10,11 @@
 // for exclusive use while a program streams from it, so the stream must be stopped first.
 #include <string.h>
 
+#ifdef _WIN32
+#define EXPORT __declspec(dllexport)
+#else
 #define EXPORT __attribute__((visibility("default")))
+#endif
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>

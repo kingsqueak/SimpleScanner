@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using System.Text.Json.Serialization;

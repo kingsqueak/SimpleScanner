@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // Makes System Fusion (C4FM) test signals for SimpleScanner's tests: a voice transmission as FM
 // discriminator samples (24 kHz, signed 16-bit, 6553.6 counts per kHz). Written from Yaesu's
 // published air interface, the transmit side of what ysfrx.c receives, with RadioFoundry's

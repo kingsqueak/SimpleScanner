@@ -1,0 +1,215 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 KC2RGW Chris
+name: Packages
+
+# Builds the macOS DMGs (Apple silicon and Intel), the deb, RPM and Arch packages for x86-64 and
+# arm64, and the Windows installer, and runs the tests on Linux. The debs are also installed and
+# started on Debian 13 (Trixie) and Debian 12 (Bookworm), which Raspberry Pi OS is based on.
+# Runs by hand only; the packages are the run's artifacts. A release is made from a run on main,
+# checked, and tagged afterwards, so a version tag does not start a run.
+on:
+  workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Build only the Windows installer
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One run per branch and kind: starting it again replaces the run still going.
+concurrency:
+  group: packages-${{ github.ref }}-${{ inputs.windows_only }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    if: ${{ !inputs.windows_only }}
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run the tests
+        # The native libraries are built by the first build (native/*/build.sh).
+        run: dotnet test -c Release
+
+  linux:
+    if: ${{ !inputs.windows_only }}
+    strategy:
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install the packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ruby rpm libarchive-tools zstd libasound2-dev pkg-config
+          sudo gem install --no-document fpm
+      - name: Build the packages
+        run: ./scripts/make-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simplescanner-linux-${{ runner.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+          if-no-files-found: error
+
+  # The same debs are what Raspberry Pi OS (64-bit) and Debian users install: check they install
+  # with apt there, every bundled library loads, and the app starts and stays up (with no radio
+  # and no SDRplay API, as on a machine where it has not been installed yet).
+  debian:
+    if: ${{ !inputs.windows_only }}
+    needs: linux
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-26.04-arm
+            arch: ARM64
+            os: trixie
+          - runner: ubuntu-26.04
+            arch: X64
+            os: trixie
+          - runner: ubuntu-26.04-arm
+            arch: ARM64
+            os: bookworm
+    runs-on: ${{ matrix.runner }}
+    container: debian:${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: simplescanner-linux-${{ matrix.arch }}
+          path: dist
+      - name: Install the deb with apt
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ./dist/simplescanner_*.deb
+      - name: Check every bundled library resolves
+        # liblttng-ust is only for .NET's optional tracing library and isn't needed.
+        run: |
+          missing=$(find /usr/lib/simplescanner -type f \( -name '*.so*' -o -name SimpleScanner \) |
+            while read -r f; do LD_LIBRARY_PATH=$(dirname "$f") ldd "$f" 2>/dev/null | sed "s|^|$f: |"; done |
+            grep 'not found' | grep -v 'liblttng-ust' | sort -u || true)
+          [ -z "$missing" ] || { echo "$missing"; exit 1; }
+      - name: Start it under a virtual display
+        run: |
+          apt-get install -y --no-install-recommends xvfb xauth
+          export HOME=$(mktemp -d)
+          set +e
+          timeout 30 xvfb-run -a simplescanner > run.log 2>&1
+          code=$?
+          set -e
+          tail -40 run.log
+          # 124: still running when the timeout stopped it, which is the pass.
+          [ "$code" -eq 124 ] || { echo "simplescanner exited with $code"; exit 1; }
+
+  dmg:
+    if: ${{ !inputs.windows_only }}
+    runs-on: macos-26
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build the DMG
+        run: ./scripts/make-dmg.sh ${{ matrix.rid }}
+      - name: Check the DMG and start the app
+        run: |
+          dmg=$(ls artifacts/*.dmg)
+          hdiutil verify "$dmg"
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          app="$mnt/SimpleScanner.app"
+          codesign --verify --deep --strict "$app"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist"
+          for f in "$app"/Contents/MacOS/*.dylib; do echo "$(basename "$f"): $(lipo -archs "$f")"; done
+          if [ "${{ matrix.rid }}" = osx-arm64 ]; then
+            export SIMPLESCANNER_DATA=$(mktemp -d)
+            "$app/Contents/MacOS/SimpleScanner" > run.log 2>&1 &
+            pid=$!
+            sleep 25
+            if ! kill -0 $pid 2>/dev/null; then cat run.log; echo "SimpleScanner exited"; exit 1; fi
+            pkill -f "$app/Contents/MacOS/SimpleScanner" || true
+            tail -20 run.log
+          fi
+          hdiutil detach "$mnt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simplescanner-dmg-${{ matrix.rid }}
+          path: artifacts/*.dmg
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Find MinGW's gcc
+        # The digital voice library builds with gcc, not MSVC.
+        shell: pwsh
+        run: |
+          if (Test-Path C:\mingw64\bin\gcc.exe) { 'C:\mingw64\bin' >> $env:GITHUB_PATH }
+          elseif (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
+            choco install mingw -y --no-progress | Out-Null
+            'C:\ProgramData\mingw64\mingw64\bin' >> $env:GITHUB_PATH
+          }
+      - name: Build the program folder
+        shell: bash
+        run: |
+          command -v gcc
+          ./scripts/make-windows.sh
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          $dir = (Get-Item artifacts/win/SimpleScanner-*).FullName
+          $ver = (Select-Xml -Path src/SimpleScanner/SimpleScanner.csproj -XPath '//Version').Node.InnerText
+          & $iscc /Q "/DAppVersion=$ver" "/DSourceDir=$dir" scripts/windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed: $LASTEXITCODE" }
+          Get-Item artifacts/*-setup.exe | Format-Table Name, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simplescanner-windows-x64
+          path: artifacts/*-setup.exe
+          if-no-files-found: error
+      - name: Install it
+        shell: pwsh
+        run: |
+          $setup = (Get-Item artifacts/*-setup.exe).FullName
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=desktopicon' -Wait
+          $dir = "$env:LOCALAPPDATA\Programs\SimpleScanner"
+          foreach ($f in 'SimpleScanner.exe', 'ss_audio.dll', 'ss_digital.dll', 'ss_ambe.dll', 'unins000.exe') {
+            if (-not (Test-Path "$dir\$f")) { throw "installer left out $f" }
+          }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\SimpleScanner.lnk")) { throw 'no Start menu entry' }
+          Write-Host "installed in $dir"
+      - name: Start it
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1 "$env:LOCALAPPDATA\Programs\SimpleScanner" "$pwd/windows-screenshot.png"
+      - name: Uninstall it
+        shell: pwsh
+        run: |
+          $dir = "$env:LOCALAPPDATA\Programs\SimpleScanner"
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path "$dir\SimpleScanner.exe") { throw 'uninstall left the program behind' }
+          Write-Host 'uninstalled'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-screenshot
+          path: windows-screenshot.png

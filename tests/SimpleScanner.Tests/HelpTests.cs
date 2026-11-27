@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 namespace SimpleScanner.Tests;
 
 /// <summary>The Help text: how it is read, and that the text in the program has the parts it must have.</summary>

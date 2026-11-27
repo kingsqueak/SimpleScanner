@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
 // SimpleScanner's DMR receiver (ETSI TS 102 361, Tier II conventional): FM discriminator samples
 // in; what each of the two time slots carries and the voice frames of one call out.
 //

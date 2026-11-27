@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 KC2RGW Chris
+
 namespace SimpleScanner.RadioReference;
 
 // What the RadioReference web service says, in the shapes its definition (the WSDL) gives them.

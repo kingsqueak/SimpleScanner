@@ -4,6 +4,27 @@ A desktop communications scanner for the SDRplay RSP series of receivers, for Wi
 (.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, the first five
 digital voice modes, and several radios at once.
 
+<p align="center">
+  <img src="docs/screenshots/main-window.png" width="850"
+       alt="SimpleScanner with two radios: an RSPdx on a fire dispatch channel, and an RSP1 scanning in Multi Monitor and decoding a P25 sheriff's dispatch, with the Scan, Audio and Tune controls and the Groups tab below">
+</p>
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/light-one-radio.png" alt="The Light look with one radio: the large display above the controls, and the Channels tab"></td>
+    <td width="50%"><img src="docs/screenshots/channel-editor.png" alt="The channel editor, filtered to one town, with a channel's fields open for editing"></td>
+  </tr>
+  <tr>
+    <td>The Light look with one radio, on the Channels tab. The display stays dark like a scanner's LCD.</td>
+    <td>The channel editor: filter, edit any field, put channels in groups, or load them from RadioReference.</td>
+  </tr>
+</table>
+
+The picture at the top is two radios at once: the RSP1 is scanning in Multi Monitor and has stopped on a
+P25 dispatch channel, with the NAC, talkgroup and radio ID decoded.
+
 ## What works now
 
 - AM (airband, AM broadcast), narrow FM (public service, marine, weather, amateur) and

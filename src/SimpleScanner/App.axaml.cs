@@ -58,10 +58,9 @@ public partial class App : Application
             desktop.MainWindow = window;
             // The application's own menu on macOS, in place of "About Avalonia".
             var about = new NativeMenuItem($"About {AppInfo.Name}");
-            about.Click += (_, _) => window.OpenHelp("About");
-            var help = new NativeMenuItem($"{AppInfo.Name} Help");
-            help.Click += (_, _) => window.OpenHelp();
-            NativeMenu.SetMenu(this, new NativeMenu { Items = { about, help } });
+            about.Click += (_, _) => window.OpenAbout();
+            // The Help itself is in the Help menu in the menu bar (MainWindow).
+            NativeMenu.SetMenu(this, new NativeMenu { Items = { about } });
             desktop.ShutdownRequested += (_, _) =>
             {
                 window.KeepPlace();
@@ -70,6 +69,8 @@ public partial class App : Application
             bool start = (desktop.Args ?? []).Contains("--start");
             window.Opened += async (_, _) =>
             {
+                // Is there a newer release? Asked of GitHub once, at start; a note beside the tabs if so.
+                _ = vm.CheckForUpdatesAtStartAsync();
                 if (inUse.Count == 0) await ChooseRadio(window, first.Source, settings);
                 vm.RefreshRadios();
                 // --start: switch the receivers on at launch.

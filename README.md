@@ -74,9 +74,13 @@ P25 dispatch channel, with the NAC, talkgroup and radio ID decoded.
   repeater) and the digital group ID. A transmission can be joined at any frame
 - Encrypted calls are shown and stay silent
 - Cellular telephone bands are blocked
-- A Help window (the Help tab, or the application menu on macOS): getting started, every tab, the two
+- A Help window (the ? button beside the tabs, or the Help menu): getting started, every tab, the two
   ways of loading from RadioReference, several radios, and the hardware. Its text is
   `src/SimpleScanner/Assets/help.md`
+- An About window (Help menu, or the application menu on macOS) with the version, licence and credits
+- A check for a newer release: once at each start and from **Check for updates** in About, the app
+  asks GitHub's releases API for the latest version and, if it is newer, shows a link to its page
+  beside the tabs. Nothing is downloaded or installed, and nothing is sent but the request
 
 Not yet: trunk following, P25 Phase 2. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
 the scan stops on. Trunked-system frequencies in a download are stored unticked.

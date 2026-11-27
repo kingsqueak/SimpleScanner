@@ -330,9 +330,17 @@ A scanner is only as good as its antenna. A discone or a wideband scanner antenn
 - Settings and the database of stored channels are in a folder called SimpleScanner: `~/Library/Application Support/SimpleScanner` on macOS, `%LOCALAPPDATA%\SimpleScanner` on Windows, `~/.local/share/SimpleScanner` on Linux. The database (simplescanner.db) also holds what was fetched from RadioReference. Uninstalling the app leaves the folder.
 - The RadioReference application key is in the file radioreference.key in the same folder, readable only by you. The password is kept only if you ask, in the macOS login keychain; on Windows and Linux it is not kept and is asked for at each run.
 - To move your channels to another computer, close the app and copy that folder.
-- The app talks to the network only for RadioReference online, and only when you use it.
+- The app talks to the network for RadioReference online, only when you use it, and once at each start to ask GitHub which SimpleScanner release is the latest. That asks for the release's number and nothing else is sent; nothing is downloaded or installed.
 
 # About
+
+**Help › About SimpleScanner** (on macOS, **SimpleScanner › About SimpleScanner**) shows the version, who made it, the licence and the credits.
+
+## Updates
+
+At each start the app asks GitHub which release is the latest. When a newer one is out, "Version … is available" appears at the right of the tab headings: click it to open the release's page, where the packages are, or click ✕ to hide it until the version after. **Check for updates** in About, or **Help › Check for Updates…**, asks again at any time and says what it found. The app never downloads or installs anything itself; install the new version as you did the first, and your settings and channels are kept.
+
+## Licence and credits
 
 Copyright (C) 2026 KC2RGW Chris. SimpleScanner is free software under the GNU General Public License, version 3 or any later version (GPL-3.0-or-later). It comes with no warranty. The source is at github.com/kingsqueak/SimpleScanner.
 

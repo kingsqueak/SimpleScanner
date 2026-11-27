@@ -18,10 +18,46 @@ public partial class MainWindow : Window
         InitializeComponent();
         Closing += (_, _) => KeepPlace();
         Opened += (_, _) => BringOntoAScreen();
+        BuildMenu();
+    }
+
+    // The Help menu in the menu bar. On macOS About is in the application's own menu (see App), elsewhere here.
+    private void BuildMenu()
+    {
+        var help = new NativeMenuItem($"{AppInfo.Name} Help");
+        help.Click += (_, _) => OpenHelp();
+        var check = new NativeMenuItem("Check for Updates…");
+        check.Click += (_, _) => OpenAbout(check: true);
+        var items = new NativeMenu { help, check };
+        if (!OperatingSystem.IsMacOS())
+        {
+            var about = new NativeMenuItem($"About {AppInfo.Name}");
+            about.Click += (_, _) => OpenAbout();
+            items.Add(new NativeMenuItemSeparator());
+            items.Add(about);
+        }
+        NativeMenu.SetMenu(this, new NativeMenu { new NativeMenuItem("Help") { Menu = items } });
+    }
+
+    private AboutWindow? _about;
+
+    /// <summary>Open About, or bring it forward if it is already open; with check, ask GitHub for a newer release as well.</summary>
+    public void OpenAbout(bool check = false)
+    {
+        if (_about is null)
+        {
+            _about = new AboutWindow(DataContext as MainViewModel);
+            _about.Closed += (_, _) => _about = null;
+            _about.Show(this);
+        }
+        else _about.Activate();
+        if (check) _ = _about.CheckAsync();
     }
 
     // The full window's and the small window's least and usual sizes.
-    private const double FullMinWidth = 820, FullMinHeight = 740, FullWidth = 1130, FullHeight = 760;
+    // On Windows and Linux the Help menu is a bar at the top of the full window, so it is that much taller.
+    private static readonly double MenuBar = OperatingSystem.IsMacOS() ? 0 : 26;
+    private static readonly double FullMinWidth = 820, FullMinHeight = 740 + MenuBar, FullWidth = 1130, FullHeight = 760 + MenuBar;
     private const double MiniMinWidth = 300, MiniMinHeight = 170, MiniWidth = 520, MiniHeight = 262;
 
     /// <summary>Put the window where it was when it was last closed, at the size it had, full or small as it was.</summary>

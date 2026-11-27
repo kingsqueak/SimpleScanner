@@ -98,6 +98,8 @@ public sealed class Settings
     public string Appearance { get; set; } = "System";
     /// <summary>In the Light look the display follows it (dark amber on cream); otherwise it stays dark, as a scanner's LCD.</summary>
     public bool DisplayFollowsLight { get; set; }
+    /// <summary>The newer release whose note was hidden with its ✕; a later one is noted again.</summary>
+    public string? UpdateDismissedVersion { get; set; }
     /// <summary>Widths of the channel editor's columns that the user has changed, by column key.</summary>
     public Dictionary<string, double>? ChannelColumns { get; set; }
     /// <summary>Minutes an avoided frequency stays out of the scan; 0 is until the app is closed.</summary>

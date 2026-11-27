@@ -1,0 +1,31 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 KC2RGW Chris -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SimpleScanner.Views.AboutWindow"
+        Icon="avares://SimpleScanner/Assets/icon.png"
+        Title="About SimpleScanner" Width="560" Height="640" MinWidth="460" MinHeight="420"
+        WindowStartupLocation="CenterOwner">
+  <DockPanel Margin="18">
+    <Button DockPanel.Dock="Bottom" x:Name="CloseButton" Classes="seg" Content="Close" MinWidth="76"
+            HorizontalAlignment="Right" Margin="0,12,0,0" IsDefault="True" IsCancel="True" />
+    <!-- The name, the version and the update check; what the check found under them -->
+    <StackPanel DockPanel.Dock="Top" Spacing="4">
+      <StackPanel Orientation="Horizontal" Spacing="14">
+        <Image Source="avares://SimpleScanner/Assets/icon.png" Width="56" Height="56" VerticalAlignment="Center" />
+        <StackPanel Spacing="2" VerticalAlignment="Center">
+          <TextBlock Text="SimpleScanner" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock x:Name="VersionText" Classes="label" FontSize="12" />
+          <HyperlinkButton x:Name="CheckButton" Content="Check for updates" Padding="0" FontSize="12" Margin="0,2,0,0"
+                           ToolTip.Tip="Ask GitHub which release is the latest. Nothing is downloaded or installed by the app." />
+        </StackPanel>
+      </StackPanel>
+      <TextBlock x:Name="CheckResult" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
+                 IsVisible="{Binding $self.Text, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      <HyperlinkButton x:Name="ReleaseLink" IsVisible="False" Padding="0" FontSize="12" />
+    </StackPanel>
+    <ScrollViewer Margin="0,14,0,0" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel x:Name="Body" Spacing="4" Margin="0,0,10,0" />
+    </ScrollViewer>
+  </DockPanel>
+</Window>

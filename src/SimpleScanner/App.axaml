@@ -4,6 +4,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="SimpleScanner.App"
              RequestedThemeVariant="Default">
+  <!-- The macOS application menu, in place of Avalonia's "About Avalonia". It has to be here:
+       one set from code once the window is made comes too late, and Avalonia's stays. -->
+  <NativeMenu.Menu>
+    <NativeMenu>
+      <NativeMenuItem Header="About SimpleScanner" Click="OnAbout" />
+    </NativeMenu>
+  </NativeMenu.Menu>
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://SimpleScanner/Styles.axaml" />

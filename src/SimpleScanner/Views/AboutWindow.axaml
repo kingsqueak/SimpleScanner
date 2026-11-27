@@ -4,28 +4,90 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="SimpleScanner.Views.AboutWindow"
         Icon="avares://SimpleScanner/Assets/icon.png"
-        Title="About SimpleScanner" Width="560" Height="640" MinWidth="460" MinHeight="420"
+        Title="About SimpleScanner" Width="560" Height="700" MinWidth="460" MinHeight="420"
         WindowStartupLocation="CenterOwner">
+  <Window.Styles>
+    <Style Selector="TextBlock.head">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,14,0,2" />
+    </Style>
+    <Style Selector="TextBlock.text">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="LineHeight" Value="19" />
+    </Style>
+    <Style Selector="TextBlock.small">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="LineHeight" Value="17" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+    </Style>
+    <Style Selector="TextBlock.smallhead">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,8,0,0" />
+    </Style>
+    <Style Selector="HyperlinkButton">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+  </Window.Styles>
   <DockPanel Margin="18">
     <Button DockPanel.Dock="Bottom" x:Name="CloseButton" Classes="seg" Content="Close" MinWidth="76"
             HorizontalAlignment="Right" Margin="0,12,0,0" IsDefault="True" IsCancel="True" />
     <!-- The name, the version and the update check; what the check found under them -->
     <StackPanel DockPanel.Dock="Top" Spacing="4">
       <StackPanel Orientation="Horizontal" Spacing="14">
-        <Image Source="avares://SimpleScanner/Assets/icon.png" Width="56" Height="56" VerticalAlignment="Center" />
+        <Image Source="avares://SimpleScanner/Assets/icon.png" Width="64" Height="64" VerticalAlignment="Center" />
         <StackPanel Spacing="2" VerticalAlignment="Center">
           <TextBlock Text="SimpleScanner" FontSize="22" FontWeight="SemiBold" />
-          <TextBlock x:Name="VersionText" Classes="label" FontSize="12" />
-          <HyperlinkButton x:Name="CheckButton" Content="Check for updates" Padding="0" FontSize="12" Margin="0,2,0,0"
-                           ToolTip.Tip="Ask GitHub which release is the latest. Nothing is downloaded or installed by the app." />
+          <TextBlock Text="A scanner for SDRplay RSP receivers" FontSize="13" />
+          <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,2,0,0">
+            <TextBlock x:Name="VersionText" Classes="label" FontSize="12" VerticalAlignment="Center" />
+            <HyperlinkButton x:Name="CheckButton" Content="Check for updates" FontSize="12" VerticalAlignment="Center"
+                             ToolTip.Tip="Ask GitHub which release is the latest. Nothing is downloaded or installed by the app." />
+          </StackPanel>
         </StackPanel>
       </StackPanel>
       <TextBlock x:Name="CheckResult" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
                  IsVisible="{Binding $self.Text, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-      <HyperlinkButton x:Name="ReleaseLink" IsVisible="False" Padding="0" FontSize="12" />
+      <HyperlinkButton x:Name="ReleaseLink" IsVisible="False" FontSize="12" />
     </StackPanel>
-    <ScrollViewer Margin="0,14,0,0" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel x:Name="Body" Spacing="4" Margin="0,0,10,0" />
+    <ScrollViewer Margin="0,6,0,0" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="0,0,10,0">
+        <TextBlock Classes="head" Text="SimpleScanner" />
+        <TextBlock Classes="text"
+                   Text="A desktop communications scanner for the SDRplay RSP receivers, on macOS, Windows and Linux. Stored channels in groups, a fast scan and a search, several radios at once, and Multi Monitor, which plays up to four active channels at once. Channels come from RadioReference or are typed in, and P25, DMR, NXDN and D-STAR digital voice is decoded." />
+        <StackPanel Orientation="Horizontal" Spacing="18" Margin="0,6,0,0">
+          <HyperlinkButton Content="Project page" NavigateUri="https://github.com/kingsqueak/SimpleScanner" />
+          <HyperlinkButton Content="Bug reports and suggestions" NavigateUri="https://github.com/kingsqueak/SimpleScanner/issues" />
+        </StackPanel>
+
+        <TextBlock Classes="head" Text="About me" />
+        <TextBlock Classes="text"
+                   Text="I'm Chris, KC2RGW, my background is in computer systems and architecture. I am a big fan and early adopter of SDR." />
+        <TextBlock Classes="text" Margin="0,8,0,0"
+                   Text="SimpleScanner is one of the small, plain programs I write for the radios I use, alongside SimpleHPSDR and TCIdigi." />
+        <StackPanel Orientation="Horizontal" Spacing="18" Margin="0,6,0,0">
+          <HyperlinkButton Content="www.kc2rgw.com" NavigateUri="https://www.kc2rgw.com/" />
+          <HyperlinkButton Content="KC2RGW on QRZ" NavigateUri="https://www.qrz.com/db/KC2RGW" />
+        </StackPanel>
+
+        <Separator Margin="0,16,0,4" />
+        <TextBlock Classes="smallhead" Text="Licence" />
+        <TextBlock Classes="small"
+                   Text="Copyright © 2026 KC2RGW Chris. SimpleScanner is free software under the GNU General Public License, version 3 or (at your option) any later version: GPL-3.0-or-later. It comes with no warranty." />
+        <TextBlock Classes="smallhead" Text="With thanks to" />
+        <TextBlock Classes="small"
+                   Text="miniaudio (audio output), RadioFoundry and DSD (digital voice receivers), and mbelib (speech decoders), each under its own licence. The window is built with Avalonia and SkiaSharp, with the Inter typeface. Their notices are in THIRD-PARTY-NOTICES.txt, which comes with the app." />
+        <TextBlock Classes="smallhead" Text="Patents" />
+        <TextBlock Classes="small"
+                   Text="The AMBE and AMBE+2 speech decoders may be covered by patents in some countries: see the README." />
+        <TextBlock Classes="smallhead" Text="Names" />
+        <TextBlock Classes="small"
+                   Text="SDRplay and RSP are SDRplay's names; RadioReference is RadioReference.com's. SimpleScanner is not connected with either." />
+      </StackPanel>
     </ScrollViewer>
   </DockPanel>
 </Window>

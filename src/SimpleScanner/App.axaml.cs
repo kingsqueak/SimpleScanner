@@ -56,11 +56,6 @@ public partial class App : Application
             var window = new MainWindow { DataContext = vm };
             window.RestorePlace();
             desktop.MainWindow = window;
-            // The application's own menu on macOS, in place of "About Avalonia".
-            var about = new NativeMenuItem($"About {AppInfo.Name}");
-            about.Click += (_, _) => window.OpenAbout();
-            // The Help itself is in the Help menu in the menu bar (MainWindow).
-            NativeMenu.SetMenu(this, new NativeMenu { Items = { about } });
             desktop.ShutdownRequested += (_, _) =>
             {
                 window.KeepPlace();
@@ -78,6 +73,13 @@ public partial class App : Application
             };
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>About in the macOS application menu (App.axaml). The Help itself is in the Help menu (MainWindow).</summary>
+    private void OnAbout(object? sender, EventArgs e)
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime { MainWindow: MainWindow window })
+            window.OpenAbout();
     }
 
     /// <summary>The radios marked for use in the settings that are plugged in and free, the one used last first.</summary>

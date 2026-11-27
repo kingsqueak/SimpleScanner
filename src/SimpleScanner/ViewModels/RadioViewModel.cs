@@ -228,7 +228,8 @@ public sealed partial class RadioViewModel : ObservableObject
         s.AutoGain = AutoGain;
         s.GainStep = (int)Math.Round(GainStep);
         // A radio with one socket has no choice to keep: leave the one made on a radio that has.
-        if (Antennas.Count > 1) s.Antenna = SelectedAntenna;
+        // Never a null: a list that loses its selection says null, and that would come back as the first socket.
+        if (Antennas.Count > 1 && SelectedAntenna is { Length: > 0 } antenna) s.Antenna = antenna;
         s.BiasT = BiasT;
         s.FmNotch = FmNotch;
         s.Ppm = (double)(Ppm ?? 0);

@@ -517,8 +517,22 @@
                             Content="Runs whenever it is plugged in" Foreground="{DynamicResource TextMuted}" FontSize="11"
                             ToolTip.Tip="Run this radio whenever it is plugged in. With several on, all run at once, each with a display of its own, scanning its own groups. A change takes effect when the app is next started. With none on, the radio used last is used." />
                   <TextBlock Grid.Row="1" Text="Antenna" Classes="label" IsVisible="{Binding ShownIsHere}" />
-                  <ListBox Grid.Row="1" Grid.Column="1" Classes="segs" ItemsSource="{Binding Radio.Antennas}" SelectedItem="{Binding Radio.SelectedAntenna}"
-                           IsVisible="{Binding ShownIsHere}" ToolTip.Tip="The antenna socket the radio listens on" />
+                  <!-- A list for each radio, the selected one's shown, as with the gain. One list moved from
+                       radio to radio lost its selection when the sockets changed (an RSPdx's A/B/C, an RSP1A's
+                       one) and wrote null back: the RSPdx's choice was saved as null and came back as A. -->
+                  <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding RadioList}" IsVisible="{Binding ShownIsHere}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <Panel />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:RadioViewModel">
+                        <ListBox Classes="segs" ItemsSource="{Binding Antennas}" SelectedItem="{Binding SelectedAntenna}"
+                                 IsVisible="{Binding IsSelected}" ToolTip.Tip="The antenna socket the radio listens on" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                   <TextBlock Grid.Row="2" Text="Gain (LNA step)" Classes="label" IsVisible="{Binding ShownIsHere}" />
                   <!-- A slider for each radio, the selected one's shown. One slider moved from radio to radio
                        pulled its value down to the next radio's lower maximum (an RSP1's 3) and wrote that

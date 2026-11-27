@@ -422,6 +422,29 @@ public class RadioViewModelTests
         }
     }
 
+    // 2026-11-27: the Radio tab's one antenna list, moved from an RSPdx to a one-socket radio, lost its
+    // selection and wrote null into the RSPdx's, which was saved and came back as Antenna A.
+    [Fact]
+    public void AnAntennaChoiceThatWentMissingIsNotSavedAsNone()
+    {
+        var source = new FakeSource { Antennas = ["Antenna A", "Antenna B", "Antenna C"], Antenna = "Antenna A" };
+        var vm = Make(source, new RadioSettings { Antenna = "Antenna B" }, Store(), out var rx);
+        using (rx)
+        {
+            Assert.Equal("Antenna B", vm.SelectedAntenna);
+            Assert.Equal("Antenna B", source.Antenna);
+            vm.SelectedAntenna = null!;          // as a list that lost its selection says it
+            Assert.Equal("Antenna B", source.Antenna);
+            var back = new RadioSettings { Antenna = "Antenna B" };
+            vm.WriteTo(back);
+            Assert.Equal("Antenna B", back.Antenna);
+            vm.SelectedAntenna = "Antenna C";
+            vm.WriteTo(back);
+            Assert.Equal("Antenna C", back.Antenna);
+            Assert.Equal("Antenna C", source.Antenna);
+        }
+    }
+
     [Fact]
     public async Task TwoRadiosKeepToThemselves()
     {

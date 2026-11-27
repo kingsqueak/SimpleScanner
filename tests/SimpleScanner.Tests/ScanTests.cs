@@ -61,7 +61,7 @@ internal sealed class FakeSource : IIqSource
 #pragma warning disable CS0067
     public event Action<string>? Failed;
 #pragma warning restore CS0067
-    public IReadOnlyList<string> Antennas => ["Antenna"];
+    public IReadOnlyList<string> Antennas { get; set; } = ["Antenna"];
     public string Antenna { get; set; } = "Antenna";
     public bool HasBiasT => false;
     public bool BiasT { get; set; }

@@ -117,6 +117,20 @@ A stored tone or code (PL, DPL, NAC, color code) is shown on the display but is 
 - **Avoid** leaves it and keeps it out of the scan for the **Avoid Timer** set on Settings (30 minutes, 1 hour, or the full session). Closing the app clears every avoid.
 - **Resume Timer** (Settings) is the longest the scan stays on a busy channel before it carries on, from 15 seconds to 10 minutes, or **Hold** to stay until the signal drops. A channel left this way is passed by for ten seconds so the others get a turn.
 
+## Multi Monitor
+
+With **Multi** on, a scan that finds several active channels in the stretch of band it is looking at plays up to four of them at once, each from its own place between the speakers. Each radio has its own **Multi** button, beside its Scan button; it works for a search as well.
+
+- **The stretch of band.** The radio watches about 6.4 MHz from one tuning. Only channels inside that stretch can be heard together; the scan moves to the next stretch when the one it is on has gone quiet.
+- **Four rows.** While the radio scans in this mode, its display gives way to four rows, one for each place: **33% L**, **33% R**, **Hard L** and **Hard R**. Each row shows the channel it holds, its details, its level, and a lamp: **RX** lit while the signal is heard, **WAIT** outlined while the channel is kept for a reply.
+- **Places.** A signal heard alone plays in the centre. When a second one starts, each glides to its own place, and back to the centre when it is alone again.
+- **Hang time.** After a signal drops, its row keeps the channel for the **Multi Monitor Hang Time** set on Settings (2 to 15 seconds, 8 to begin with), so that the reply is heard on the same row. The one hang time applies to every radio.
+- **Resume Timer.** In this mode the Resume Timer limits the whole stay in one stretch of band, not each channel. For long conversations set it long, or to **Hold**.
+- **One signal, one row.** A strong signal also shows up on the channels right beside it. Such a channel is not given a row of its own, and a much weaker signal on the next channel waits until the stronger one stops.
+- **Skip and Avoid.** Each row has its own **Skip** and **Avoid** for the channel it holds; the others carry on. The main **Skip** leaves the whole stretch of band and passes by every channel held in it for a while. The main **Avoid** is not used in this mode.
+- **Pan.** A radio's **Pan** on Settings is applied on top of the places: off centre it squeezes all four towards one side. Keep it in the middle for the full spread.
+- Digital voice is decoded on each row, so up to four digital calls can be heard at once. Linked repeaters often carry the same call: two rows, or two radios, may then play the same voice.
+
 ## The frequency list on Operate
 
 Under the groups at the right of Operate are the frequencies of the ticked groups, each with a tick. Untick one to leave it out of the scan. It is the channel's own Scan tick, the same one as on Scan Groups. A change takes effect at once, also on a running scan.
@@ -258,7 +272,7 @@ Which sound device the audio goes to. It can be changed while receiving. **Refre
 
 ## Scan
 
-**Avoid Timer** and **Resume Timer**: see **Scanning and searching**.
+**Avoid Timer** and **Resume Timer**: see **Scanning and searching**. **Multi Monitor Hang Time**: see **Multi Monitor** under **Scanning and searching**.
 
 # Hardware
 

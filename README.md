@@ -14,6 +14,8 @@ digital voice modes, and several radios at once.
 - Stored channels in groups (a channel can be in several), a scan over the groups chosen that
   looks at several megahertz at a time, and a search between two frequencies
 - Several radios at once, each with its own display, groups and scan (see "Several radios" below)
+- Multi Monitor: a scan that finds several active channels within one tuning of the radio plays
+  up to four at once, each from its own place between the speakers (see "Multi Monitor" below)
 - Under the groups on the Operate tab, the frequencies of the groups chosen, each with a tick to
   take it in or out of the scan. A change of tick is taken up by a running scan at once
 - Import of RadioReference frequency downloads (the CSV file of a county or an agency), and a
@@ -77,6 +79,23 @@ a fresh helper).
 - The small window shows every radio's strip.
 
 With one radio the window is as it was, with the one large display.
+
+### Multi Monitor
+
+With the Multi button on (each radio has its own), a scan or search that finds several active
+channels in the stretch of band the radio watches from one tuning (about 6.4 MHz) plays up to four
+of them at once. Each is placed between the speakers (33% left, 33% right, hard left, hard right);
+a signal heard alone plays in the centre and glides to its place when another starts. During the
+scan the radio's display gives way to four rows, one per place, with the channel, its details, its
+level, a lamp (RX while heard, WAIT while kept for a reply) and its own Skip and Avoid.
+
+- After a signal drops its row keeps the channel for the Multi Monitor Hang Time (Settings, 2 to
+  15 seconds), so that a reply is heard on the same row.
+- The Resume Timer limits the whole stay in one stretch of band in this mode.
+- A strong signal's spill onto the channels beside it is not given a row of its own.
+- The main Skip leaves the whole stretch; the main Avoid is not used in this mode.
+- Digital voice is decoded on each row.
+- A radio's Pan is applied on top of the places; keep it in the middle for the full spread.
 
 ### The RadioReference web service
 

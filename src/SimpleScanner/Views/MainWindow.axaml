@@ -102,7 +102,7 @@
             <!-- The groups take what they need, up to half the column (set in the code behind); the frequencies have the rest -->
             <Grid x:Name="GroupsColumn" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" SizeChanged="OnGroupsColumnSized">
               <TextBlock Text="{Binding GroupsTitle}" Classes="label" FontWeight="SemiBold" Margin="2,0,0,2"
-                         ToolTip.Tip="The groups you made. Tick one or several to show and scan; with none ticked on Scan Groups, all are. With several radios each has its own ticks: these are those of the radio selected, and a group ticked for more than one radio is shared out between them." />
+                         ToolTip.Tip="The groups you made. Tick one or several to show and scan; with none ticked, nothing is. With several radios each has its own ticks: these are those of the radio selected, and a group ticked for more than one radio is scanned by each of them." />
               <Border Grid.Row="1" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
               <ScrollViewer x:Name="GroupsScroll" Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <ItemsControl ItemsSource="{Binding UserGroupRows}">
@@ -113,9 +113,9 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
               </ScrollViewer>
-              <!-- What the radio selected scans: the ticked channels of its groups, or its share while it scans -->
+              <!-- What the radio selected scans: the ticked channels of its groups -->
               <TextBlock Grid.Row="3" Text="{Binding ActiveTitle}" Classes="label" FontWeight="SemiBold" Margin="2,10,0,2"
-                         ToolTip.Tip="The frequencies of this radio's groups (every group ticked on Scan Groups counts, not only the user groups). Untick one to leave it out of the scan: it is the channel's Scan tick, the same one as on Scan Groups, so it is left out for every radio. A change takes effect at once. While this radio scans alongside another that has some of the same channels, the ticked ones that went to the other are not listed." />
+                         ToolTip.Tip="The frequencies of this radio's groups (every group ticked on Scan Groups counts, not only the user groups). Untick one to leave it out of the scan: it is the channel's Scan tick, the same one as on Scan Groups, so it is left out for every radio. A change takes effect at once." />
               <Border Grid.Row="4" Height="1" Background="{DynamicResource TextMuted}" Opacity="0.35" Margin="0,0,0,4" />
               <ScrollViewer Grid.Row="5" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <!-- Only the lines in view are made: with no group ticked this is every stored channel -->
@@ -273,8 +273,10 @@
 
           <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
             <Button DockPanel.Dock="Left" Classes="seg" Content="All groups" Command="{Binding ShowAllGroupsCommand}"
-                    ToolTip.Tip="Untick every group: all of them are shown and scanned" />
-            <TextBlock Text="Tick one or several groups to show and scan; with none ticked, all are."
+                    ToolTip.Tip="Tick every group: all of them are shown and scanned" />
+            <Button DockPanel.Dock="Left" Classes="seg" Content="No groups" Command="{Binding ClearGroupsCommand}" Margin="6,0,0,0"
+                    ToolTip.Tip="Untick every group, to tick only the ones wanted: with none ticked, nothing is shown or scanned" />
+            <TextBlock Text="Tick one or several groups to show and scan; with none ticked, nothing is."
                        Classes="label" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
           </DockPanel>
           <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
@@ -390,7 +392,7 @@
               <TextBlock Text="Antenna" Classes="label" Margin="12,0,0,0" IsVisible="{Binding ShownIsHere}" />
               <ComboBox ItemsSource="{Binding Radio.Antennas}" SelectedItem="{Binding Radio.SelectedAntenna}" Width="130" IsVisible="{Binding ShownIsHere}" />
               <CheckBox Content="Use" IsChecked="{Binding ShownUse}" IsEnabled="{Binding CanSetUse}" FontSize="12" Margin="12,0,0,0"
-                        ToolTip.Tip="Run this radio whenever it is plugged in. With several ticked, all run at once, each with a display of its own and a share of the scan. A change takes effect when the app is next started. With none ticked, the radio used last is used." />
+                        ToolTip.Tip="Run this radio whenever it is plugged in. With several ticked, all run at once, each with a display of its own, scanning its own groups. A change takes effect when the app is next started. With none ticked, the radio used last is used." />
             </StackPanel>
             <!-- A radio that is plugged in but not run by the program now -->
             <StackPanel Spacing="8" IsVisible="{Binding ShownIsElsewhere}">

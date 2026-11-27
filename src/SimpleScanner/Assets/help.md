@@ -85,7 +85,7 @@ A stored channel is a frequency with a name and what is known about it. Channels
 
 ## The Scan Groups tab
 
-- Tick one or several groups to show and scan. With none ticked, all are. **All groups** unticks every one.
+- Tick one or several groups to show and scan. With none ticked, nothing is. **All groups** ticks every one; **No groups** unticks every one, to start again from a few.
 - The list at the right shows the channels of the ticked groups. Tick a channel to include it in the scan; select one to tune to it.
 - **Store** keeps the frequency on the display under the name typed beside it. With one group shown it goes in that group; otherwise in "My channels".
 - **Delete** removes the selected channel.
@@ -223,7 +223,7 @@ With more than one RSP plugged in, the scanner can run them together.
 - Click a strip to select that radio. Tune, Mode, Filter, Audio, Search and the Scan row on Operate work the radio selected. A click on the frequency of a radio that is not selected only selects it; once it is selected, its digits tune by wheel or click as the big display's do.
 - Each radio has its own ticked groups. The groups shown are those of the radio selected, and the heading says whose they are.
 - **Scan** starts and stops the radio selected and leaves the others as they are: one can sit on a fixed channel while another scans.
-- When two radios scan channels they have in common, those are shared out between them, so each is visited by one radio and the scan comes round sooner. They are shared out again when one stops.
+- Each radio scans every ticked channel of its own groups, whatever the other radios scan. The stored channels are common to all: give two radios the same groups and both scan them; give each its own and they divide the work as you choose.
 - A channel's own Scan tick is the same for every radio.
 - Each radio keeps its own settings (antenna, gain, squelch, volume and the rest) under its serial number. **Pan** on Settings puts a radio's sound to the left or the right, to tell them apart by ear.
 - Each radio runs in a helper process of its own, started and ended by the program: the SDRplay software gives a program one radio, and a radio that stops working is restarted in a fresh helper (see **Troubleshooting**).

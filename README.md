@@ -67,8 +67,8 @@ a fresh helper).
 - Each radio has its own ticked groups. The groups shown on Operate and on Scan Groups are those
   of the radio selected, and the heading says whose they are.
 - Scan starts and stops the radio selected and leaves the others as they are: one can sit on a
-  fixed station while another scans. When two radios scan channels they have in common, those are
-  shared out between them, so each is visited by one radio, and shared out again when one stops.
+  fixed station while another scans. Each radio scans every ticked channel of its own groups,
+  whatever the others scan: radios given the same groups both scan them.
 - A channel's own Scan tick (on Scan Groups, and in the frequency list on Operate) is the same for
   every radio.
 - Each radio keeps its own settings (antenna, gain, squelch, volume and the rest) under its serial

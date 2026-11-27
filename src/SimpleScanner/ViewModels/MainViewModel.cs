@@ -102,7 +102,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly Settings _settings;
     private readonly MemoryStore _memories;
-    private const string AllGroups = "All groups", DefaultDevice = "System default";
+    private const string AllGroups = "All groups", NoGroups = "No groups", DefaultDevice = "System default";
     private readonly DispatcherTimer _timer;
     private bool _loading, _dirty;
     private int _ticks;
@@ -137,7 +137,7 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private Choice _selectedAvoidTime;
     [ObservableProperty] private Choice _selectedResumeTime;
     [ObservableProperty] private Choice _selectedMultiHangTime;
-    /// <summary>What the group selector's button says: the groups ticked, or that all are shown.</summary>
+    /// <summary>What the group selector's button says: the groups ticked, or that all or none are.</summary>
     [ObservableProperty] private string _groupsText = AllGroups;
     [ObservableProperty] private MemoryRow? _selectedMemory;
     [ObservableProperty] private string _newName = "";
@@ -169,8 +169,10 @@ public sealed partial class MainViewModel : ObservableObject
             var kept = radios.Count == 0 ? settings.ForFirstRadio(rx.Source.Serial)
                 : rx.Source.Serial is { } serial ? settings.Entry(serial) : new RadioSettings();
             var radio = new RadioViewModel(rx, kept, memories);
-            // A radio that has no groups of its own yet starts with the ones that were shared.
-            _groups[radio] = [.. kept.Groups ?? settings.Groups ?? (settings.Group is { } g && g != AllGroups ? [g] : [])];
+            // A radio that has no groups of its own yet starts with the ones that were shared. No group ticked was
+            // every group before 0.1.6, and is none now: a list kept empty without NoGroups is every group.
+            List<string> picked = [.. kept.Groups ?? settings.Groups ?? (settings.Group is { } g && g != AllGroups ? [g] : [])];
+            _groups[radio] = picked.Count == 0 && !kept.NoGroups ? AllGroupNames() : picked;
             radio.IsTaken = s => radios.Any(o => o != radio && o.Serial == s);
             radios.Add(radio);
         }
@@ -349,8 +351,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// The frequencies of the selected radio's groups, for the list under the user groups on Operate, each
-    /// with the Scan tick of its stored channels. While the radio scans alongside another, the ticked
-    /// frequencies that went to the other radio are left out.
+    /// with the Scan tick of its stored channels: the ticked ones are what that radio scans, whatever the
+    /// other radios scan.
     /// </summary>
     [ObservableProperty] private IReadOnlyList<ActiveFrequency> _activeFrequencies = [];
     [ObservableProperty] private string _activeTitle = "Active Frequencies";
@@ -363,12 +365,6 @@ public sealed partial class MainViewModel : ObservableObject
         var lines = Memories.GroupBy(m => Place(m.Channel.FrequencyHz))
             .Select(g => (Place: g.Key, Hz: g.First().Channel.FrequencyHz, (g.FirstOrDefault(m => m.Scan) ?? g.First()).Name, Scan: g.Any(m => m.Scan)))
             .OrderBy(l => l.Hz).ToList();
-        var radio = Radio;
-        if (radio.IsScanning && !radio.IsSearching && _shares.TryGetValue(radio, out var share))
-        {
-            var mine = share.Select(c => Place(c.FrequencyHz)).ToHashSet();
-            lines = lines.Where(l => !l.Scan || mine.Contains(l.Place)).ToList();
-        }
         // The same lines as before: only the ticks are brought up to date, so the list stays where it was scrolled to.
         if (lines.Select(l => (l.Place, l.Name)).SequenceEqual(ActiveFrequencies.Select(a => (a.Place, a.Name))))
             for (int i = 0; i < lines.Count; i++) ActiveFrequencies[i].Show(lines[i].Scan);
@@ -394,7 +390,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (_ticking) return;
         _memories.Save();
-        ShareAgain();
+        Rescan();
         RefreshActive();
     }
 
@@ -404,16 +400,20 @@ public sealed partial class MainViewModel : ObservableObject
 
     // ---- memories and scanning --------------------------------------------------------------
 
-    /// <summary>The groups ticked in the selector, which are those of the radio the controls work; empty means all.</summary>
+    /// <summary>The groups ticked in the selector, which are those of the radio the controls work; empty means none.</summary>
     private List<string> SelectedGroups => GroupRows.Where(g => g.Selected).Select(g => g.Name).ToList();
 
-    /// <summary>The groups ticked for a radio, each radio having its own; empty means all. Groups that are no longer there are left out.</summary>
+    /// <summary>The groups ticked for a radio, each radio having its own; empty means none. Groups that are no longer there are left out.</summary>
     private List<string> GroupsOf(RadioViewModel radio) => radio == Radio
         ? SelectedGroups
         : GroupRows.Where(g => _groups[radio].Any(w => MemoryStore.SameGroup(w, g.Name))).Select(g => g.Name).ToList();
 
     /// <summary>The heading over the user groups on Operate: with several radios it says whose ticks these are.</summary>
     public string GroupsTitle => IsMulti ? $"User Groups · {Radio.Name}" : "User Groups";
+
+    /// <summary>Every group, in the order the selector lists them: the user's own, then those made from the locations and the tags.</summary>
+    private List<string> AllGroupNames() =>
+        [.. _memories.GroupNames().Where(n => !MemoryStore.IsAutoGroup(n)), .. _memories.PlaceGroupNames(), .. _memories.TagGroupNames()];
 
     private void RefreshMemories(IReadOnlyCollection<string>? select = null)
     {
@@ -422,7 +422,7 @@ public sealed partial class MainViewModel : ObservableObject
         var wanted = select ?? SelectedGroups;
         // The user's own groups first, then the ones made from the locations and the tags. A tag's group keeps its tick
         // when its name changes spelling.
-        string[] names = [.. _memories.GroupNames().Where(n => !MemoryStore.IsAutoGroup(n)), .. _memories.PlaceGroupNames(), .. _memories.TagGroupNames()];
+        var names = AllGroupNames();
         if (select is not null || !names.SequenceEqual(GroupRows.Select(g => g.Name)))
         {
             GroupRows.Clear();
@@ -440,12 +440,12 @@ public sealed partial class MainViewModel : ObservableObject
             HasPlaceGroups = PlaceGroupRows.Count > 0;
         }
         var shown = SelectedGroups;
-        GroupsText = shown.Count == 0 ? AllGroups : shown.Count == 1 ? shown[0] : $"{shown.Count} groups";
+        GroupsText = shown.Count == 0 ? NoGroups : shown.Count == GroupRows.Count ? AllGroups : shown.Count == 1 ? shown[0] : $"{shown.Count} groups";
         Memories.Clear();
         // A channel in several of the groups shown appears once, under the first of them.
         string First(MemoryChannel c) =>
-            (shown.Count == 0 ? c.Groups : shown.Where(g => MemoryStore.InGroup(c, g))).Order().FirstOrDefault() ?? "";
-        foreach (var c in _memories.Channels.Where(c => shown.Count == 0 || shown.Any(g => MemoryStore.InGroup(c, g)))
+            shown.Where(g => MemoryStore.InGroup(c, g)).Order().FirstOrDefault() ?? "";
+        foreach (var c in _memories.Channels.Where(c => shown.Any(g => MemoryStore.InGroup(c, g)))
                      .OrderBy(First).ThenBy(c => c.FrequencyHz))
             Memories.Add(new MemoryRow(c, ScanTicksChanged));
         _loading = false;
@@ -538,21 +538,29 @@ public sealed partial class MainViewModel : ObservableObject
     private void OnGroupsChanged()
     {
         if (_loading) return;
-        // The ticks are the selected radio's: its scan ends, and the others' go on, taking up what it leaves.
+        // The ticks are the selected radio's: its scan ends; the others' are not touched.
         if (Radio.IsScanning) Radio.StopScan();
         RefreshMemories();
-        ShareAgain();
         _dirty = true;
     }
 
-    /// <summary>Untick every group: all of them are shown and scanned.</summary>
+    /// <summary>Tick every group: all of them are shown and scanned by the radio selected.</summary>
     [RelayCommand]
     private void ShowAllGroups()
+    {
+        if (GroupRows.All(g => g.Selected)) return;
+        if (Radio.IsScanning) Radio.StopScan();
+        RefreshMemories(AllGroupNames());
+        _dirty = true;
+    }
+
+    /// <summary>Untick every group: the radio selected shows and scans nothing until one is ticked again.</summary>
+    [RelayCommand]
+    private void ClearGroups()
     {
         if (SelectedGroups.Count == 0) return;
         if (Radio.IsScanning) Radio.StopScan();
         RefreshMemories([]);
-        ShareAgain();
         _dirty = true;
     }
 
@@ -646,16 +654,16 @@ public sealed partial class MainViewModel : ObservableObject
         return ok && hz is >= MinHz and <= MaxHz;
     }
 
-    // What each radio that is scanning from the stored channels was last given, to tell whether a new sharing-out changes it.
-    private readonly Dictionary<RadioViewModel, List<ScanChannel>> _shares = [];
+    // What each radio that is scanning from the stored channels was last given, so that a change of ticks
+    // starts again only the scans whose list it changes.
+    private readonly Dictionary<RadioViewModel, List<ScanChannel>> _scanLists = [];
 
     private IEnumerable<RadioViewModel> Scanners => RadioList.Where(r => r.IsOn && r.IsScanning && !r.IsSearching);
 
     /// <summary>
     /// Scan the ticked channels of the selected radio's groups with that radio, or stop its scan (or its
-    /// search). The other radios are left as they are: one on a fixed station stays there. Where another
-    /// radio is already scanning some of the same channels, those are shared out between them (see
-    /// <see cref="ScanSplit"/>), and shared out again when either stops.
+    /// search). Each radio scans its own groups in full and the others are left as they are: two radios
+    /// whose groups have channels in common both scan them.
     /// </summary>
     [RelayCommand]
     private void ToggleScan()
@@ -664,12 +672,6 @@ public sealed partial class MainViewModel : ObservableObject
         if (radio.IsScanning)
         {
             radio.StopScan();
-            ShareAgain();
-            return;
-        }
-        if (!Memories.Any(m => m.Scan))
-        {
-            radio.Status = "No channels are ticked for scanning in the groups shown";
             return;
         }
         if (!radio.IsOn)
@@ -677,20 +679,14 @@ public sealed partial class MainViewModel : ObservableObject
             radio.Status = "Start the radio first";
             return;
         }
-        // Always in the order of the radios, so that sharing out again gives each the part it had.
-        var on = RadioList.Where(r => r == radio || Scanners.Contains(r)).ToList();
-        if (Shares(on) is not { } shares) return;
-        for (int r = 0; r < on.Count; r++)
+        if (ScanListOf(radio) is not (var members, var list))
         {
-            var (members, share) = shares[r];
-            if (on[r] == radio)
-            {
-                if (share.Count > 0) radio.StartScan(members, share);
-                else radio.Status = "Nothing to scan on this radio: every channel went to another";
-                _shares[radio] = share;
-            }
-            else Give(on[r], members, share);
+            radio.Status = SelectedGroups.Count == 0 ? "No groups are ticked: tick one or more on Scan Groups"
+                : "No channels are ticked for scanning in the groups shown";
+            return;
         }
+        radio.StartScan(members, list);
+        _scanLists[radio] = list;
         RefreshActive();
     }
 
@@ -702,78 +698,35 @@ public sealed partial class MainViewModel : ObservableObject
         if (Radio == radio) ToggleScan();
     }
 
-    // The radios still scanning take up between them what one that has stopped has left, or what a change of ticks has moved.
-    private void ShareAgain()
+    // A channel's Scan tick has changed: each radio scanning takes up its own list again, if the change touched it.
+    private void Rescan()
     {
-        var on = Scanners.ToList();
-        if (on.Count == 0) return;
-        if (Shares(on) is not { } shares)
+        foreach (var radio in Scanners.ToList())
         {
-            // The last channel was unticked: there is nothing left to scan.
-            foreach (var r in on)
+            if (ScanListOf(radio) is not (var members, var list))
             {
-                r.StopScan();
-                r.Status = "No channels are ticked for scanning";
+                radio.StopScan();
+                radio.Status = "No channels are ticked for scanning in this radio's groups";
+                _scanLists.Remove(radio);
+                continue;
             }
-            return;
+            if (_scanLists.TryGetValue(radio, out var had) && had.Select(c => c.FrequencyHz).SequenceEqual(list.Select(c => c.FrequencyHz))) continue;
+            _scanLists[radio] = list;
+            radio.StartScan(members, list);
         }
-        for (int r = 0; r < on.Count; r++) Give(on[r], shares[r].Members, shares[r].Share);
-    }
-
-    // A radio that is scanning gets another share: its scan starts again only if the share is not the one it has.
-    private void Give(RadioViewModel radio, List<MemoryChannel> members, List<ScanChannel> share)
-    {
-        if (_shares.TryGetValue(radio, out var has) && has.Select(c => c.FrequencyHz).SequenceEqual(share.Select(c => c.FrequencyHz))) return;
-        _shares[radio] = share;
-        if (share.Count > 0) radio.StartScan(members, share);
-        else
-        {
-            radio.StopScan();
-            radio.Status = "Nothing to scan on this radio: every channel went to another";
-        }
-        if (radio == Radio) RefreshActive();
     }
 
     /// <summary>
-    /// For each of these radios, its share of a scan and the stored channels it was made from. Each radio
-    /// scans the ticked channels of its own groups; a frequency several of them scan goes to one of them.
-    /// Null when there is nothing to scan.
+    /// What a radio scans: the ticked stored channels of its own groups, and the scan list made from them
+    /// (a frequency several stored channels have is visited once). Null when none is ticked.
     /// </summary>
-    private (List<MemoryChannel> Members, List<ScanChannel> Share)[]? Shares(List<RadioViewModel> on)
+    private (List<MemoryChannel> Members, List<ScanChannel> List)? ScanListOf(RadioViewModel radio)
     {
-        // A frequency shared by several stored channels is visited once.
-        var groups = on.Select(GroupsOf).ToList();
-        bool Wants(int radio, MemoryChannel c) => groups[radio].Count == 0 || groups[radio].Any(g => MemoryStore.InGroup(c, g));
-        var mine = Memories.Where(m => m.Scan).Select(m => m.Channel).ToList();
-        var members = on.Count == 1 && on[0] == Radio ? mine
-            : _memories.Channels.Where(c => c.Scan && Enumerable.Range(0, on.Count).Any(r => Wants(r, c))).ToList();
-        var places = members.GroupBy(c => Math.Round(c.FrequencyHz / 100)).OrderBy(g => g.First().FrequencyHz).ToList();
-        if (places.Count == 0) return null;
-        var list = places.Select(g => ToScan(g.First())).ToList();
-        var usable = on.Select(r => r.UsableHz).ToList();
-        // Which radio each frequency goes to: the only radio that scans it; otherwise (-1) it is shared out
-        // among all, or (-2) among some.
-        var wanted = new int[places.Count];
-        var wanters = new List<int>[places.Count];
-        for (int i = 0; i < places.Count; i++)
-        {
-            var place = places[i];
-            var who = wanters[i] = Enumerable.Range(0, on.Count).Where(r => place.Any(c => Wants(r, c))).ToList();
-            wanted[i] = who.Count == 1 ? who[0] : who.Count == on.Count ? -1 : -2;
-        }
-        // Frequencies that some of the radios scan, but not all: shared out among just those first, with what
-        // those radios already have to themselves counted in.
-        foreach (var some in Enumerable.Range(0, places.Count).Where(i => wanted[i] == -2).GroupBy(i => string.Join(",", wanters[i])).ToList())
-        {
-            var who = wanters[some.First()];
-            var part = Enumerable.Range(0, places.Count).Where(i => some.Contains(i) || who.Contains(wanted[i])).ToList();
-            var shares = ScanSplit.Split(part.Select(i => list[i]).ToList(), part.Select(i => who.IndexOf(wanted[i])).ToList(),
-                who.Select(r => usable[r]).ToList());
-            foreach (int i in some)
-                wanted[i] = who[Array.FindIndex(shares, share => share.Contains(list[i]))];
-        }
-        var split = ScanSplit.Split(list, wanted, usable);
-        return Enumerable.Range(0, on.Count).Select(r => (members.Where(c => Wants(r, c)).ToList(), split[r])).ToArray();
+        var groups = GroupsOf(radio);
+        var members = _memories.Channels.Where(c => c.Scan && groups.Any(g => MemoryStore.InGroup(c, g))).ToList();
+        if (members.Count == 0) return null;
+        var list = members.GroupBy(c => Math.Round(c.FrequencyHz / 100)).OrderBy(g => g.First().FrequencyHz).Select(g => ToScan(g.First())).ToList();
+        return (members, list);
     }
 
     /// <summary>Takes effect at once, on the channel the scan is stopped on as well.</summary>
@@ -877,6 +830,7 @@ public sealed partial class MainViewModel : ObservableObject
             var entry = _settings.Entry(serial);
             r.WriteTo(entry);
             entry.Groups = GroupsOf(r);
+            entry.NoGroups = entry.Groups.Count == 0;
         }
         // What the window's own radio has goes in the one-radio fields too, for a build from before.
         var first = RadioList[0];

@@ -27,8 +27,14 @@ public sealed class RadioSettings
     public double BandwidthHz { get; set; } = BandPlan.NfmWide;
     public double StepHz { get; set; }
     public bool Stereo { get; set; } = true;
-    /// <summary>The memory groups ticked for this radio: the ones it shows and scans. Empty is all of them; null (never set) takes the groups that were shared.</summary>
+    /// <summary>
+    /// The memory groups ticked for this radio: the ones it shows and scans. Null (never set) takes the groups
+    /// that were shared. Empty is none when <see cref="NoGroups"/> is set; without it, as a build before 0.1.6
+    /// wrote it, empty is all of them.
+    /// </summary>
     public List<string>? Groups { get; set; }
+    /// <summary>No group is ticked: the radio shows and scans nothing until one is (see <see cref="Groups"/>).</summary>
+    public bool NoGroups { get; set; }
     /// <summary>Multi Monitor: a scan or search holds up to four active channels of a window at once.</summary>
     public bool MultiMonitor { get; set; }
 }

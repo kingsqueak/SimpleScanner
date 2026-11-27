@@ -1,6 +1,6 @@
 # SimpleScanner
 
-A desktop communications scanner for the SDRplay RSPdx, for Windows, macOS and Linux
+A desktop communications scanner for the SDRplay RSP series of receivers, for Windows, macOS and Linux
 (.NET 10, Avalonia). Early days: an analogue receiver with a fast scan, the first five
 digital voice modes, and several radios at once.
 

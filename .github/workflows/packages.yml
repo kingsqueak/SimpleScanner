@@ -53,6 +53,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends ruby rpm libarchive-tools zstd libasound2-dev pkg-config
           sudo gem install --no-document fpm
       - name: Build the packages
+        # The C libraries are built in Debian 12 so they run on older glibc (Raspberry Pi OS).
+        env:
+          NATIVE_DOCKER_IMAGE: debian:bookworm
         run: ./scripts/make-linux.sh
       - uses: actions/upload-artifact@v4
         with:

@@ -12,7 +12,7 @@ case "$(uname -s)" in
     ${CC:-cc} -O2 -fvisibility=hidden -arch arm64 -arch x86_64 -dynamiclib -o out/libss_audio.dylib ss_audio.c ss_usb.c \
       -framework CoreAudio -framework AudioToolbox -framework CoreFoundation -framework AudioUnit -framework IOKit ;;
   MINGW*|MSYS*|CYGWIN*)
-    ${CC:-gcc} -O2 -shared -static-libgcc -o out/ss_audio.dll ss_audio.c ss_usb.c -lole32 ;;
+    ${CC:-gcc} -O2 -shared -static -o out/ss_audio.dll ss_audio.c ss_usb.c -lole32 ;;
   *)
     ${CC:-cc} -O2 -fPIC -fvisibility=hidden -shared -o out/libss_audio.so ss_audio.c ss_usb.c -lpthread -lm -ldl ;;
 esac

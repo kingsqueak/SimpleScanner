@@ -14,7 +14,7 @@ case "$(uname -s)" in
     export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
     ${CC:-cc} $FLAGS -fvisibility=hidden -arch arm64 -arch x86_64 -dynamiclib -o out/libss_ambe.dylib $SRC ;;
   MINGW*|MSYS*|CYGWIN*)
-    ${CC:-gcc} $FLAGS -D_USE_MATH_DEFINES -shared -static-libgcc -o out/ss_ambe.dll $SRC ;;
+    ${CC:-gcc} $FLAGS -D_USE_MATH_DEFINES -shared -static -o out/ss_ambe.dll $SRC ;;
   *)
     ${CC:-cc} $FLAGS -fvisibility=hidden -fPIC -shared -o out/libss_ambe.so $SRC -lm ;;
 esac

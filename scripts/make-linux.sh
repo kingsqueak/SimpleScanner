@@ -28,8 +28,20 @@ mkdir -p "$STAGE/DEBIAN" "$APP" "$STAGE/usr/bin" "$STAGE/usr/share/applications"
     "$STAGE/usr/share/icons/hicolor/512x512/apps" "$STAGE/usr/share/doc/simplescanner" dist
 
 echo "== native libraries"
-for lib in audio digital $([ "$AMBE" = true ] && echo ambe); do
-  sh "native/$lib/build.sh" > /dev/null
+LIBS="audio digital $([ "$AMBE" = true ] && echo ambe)"
+if [ -n "${NATIVE_DOCKER_IMAGE:-}" ]; then
+  # Built in an older Linux (CI: Debian 12) so that they need no newer glibc than the systems the
+  # package is for: built on a new Ubuntu they would not load on Debian 12 or 13 or Raspberry Pi OS.
+  mkdir -p native/audio/out native/digital/out native/ambe/out
+  docker run --rm -v "$PWD:/src" -w /src "$NATIVE_DOCKER_IMAGE" sh -c "
+    apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc libc6-dev > /dev/null &&
+    for lib in $LIBS; do sh native/\$lib/build.sh > /dev/null; done &&
+    chown -R $(id -u):$(id -g) native/audio/out native/digital/out native/ambe/out"
+else
+  for lib in $LIBS; do sh "native/$lib/build.sh" > /dev/null; done
+fi
+for lib in native/*/out/*.so; do
+  echo "$lib needs glibc $(objdump -T "$lib" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
 done
 
 echo "== app ($RID)"

@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <Version>0.1.7</Version>
+    <Version>0.1.8</Version>
     <Product>SimpleScanner</Product>
     <Authors>KC2RGW Chris</Authors>
     <Copyright>Copyright (C) 2026 KC2RGW Chris. GPL-3.0-or-later.</Copyright>

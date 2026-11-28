@@ -4,6 +4,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using SimpleScanner.RadioReference;
 using SimpleScanner.ViewModels;
 
@@ -17,6 +18,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Closing += (_, _) => KeepPlace();
+        Closed += (_, _) => _closed = true;
         Opened += (_, _) => BringOntoAScreen();
         BuildMenu();
     }
@@ -89,19 +91,34 @@ public partial class MainWindow : Window
         MinHeight = minH;
     }
 
-    /// <summary>The view has just changed: remember the size the old one had, and take the new one's. The top left corner stays put.</summary>
+    /// <summary>
+    /// The view has just changed: remember where the old one was and how big, and take the new one's place and size.
+    /// Each view has a place of its own; a view with none yet opens where the top left corner of the other was.
+    /// </summary>
     private void ChangeView(MainViewModel main)
     {
+        var from = Position;
         if (WindowState != WindowState.Normal) WindowState = WindowState.Normal;
         else Keep(main, !main.IsMini);
         SizeFor(main);
+        var saved = main.IsMini ? main.MiniWindowPlace : main.WindowPlace;
+        var at = saved is { } p ? new PixelPoint(p.X, p.Y) : from;
+        MoveOnScreen(at);
+        // macOS resizes about the bottom left corner, and may do so after this: put it in its place again then.
+        Dispatcher.UIThread.Post(() => MoveOnScreen(at), DispatcherPriority.Background);
     }
 
-    /// <summary>Remember where the window is. A maximised or minimised window keeps the place it had before.</summary>
+    /// <summary>
+    /// Remember where the window is. A maximised or minimised window keeps the place it had before, and so does one
+    /// already closed: closed with its close button, the app's shutdown asks again, and its place then reads as 0,0.
+    /// </summary>
     public void KeepPlace()
     {
+        if (_closed || !IsVisible) return;
         if (DataContext is MainViewModel main && WindowState == WindowState.Normal) Keep(main, main.IsMini);
     }
+
+    private bool _closed;
 
     private void Keep(MainViewModel main, bool mini)
     {
@@ -111,17 +128,27 @@ public partial class MainWindow : Window
         else main.WindowPlace = place;
     }
 
-    /// <summary>If the screen the window was on has gone, so that its title bar cannot be reached, centre it on the main one.</summary>
+    /// <summary>At start, the place it was given: kept wholly on a screen (see <see cref="MoveOnScreen"/>).</summary>
     private void BringOntoAScreen()
     {
-        if (WindowStartupLocation != WindowStartupLocation.Manual) return;
-        var top = new PixelRect(Position.X + 40, Position.Y, Math.Max(1, (int)(ClientSize.Width * RenderScaling) - 80), 30);
-        if (Screens.All.Any(s => s.WorkingArea.Intersects(top))) return;
-        if ((Screens.Primary ?? Screens.All.FirstOrDefault()) is not { } screen) return;
-        var area = screen.WorkingArea;
-        Position = new PixelPoint(
-            area.X + Math.Max(0, (area.Width - (int)(ClientSize.Width * screen.Scaling)) / 2),
-            area.Y + Math.Max(0, (area.Height - (int)(ClientSize.Height * screen.Scaling)) / 2));
+        if (WindowStartupLocation == WindowStartupLocation.Manual) MoveOnScreen(Position);
+    }
+
+    /// <summary>Put the window's top left corner at this point, moved as little as needed for all of it to be on a screen.</summary>
+    private void MoveOnScreen(PixelPoint at)
+    {
+        var screens = Screens.All;
+        if (screens.Count == 0) return;
+        // The size it is about to have: the size asked for, with its title bar and edges, in screen pixels.
+        double frameW = (FrameSize?.Width ?? ClientSize.Width) - ClientSize.Width;
+        double frameH = (FrameSize?.Height ?? ClientSize.Height) - ClientSize.Height;
+        var current = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? screens[0];
+        var place = WindowPlacement.Fit(at,
+            (w: Math.Max(0, frameW) + (double.IsNaN(Width) ? ClientSize.Width : Width),
+             h: Math.Max(0, frameH) + (double.IsNaN(Height) ? ClientSize.Height : Height)),
+            screens.Select(s => (s.WorkingArea, s.Scaling)).ToList(),
+            screens.ToList().IndexOf(current));
+        if (place != Position) Position = place;
     }
 
     // The deck: its three cards in one row when there is room for them; otherwise Scan and Audio side by side

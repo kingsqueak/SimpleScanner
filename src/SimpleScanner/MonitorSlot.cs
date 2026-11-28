@@ -33,6 +33,10 @@ internal sealed class MonitorSlot : IDisposable
         Channel = new ChannelReceiver(sampleRate);
         Channel.SetOffset(OffsetHz);
         Channel.DiscriminatorTap = d => DigitalVoice.Feed(d, Channel.DiscriminatorHzPerUnit);
+        Channel.BasebandTap = (re, im) =>
+        {
+            if (Channel.Mode == Mode.Nfm) DigitalVoice.FeedBaseband(re, im, SquelchOpen);
+        };
     }
 
     public ChannelReceiver Channel { get; }

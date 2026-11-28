@@ -58,6 +58,57 @@ public static class ScanPlan
         return windows;
     }
 
+    /// <summary>
+    /// The centre for one channel that must be received and as many more as can be with it (a trunked site: its control
+    /// channel and its voice channels), all of them <paramref name="bandwidthHz"/> wide: each one counted lies inside the
+    /// passband and clear of the centre (<see cref="Fits"/>). Of the centres that hold the most, the middle of the longest
+    /// run of them, which leaves the most room either side. <paramref name="held"/> is how many of
+    /// <paramref name="wantHz"/> it holds.
+    /// </summary>
+    public static double CenterFor(double mustHz, IReadOnlyList<double> wantHz, double bandwidthHz, double usableHz, out int held)
+    {
+        const double step = 6250;
+        int steps = (int)(usableHz / 2 / step);
+        int best = -1, runStart = 0, runLength = 0, bestStart = 0, bestLength = 0;
+        for (int k = -steps; k <= steps + 1; k++)
+        {
+            int count = -1;
+            double center = mustHz + k * step;
+            if (k <= steps && center >= MinCenterHz && center <= MaxCenterHz && Fits(mustHz - center, bandwidthHz, usableHz))
+            {
+                count = 0;
+                foreach (double hz in wantHz)
+                    if (Fits(hz - center, bandwidthHz, usableHz)) count++;
+            }
+            // Runs of centres holding the same number, one after another.
+            if (count == best && count >= 0 && runLength > 0 && runStart + runLength == k)
+            {
+                runLength++;
+                if (runLength > bestLength)
+                {
+                    bestStart = runStart;
+                    bestLength = runLength;
+                }
+                continue;
+            }
+            if (count > best)
+            {
+                best = count;
+                bestStart = runStart = k;
+                bestLength = runLength = 1;
+            }
+            else if (count == best && count >= 0)
+            {
+                runStart = k;
+                runLength = 1;
+            }
+            else runLength = 0;
+        }
+        held = Math.Max(best, 0);
+        if (best < 0) return mustHz - SingleOffsetFor(mustHz);
+        return mustHz + (bestStart + (bestLength - 1) / 2) * step;
+    }
+
     private static double Top(IReadOnlyList<ScanChannel> c, int from, int to)
     {
         double top = 0;

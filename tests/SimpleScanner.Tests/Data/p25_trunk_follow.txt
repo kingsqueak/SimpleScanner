@@ -1,0 +1,14 @@
+# The script of p25_trunk_follow_24k.raw (native/digital/tools/p25gen.c; see README.md): a control channel for
+# the trunk engine's tests. System 0x123, WACN 0xBEE00, NAC 0x293, RFSS 1, site 1, control channel 851.0125 MHz.
+# Identifier 1: 851.00625 MHz + n x 6.25 kHz; 3: TDMA, two slots, the same carriers.
+nac 0x293
+rfss lra=0x01 flags=1 sysid=0x123 rfss=1 site=1 ch=0x1001 ssc=0x70
+net lra=0x01 wacn=0xBEE00 sysid=0x123 ch=0x1001 ssc=0x70
+iden id=1 base=851006250 spacing=6250 offset=-45000000 bw=12500
+iden_tdma id=3 type=3 base=851006250 spacing=6250 offset=-45000000
+grant svc=0x00 ch=0x1051 tg=1234 src=5678           # 851.5125: 500 kHz from the control channel
+grant svc=0x00 ch=0x1141 tg=1235 src=5679           # 853.0125: 2 MHz from it
+grant svc=0x40 ch=0x1029 tg=5005 src=2345678        # 851.2625, encrypted
+grant svc=0x00 ch=0x103D tg=6006 src=42             # 851.3875
+grant svc=0x00 ch=0x30A3 tg=4004 src=7654321        # TDMA: 851.5125, slot 1
+update ch=0x1051 tg=1234 ch2=0x1141 tg2=1235

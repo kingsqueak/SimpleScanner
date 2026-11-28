@@ -8,6 +8,7 @@ using System.Text.Json;
 using SimpleScanner.Digital;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio;
+using SimpleScanner.Trunk;
 
 namespace SimpleScanner.Remote;
 
@@ -38,6 +39,7 @@ public sealed class RemoteReceiver : IReceiver
     private readonly Dictionary<string, (object? Value, Type Type)> _sets = [];
     private ModeArg? _mode;
     private IReadOnlyList<ScanChannel>? _scan;
+    private TrunkArg? _trunk;
     private bool _wantRunning;
     private volatile string? _restartWhy;
     private long _lastRestart;
@@ -190,7 +192,7 @@ public sealed class RemoteReceiver : IReceiver
         lock (_gate)
         {
             wasRunning = _s.IsRunning;
-            Volatile.Write(ref _s, _s with { IsRunning = false, Scanning = false, ScanListening = false, ScanChannel = null, SquelchOpen = false, LevelDb = -140, DigitalText = null, Slots = ReceiverStatus.EmptySlots });
+            Volatile.Write(ref _s, _s with { IsRunning = false, Scanning = false, ScanListening = false, ScanChannel = null, SquelchOpen = false, LevelDb = -140, DigitalText = null, Slots = ReceiverStatus.EmptySlots, Trunk = null });
         }
         foreach (var waiter in _waiting.Values) waiter.TrySetException(new InvalidOperationException("The receiver's helper program stopped."));
         if (!_disposed && wasRunning) Failed?.Invoke("The receiver's helper program stopped.");
@@ -281,7 +283,11 @@ public sealed class RemoteReceiver : IReceiver
 
     public void Stop()
     {
-        lock (_gate) _wantRunning = false;
+        lock (_gate)
+        {
+            _wantRunning = false;
+            _trunk = null;                   // a receiver that stops leaves trunk mode
+        }
         if (_gone) return;
         Ask("stop", 10000);
     }
@@ -289,7 +295,13 @@ public sealed class RemoteReceiver : IReceiver
     public double FrequencyHz
     {
         get => Status.FrequencyHz;
-        set => Set(nameof(FrequencyHz), value, s => s with { FrequencyHz = value });
+        set
+        {
+            // Tuning by hand ends trunk mode (tuning to where it is already does nothing).
+            lock (_gate)
+                if (value != _s.FrequencyHz) _trunk = null;
+            Set(nameof(FrequencyHz), value, s => s with { FrequencyHz = value, Trunk = value != s.FrequencyHz ? null : s.Trunk });
+        }
     }
 
     public Mode Mode => Status.Mode;
@@ -297,8 +309,15 @@ public sealed class RemoteReceiver : IReceiver
 
     public void SetMode(Mode mode, double bandwidthHz)
     {
-        lock (_gate) _mode = new ModeArg(mode, bandwidthHz);
-        Send("setMode", arg: new ModeArg(mode, bandwidthHz), argType: typeof(ModeArg), change: s => s with { Mode = mode, BandwidthHz = bandwidthHz });
+        lock (_gate)
+        {
+            _mode = new ModeArg(mode, bandwidthHz);
+            if (mode != _s.Mode || bandwidthHz != _s.BandwidthHz) _trunk = null;      // a new mode ends trunk mode
+        }
+        Send("setMode", arg: new ModeArg(mode, bandwidthHz), argType: typeof(ModeArg), change: s => s with
+        {
+            Mode = mode, BandwidthHz = bandwidthHz, Trunk = mode != s.Mode || bandwidthHz != s.BandwidthHz ? null : s.Trunk,
+        });
     }
 
     public double LevelDb => Status.LevelDb;
@@ -390,13 +409,17 @@ public sealed class RemoteReceiver : IReceiver
 
     public void StartScan(IReadOnlyList<ScanChannel> channels)
     {
-        lock (_gate) _scan = channels.Count > 0 ? channels : null;
+        lock (_gate)
+        {
+            _scan = channels.Count > 0 ? channels : null;
+            _trunk = null;
+        }
         // The receiver leaves out the channels it refuses to receive: with none left it does not scan, and stays on its channel.
         bool any = channels.Any(c => !BandPlan.IsBlocked(c.FrequencyHz, c.BandwidthHz));
         Send("startScan", arg: channels, argType: typeof(IReadOnlyList<ScanChannel>),
             change: s => s with
             {
-                Scanning = channels.Count > 0 && s.IsRunning, ScanChannel = null, ScanListening = false, SquelchEnabled = true,
+                Scanning = channels.Count > 0 && s.IsRunning, ScanChannel = null, ScanListening = false, SquelchEnabled = true, Trunk = null,
                 Slots = OneChannel(s, none: s.MultiMonitor && any && s.IsRunning),
             });
     }
@@ -445,6 +468,36 @@ public sealed class RemoteReceiver : IReceiver
     }
 
     public void SkipSlot(int slot) => Send("skipSlot", arg: slot, argType: typeof(int));
+
+    public TrunkStatus? Trunk => Status.Trunk;
+
+    public void StartTrunk(TrunkSiteDef site, TrunkFilter filter)
+    {
+        var arg = new TrunkArg(site, filter);
+        lock (_gate)
+        {
+            _trunk = arg;
+            _scan = null;
+        }
+        Send("startTrunk", arg: arg, argType: typeof(TrunkArg), change: s => s with
+        {
+            Scanning = false, ScanListening = false, ScanChannel = null, Slots = OneChannel(s),
+            Trunk = s.IsRunning && site.ControlHz.Count > 0 ? TrunkStatus.Starting(site) : null,
+        });
+    }
+
+    public void StopTrunk()
+    {
+        lock (_gate) _trunk = null;
+        Send("stopTrunk", change: s => s with { Trunk = null });
+    }
+
+    public void SetTrunkFilter(TrunkFilter filter)
+    {
+        lock (_gate)
+            if (_trunk is not null) _trunk = _trunk with { Filter = filter };
+        Send("setTrunkFilter", arg: filter, argType: typeof(TrunkFilter));
+    }
 
     public ScanChannel? AvoidSlot(int slot)
     {
@@ -502,15 +555,17 @@ public sealed class RemoteReceiver : IReceiver
             if (!Connect(serial ?? _helperSerial)) return;
             connected = true;
             IReadOnlyList<ScanChannel>? scan;
+            TrunkArg? trunk;
             bool running;
-            lock (_gate) (scan, running) = (_scan, _wantRunning);
+            lock (_gate) (scan, trunk, running) = (_scan, _trunk, _wantRunning);
             if (running)
             {
                 Ask("start", 20000);
-                if (scan is not null) Send("startScan", arg: scan, argType: typeof(IReadOnlyList<ScanChannel>));
+                if (trunk is not null) Send("startTrunk", arg: trunk, argType: typeof(TrunkArg));
+                else if (scan is not null) Send("startScan", arg: scan, argType: typeof(IReadOnlyList<ScanChannel>));
             }
             _lastRestart = Stopwatch.GetTimestamp();
-            RadioLog.Write($"{name} {serial}: running again in a new helper{(scan is not null ? ", scanning" : "")}");
+            RadioLog.Write($"{name} {serial}: running again in a new helper{(trunk is not null ? ", trunking" : scan is not null ? ", scanning" : "")}");
         }
         catch (Exception e)
         {

@@ -93,13 +93,16 @@
           <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}" MinWidth="46"
                   Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleScanOfCommand}" CommandParameter="{Binding}"
                   ToolTip.Tip="Scan the ticked channels of this radio's groups with this radio, or stop its scan" />
-          <Button Classes="seg" Classes.lit="{Binding MultiMonitor}" Content="Multi" Command="{Binding ToggleMultiMonitorCommand}"
-                  ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers." />
-          <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding IsScanning}"
-                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and carry on" />
+          <Button Classes="seg" Classes.lit="{Binding MultiLit}" Content="Multi" Command="{Binding ToggleMultiMonitorCommand}"
+                  IsEnabled="{Binding !IsTrunking}" ToolTip.ShowOnDisabled="True"
+                  ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers. Not used in trunk mode; it is back as it was when trunk mode ends." />
+          <Button Classes="seg" Classes.lit="{Binding IsTrunking}" Content="Trunk" Command="{Binding ToggleTrunkCommand}"
+                  ToolTip.Tip="Trunk mode for this radio: follow the calls of the trunked site chosen for it on Trunk, or stop. It stops its scan, and Scan stops it." />
+          <Button Classes="seg" Content="Skip" Command="{Binding SkipChannelCommand}" IsEnabled="{Binding CanSkip}"
+                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and carry on; in trunk mode, the call being followed" />
           <Button Classes="seg" Content="Avoid" Command="{Binding AvoidChannelCommand}" IsEnabled="{Binding CanAvoidChannel}" Margin="0"
                   ToolTip.ShowOnDisabled="True"
-                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and keep it out of the scan for the time set in Avoid for, on Settings. In Multi Monitor each of its rows has its own Avoid." />
+                  ToolTip.Tip="Leave the channel this radio's scan has stopped on and keep it out of the scan for the time set in Avoid for, on Settings. In Multi Monitor each of its rows has its own Avoid. Not used in trunk mode: untick the talkgroup on Trunk instead." />
         </StackPanel>
       </StackPanel>
 

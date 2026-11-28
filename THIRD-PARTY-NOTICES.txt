@@ -133,6 +133,43 @@ Copyright (C) 2010 DSD Author
 Under the ISC licence, the same terms as mbelib's above.
 
 ==============================================================================
+op25 and sdrtrunk (P25 Phase 2 tables and layouts, and P25 message layouts, in the ss_digital library)
+https://github.com/boatbod/op25
+https://github.com/DSheirer/sdrtrunk
+==============================================================================
+
+native/digital/p25p2.h, p25p2_sync.c, p25p2_burst.c, p25p2_rs.c and p25p2rx.c take from
+op25 (gr-op25_repeater: p25p2_tdma.cc, p25p2_isch.cc, p25p2_duid.cc, p25p2_vf.cc,
+frame_sync_magics.h, apps/tdma/lfsr.py) and sdrtrunk (module/decode/p25/phase2:
+ISCHDecoder, DataUnitID, LinearFeedbackShiftRegister, ScramblingSequence, the
+timeslot classes; edac/ReedSolomonErasureDecoder) the Phase 2 sync pattern, the
+I-ISCH generator, the DUID code words, the scrambling register and where its
+sequence starts, the burst layouts, the Reed-Solomon codes' shortening and
+puncturing and the CRC; the code that uses them is written for SimpleScanner.
+p25p2_vf.c reads Phase 2 voice frames with RadioFoundry's AMBE+2 code, having
+checked that op25's frame table and whitening (p25p2_vf.cc) are the same as it.
+The test signal generator tools/p25p2gen.c builds bursts with the same tables.
+
+native/digital/p25mbt.c reads the multi-block trunking messages (Phase 1 control
+channel) at the octet places op25 (apps/tk_p25.py decode_mbt_data) and sdrtrunk
+(module/decode/p25/phase1/message/pdu/ambtc/osp) agree on; tools/p25gen.c writes
+them the same way for the tests.
+
+src/SimpleScanner/Digital/P25Phase2Mac.cs ports op25's table of MAC message
+lengths (p25p2_tdma.cc mac_msg_len) and its walk through a MAC PDU's messages
+(p25p2_tdma::decode_mac_msg), and takes the places of the MAC PDU fields (PUSH-TO-
+TALK, END-PUSH-TO-TALK, the group voice channel user messages, the ESS) from op25
+(p25p2_tdma.cc handle_mac_ptt, handle_mac_end_ptt; apps/tk_p25.py decode_tdma_msg)
+and sdrtrunk (phase2/message/mac: MacMessage, MacPduType, MacOpcode, structure/
+PushToTalk, EndPushToTalk, GroupVoiceChannelUserAbbreviated and Extended).
+
+op25: Copyright (C) 2013, 2014, 2021 Max H. Parke KA1RBI; Copyright 2017-2025 Graham
+J. Norbury. sdrtrunk: Copyright (C) 2014-2026 Dennis Sheirer.
+
+Both are free software under the GNU General Public License, version 3 or (at
+your option) any later version, the licence of SimpleScanner itself (LICENSE).
+
+==============================================================================
 Avalonia (the window and its controls), with Avalonia.Desktop, Avalonia.Skia,
 Avalonia.HarfBuzz, Avalonia.Native, Avalonia.X11, Avalonia.Win32, Avalonia.FreeDesktop,
 Avalonia.Themes.Fluent, Avalonia.Fonts.Inter, Avalonia.Remote.Protocol

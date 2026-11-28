@@ -24,13 +24,16 @@
       <Button Classes="seg" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
               Command="{Binding ToggleScanCommand}" MinWidth="82"
               ToolTip.Tip="Scan the ticked channels of the groups shown" />
-      <Button Classes="seg" Classes.lit="{Binding Radio.MultiMonitor}" Content="Multi" Command="{Binding Radio.ToggleMultiMonitorCommand}"
-              ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers." />
+      <Button Classes="seg" Classes.lit="{Binding Radio.MultiLit}" Content="Multi" Command="{Binding Radio.ToggleMultiMonitorCommand}"
+              IsEnabled="{Binding !Radio.IsTrunking}" ToolTip.ShowOnDisabled="True"
+              ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers. Not used in trunk mode; it is back as it was when trunk mode ends." />
+      <Button Classes="seg" Classes.lit="{Binding Radio.IsTrunking}" Content="Trunk" Command="{Binding Radio.ToggleTrunkCommand}"
+              ToolTip.Tip="Trunk mode: follow the calls of the trunked site chosen on Trunk, in the full window. It stops a scan, and Scan stops it." />
       <Button Classes="seg" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
-              IsEnabled="{Binding Radio.IsScanning}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
+              IsEnabled="{Binding Radio.CanSkip}" ToolTip.Tip="Leave the channel the scan has stopped on and carry on; in trunk mode, the call being followed" />
       <Button Classes="seg" Content="Avoid" Command="{Binding Radio.AvoidChannelCommand}"
               IsEnabled="{Binding Radio.CanAvoidChannel}" ToolTip.ShowOnDisabled="True"
-              ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the time set in Avoid for, on Settings. In Multi Monitor each row has its own Avoid." />
+              ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the time set in Avoid for, on Settings. In Multi Monitor each row has its own Avoid. Not used in trunk mode: untick the talkgroup on Trunk instead." />
       <!-- With one radio this button is on the display -->
       <Button Classes="seg" Content="Full window" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding IsMulti}"
               ToolTip.Tip="Back to the full window" />
@@ -126,19 +129,23 @@
         <Border x:Name="ScanCard" Classes="card" Grid.Column="0">
           <StackPanel Spacing="9">
             <TextBlock Classes="head" Text="SCAN" />
-            <Grid ColumnDefinitions="1.35*,*,*,*" ColumnSpacing="6">
+            <Grid ColumnDefinitions="1.35*,*,*,*,*" ColumnSpacing="6">
               <Button Grid.Column="0" Classes="seg big" Classes.lit="{Binding IsScanning}" Content="{Binding ScanText}"
                       Command="{Binding ToggleScanCommand}" FontWeight="SemiBold" HorizontalAlignment="Stretch" MinWidth="0" Padding="6,0"
                       ToolTip.Tip="Scan the ticked channels of the groups ticked on Groups. It stops on a channel while there is a signal above the squelch mark, and for two seconds after." />
               <Button Grid.Column="1" Classes="seg big" Content="Skip" Command="{Binding Radio.SkipChannelCommand}"
-                      IsEnabled="{Binding Radio.IsScanning}" HorizontalAlignment="Stretch" MinWidth="0" Padding="6,0"
-                      ToolTip.Tip="Leave the channel the scan has stopped on and carry on" />
+                      IsEnabled="{Binding Radio.CanSkip}" HorizontalAlignment="Stretch" MinWidth="0" Padding="6,0"
+                      ToolTip.Tip="Leave the channel the scan has stopped on and carry on. In trunk mode: leave the call being followed." />
               <Button Grid.Column="2" Classes="seg big" Content="Avoid" Command="{Binding Radio.AvoidChannelCommand}"
                       IsEnabled="{Binding Radio.CanAvoidChannel}" ToolTip.ShowOnDisabled="True" HorizontalAlignment="Stretch" MinWidth="0" Padding="6,0"
-                      ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the time set in Avoid for, on Settings. Closing the app clears every avoid. In Multi Monitor each row of the display has its own Avoid." />
-              <Button Grid.Column="3" Classes="seg big" Classes.lit="{Binding Radio.MultiMonitor}" Content="Multi"
+                      ToolTip.Tip="Leave the channel the scan has stopped on and keep it out of the scan for the time set in Avoid for, on Settings. Closing the app clears every avoid. In Multi Monitor each row of the display has its own Avoid. Not used in trunk mode: untick the talkgroup on Trunk instead." />
+              <Button Grid.Column="3" Classes="seg big" Classes.lit="{Binding Radio.MultiLit}" Content="Multi"
                       Command="{Binding Radio.ToggleMultiMonitorCommand}" HorizontalAlignment="Stretch" MinWidth="0" Padding="6,0"
-                      ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers." />
+                      IsEnabled="{Binding !Radio.IsTrunking}" ToolTip.ShowOnDisabled="True"
+                      ToolTip.Tip="Multi Monitor: with it on, a scan that finds several active channels in the stretch of band it is looking at plays up to four at once, each in its own place between the speakers. Not used in trunk mode; it is back as it was when trunk mode ends." />
+              <Button Grid.Column="4" Classes="seg big" Classes.lit="{Binding Radio.IsTrunking}" Content="Trunk"
+                      Click="OnTrunk" HorizontalAlignment="Stretch" MinWidth="0" Padding="6,0"
+                      ToolTip.Tip="Trunk mode: follow the calls of the trunked site chosen on Trunk. It stops a scan, and Scan stops it. With no site chosen yet, it opens Trunk." />
             </Grid>
             <!-- What is scanned: the groups ticked. Opens the Groups tab. -->
             <Button Classes="seg" Margin="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="8,4"
@@ -184,7 +191,7 @@
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Border Classes="segs">
                   <StackPanel Orientation="Horizontal" Spacing="2">
-                    <Button Classes="seg" Classes.lit="{Binding Radio.AutoMode}" Content="Auto" Command="{Binding Radio.SetAutoModeCommand}"
+                    <Button Classes="seg" Classes.lit="{Binding Radio.AutoLit}" Content="Auto" Command="{Binding Radio.SetAutoModeCommand}"
                             ToolTip.Tip="Choose the mode and filter from the band: AM on airband, FM elsewhere" />
                     <Button Classes="seg" Classes.lit="{Binding Radio.IsAm}" Content="AM" Command="{Binding Radio.SetModeCommand}" CommandParameter="AM" />
                     <Button Classes="seg" Classes.lit="{Binding Radio.IsNfm}" Content="NFM" Command="{Binding Radio.SetModeCommand}" CommandParameter="NFM"
@@ -258,7 +265,7 @@
       </Button>
       <!-- With several radios the small-window button has no display to sit on: it is here -->
       <Button Classes="seg ghost" MinWidth="0" Padding="7,4" Command="{Binding ToggleMiniCommand}" IsVisible="{Binding IsMulti}"
-              ToolTip.Tip="Small window: only the radios' displays, with Mute, Scan, Multi, Skip and Avoid under them">
+              ToolTip.Tip="Small window: only the radios' displays, with Mute, Scan, Multi, Trunk, Skip and Avoid under them">
         <Path Width="14" Height="14" Stretch="Uniform" StrokeThickness="2" StrokeLineCap="Round" StrokeJoin="Round"
               Stroke="{DynamicResource TextMuted}"
               Data="M 20,4 L 14,10 M 14,5 L 14,10 L 19,10 M 4,20 L 10,14 M 5,14 L 10,14 L 10,19" />
@@ -503,6 +510,151 @@
             </StackPanel>
           </Border>
         </ScrollViewer>
+      </TabItem>
+
+      <!-- TRUNK: one radio's trunked site, its talkgroups and its calls. Every row is of fixed height, so nothing moves as calls come. -->
+      <TabItem x:Name="TrunkTab" Header="Trunk">
+        <Panel Margin="0,10,0,0">
+          <TextBlock IsVisible="{Binding Radio.Trunk.NoSystems}" Classes="label" FontSize="12" VerticalAlignment="Top" TextWrapping="Wrap"
+                     Text="No trunked system is stored yet. Load one from the RadioReference window: Channel editor → RadioReference online…" />
+          <DockPanel IsVisible="{Binding Radio.Trunk.HasSystems}">
+            <!-- The system and site for the radio selected, and the button that starts and stops trunk mode -->
+            <DockPanel DockPanel.Dock="Top" Height="28" Margin="0,0,0,6">
+              <CheckBox DockPanel.Dock="Right" Classes="switch" IsChecked="{Binding Radio.Trunk.ListenUnknown}" VerticalAlignment="Center"
+                        Content="Play talkgroups not in the list" Foreground="{DynamicResource TextMuted}" FontSize="11"
+                        ToolTip.Tip="Follow calls to talkgroups that are not in the system's list, shown as TG and their number. Off: only the ticked talkgroups are followed. The same for every radio." />
+              <TextBlock DockPanel.Dock="Left" Text="For" Classes="label" IsVisible="{Binding IsMulti}" Margin="0,0,6,0" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding Radio.Name}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                         IsVisible="{Binding IsMulti}" Margin="0,0,12,0" />
+              <ComboBox DockPanel.Dock="Left" ItemsSource="{Binding Radio.Trunk.Systems}" SelectedItem="{Binding Radio.Trunk.SelectedSystem}"
+                        Width="200" Height="28" PlaceholderText="Choose a system"
+                        ToolTip.Tip="The trunked system this radio follows. Systems are loaded from the RadioReference window. Each radio has its own choice.">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TrunkSystemChoice">
+                    <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <ComboBox DockPanel.Dock="Left" ItemsSource="{Binding Radio.Trunk.Sites}" SelectedItem="{Binding Radio.Trunk.SelectedSite}"
+                        Width="180" Height="28" Margin="6,0,0,0" PlaceholderText="Choose a site"
+                        ToolTip.Tip="The site to follow: the one whose control channel is heard best here. Choosing another in trunk mode moves there at once.">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TrunkSiteChoice">
+                    <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <Button DockPanel.Dock="Left" Classes="seg" Classes.lit="{Binding Radio.IsTrunking}" Content="{Binding Radio.Trunk.ToggleText}"
+                      Command="{Binding Radio.ToggleTrunkCommand}" MinWidth="64" Height="28" Margin="6,0,0,0" FontWeight="SemiBold"
+                      ToolTip.Tip="Start or stop trunk mode on this site: the radio finds the control channel and follows the calls of the ticked talkgroups. It stops a scan, and Scan stops it." />
+              <Button DockPanel.Dock="Left" Classes="seg" Classes.lit="{Binding Radio.Trunk.IsHolding}" Content="Hold"
+                      Command="{Binding Radio.Trunk.ToggleHoldCommand}" IsEnabled="{Binding Radio.Trunk.CanHold}" ToolTip.ShowOnDisabled="True"
+                      MinWidth="52" Height="28" Margin="6,0,0,0"
+                      ToolTip.Tip="Hold: follow only the talkgroup of the call being followed (or of the last one), until Hold is pressed again. The ticks are kept as they are." />
+              <Panel />
+            </DockPanel>
+            <!-- What the site says: one line, always there -->
+            <DockPanel DockPanel.Dock="Top" Height="18" Margin="2,0,2,6">
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Radio.Trunk.WarningText}" Foreground="{DynamicResource WarnText}" FontSize="12"
+                         FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0,0,0"
+                         ToolTip.Tip="The control channel heard says it is another site or system than the one chosen: the NAC, system or site numbers differ from what RadioReference lists. Choose the site it is, or check the frequencies." />
+              <!-- Of a fixed width, so the numbers after it stay put as the state changes -->
+              <TextBlock DockPanel.Dock="Left" Text="{Binding Radio.Trunk.StateText}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                         Width="214" Margin="0,0,8,0" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding Radio.Trunk.SiteText}" Classes="label" FontSize="12" TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding Radio.Trunk.SiteTip}" />
+            </DockPanel>
+            <Grid ColumnDefinitions="*,1.25*" ColumnSpacing="10">
+              <!-- The system's talkgroups and their ticks -->
+              <Border Classes="card" Padding="6,8">
+                <DockPanel>
+                  <DockPanel DockPanel.Dock="Top" Margin="6,0,6,4" Height="24">
+                    <Button DockPanel.Dock="Right" Classes="seg small" Content="None" Command="{Binding Radio.Trunk.TickNoneCommand}" Margin="4,0,0,0"
+                            ToolTip.Tip="Untick every talkgroup shown: with a filter typed, only those it shows" />
+                    <Button DockPanel.Dock="Right" Classes="seg small" Content="All" Command="{Binding Radio.Trunk.TickAllCommand}" Margin="4,0,0,0"
+                            ToolTip.Tip="Tick every talkgroup shown: with a filter typed, only those it shows" />
+                    <TextBox DockPanel.Dock="Right" Text="{Binding Radio.Trunk.TalkgroupFilter}" Width="110" Height="24" MinHeight="0" FontSize="11"
+                             Padding="6,0" VerticalContentAlignment="Center" PlaceholderText="Filter"
+                             ToolTip.Tip="Show only the talkgroups whose number starts with this, or whose name, description, tag or category holds it. It changes nothing that is ticked." />
+                    <TextBlock Classes="head" Text="{Binding Radio.Trunk.TalkgroupsTitle}" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="The talkgroups of the system chosen. Calls to a ticked one are followed; the ticks belong to the system, so every radio on it shares them. A change takes effect at once." />
+                  </DockPanel>
+                  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <!-- By category: a heading with a tick for the category, then its talkgroups. Every line is 22 high. -->
+                    <ItemsControl ItemsSource="{Binding Radio.Trunk.TalkgroupLines}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.DataTemplates>
+                        <DataTemplate DataType="vm:TalkgroupCategoryRow">
+                          <CheckBox IsChecked="{Binding Listen}" Height="22" Margin="0,0,8,0" ToolTip.Tip="{Binding Tip}"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <DockPanel>
+                              <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" Classes="label" />
+                              <TextBlock Classes="head" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            </DockPanel>
+                          </CheckBox>
+                        </DataTemplate>
+                        <DataTemplate DataType="vm:TalkgroupRow">
+                          <CheckBox IsChecked="{Binding Listen}" Height="22" Margin="14,0,8,0" ToolTip.Tip="{Binding Tip}"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <Grid ColumnDefinitions="42,*,1.5*,20" ColumnSpacing="6">
+                              <TextBlock Text="{Binding DecText}" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                              <TextBlock Grid.Column="1" Text="{Binding Alpha}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                              <TextBlock Grid.Column="2" Text="{Binding Descr}" Classes="label" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Grid.Column="3" Text="{Binding Mode}" Classes="label" />
+                            </Grid>
+                          </CheckBox>
+                        </DataTemplate>
+                      </ItemsControl.DataTemplates>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+              <!-- The calls this radio has logged, newest first -->
+              <Border Grid.Column="1" Classes="card" Padding="6,8">
+                <DockPanel>
+                  <Grid DockPanel.Dock="Top" ColumnDefinitions="50,42,*,52,54,30,60" ColumnSpacing="6" Margin="6,0,6,4" Height="24">
+                    <TextBlock Grid.ColumnSpan="3" Classes="head" Text="RECENT CALLS"
+                               ToolTip.Tip="The calls the control channel granted, newest first: when, the talkgroup, the radio calling, the voice frequency, how long it was heard, and what became of it (heard, encrypted, not ticked, busy with another call, lost, or no voice codec: a Phase 2 call this copy cannot play)" />
+                    <TextBlock Grid.Column="3" Classes="head" Text="ID" HorizontalAlignment="Right" />
+                    <TextBlock Grid.Column="4" Classes="head" Text="MHZ" HorizontalAlignment="Right" />
+                    <TextBlock Grid.Column="5" Classes="head" Text="S" HorizontalAlignment="Right" />
+                  </Grid>
+                  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Radio.Trunk.Calls}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:TrunkCallRow">
+                          <Grid ColumnDefinitions="50,42,*,52,54,30,60" ColumnSpacing="6" Height="20" Margin="6,0" Background="Transparent"
+                                ToolTip.Tip="{Binding Tip}">
+                            <TextBlock Text="{Binding Time}" Classes="label" />
+                            <TextBlock Grid.Column="1" Text="{Binding Talkgroup}" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                       Classes.label="{Binding !Heard}" IsVisible="{Binding !Emergency}" />
+                            <!-- An emergency call stands out, in the warning colour -->
+                            <TextBlock Grid.Column="2" Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" Foreground="{DynamicResource WarnText}" IsVisible="{Binding Emergency}" />
+                            <TextBlock Grid.Column="3" Text="{Binding Source}" Classes="label" HorizontalAlignment="Right" />
+                            <TextBlock Grid.Column="4" Text="{Binding Frequency}" Classes="label" HorizontalAlignment="Right" />
+                            <TextBlock Grid.Column="5" Text="{Binding Length}" Classes="label" HorizontalAlignment="Right" />
+                            <TextBlock Grid.Column="6" Text="{Binding Outcome}" Classes="label" TextTrimming="CharacterEllipsis" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+            </Grid>
+          </DockPanel>
+        </Panel>
       </TabItem>
 
       <!-- RADIO: the settings of one receiver -->

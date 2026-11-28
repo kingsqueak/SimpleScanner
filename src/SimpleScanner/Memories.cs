@@ -80,6 +80,9 @@ public sealed class MemoryStore
 
     public MemoryStore(string? path = null) => _path = path ?? AppFiles.Database;
 
+    /// <summary>The database file, which also holds the stored trunked systems.</summary>
+    public string FilePath => _path;
+
     public static MemoryStore Load(string? path = null)
     {
         var store = new MemoryStore(path);

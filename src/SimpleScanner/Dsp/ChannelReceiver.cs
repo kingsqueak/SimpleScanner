@@ -8,6 +8,9 @@ public enum Mode { Am, Nfm, Wfm }
 /// <summary>A run of samples handed to a listener, valid only during the call.</summary>
 public delegate void SamplesHandler(ReadOnlySpan<float> samples);
 
+/// <summary>A run of complex samples (real and imaginary parts) handed to a listener, valid only during the call.</summary>
+public delegate void ComplexSamplesHandler(ReadOnlySpan<float> re, ReadOnlySpan<float> im);
+
 /// <summary>
 /// One channel out of a wide IQ stream: shift it to centre, filter it down, demodulate it,
 /// and give 48 kHz audio (left and right; the same in both except for stereo broadcast FM)
@@ -151,6 +154,12 @@ public sealed class ChannelReceiver
     /// </summary>
     public SamplesHandler? DiscriminatorTap { get; set; }
 
+    /// <summary>
+    /// In narrow FM and AM, the channel itself: complex samples at 48 kHz after the channel filter, before demodulation,
+    /// centred on the channel. For a demodulator of its own, or to record the channel.
+    /// </summary>
+    public ComplexSamplesHandler? BasebandTap { get; set; }
+
     /// <summary>The frequency deviation that reads 1.0 at the discriminator tap.</summary>
     public double DiscriminatorHzPerUnit => BandwidthHz < 13000 ? 2500 : 5000;
 
@@ -292,6 +301,7 @@ public sealed class ChannelReceiver
             count = _toNarrow.Process(_wRe.AsSpan(0, w), _wIm.AsSpan(0, w), _nRe, _nIm);
             if (count == 0) return 0;
             Measure(_nRe.AsSpan(0, count), _nIm.AsSpan(0, count));
+            BasebandTap?.Invoke(_nRe.AsSpan(0, count), _nIm.AsSpan(0, count));
             if (Mode == Mode.Nfm)
             {
                 _fm!.Process(_nRe.AsSpan(0, count), _nIm.AsSpan(0, count), audio);

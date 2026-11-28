@@ -53,13 +53,16 @@ P25 dispatch channel, with the NAC, talkgroup and radio ID decoded.
   your own radioreference.com account, give a ZIP code or choose a country, state and county,
   tick the categories and agencies wanted in the tree of what that place has, and load them
   as stored channels. What is fetched is kept on the computer for a week. Telemetry channels are
-  stored unticked
+  stored unticked. A P25 trunked system ticked there is loaded whole (sites, frequencies and
+  talkgroups) for trunk mode
 - Scan groups the program makes by itself, beside the ones you make: one for each tag in use
   (Fire Dispatch, Law Tac…) and one for each location (a town where RadioReference lists a
   county by town, otherwise the county, "statewide" or "nationwide")
 - What is stored about a channel is on the display when the scanner is on it: its name, whose
   it is, and its tag, tone or code, station class, repeater input and callsign
 - P25 Phase 1 (conventional): decoded speech, with the NAC, talkgroup and radio ID on the display
+- Trunk mode for P25 trunked systems: the radio follows a site's control channel and the calls
+  of the talkgroups ticked, Phase 1 and Phase 2 (see below)
 - DMR (Tier II conventional: repeaters, and mobiles heard directly): decoded speech, with the
   color code, time slot, talkgroup, radio ID and talker alias. It follows one of the two time
   slots at a time: the first with a call
@@ -82,8 +85,36 @@ P25 dispatch channel, with the NAC, talkgroup and radio ID decoded.
   asks GitHub's releases API for the latest version and, if it is newer, shows a link to its page
   beside the tabs. Nothing is downloaded or installed, and nothing is sent but the request
 
-Not yet: trunk following, P25 Phase 2. A stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
-the scan stops on. Trunked-system frequencies in a download are stored unticked.
+Not yet: a stored tone or code (PL, DPL, NAC, color code) is shown, not yet used to decide what
+the scan stops on. Trunked-system frequencies in a CSV download are stored unticked (trunked
+systems are followed in trunk mode, loaded from RadioReference online).
+
+### Trunk mode
+
+A trunked system's control channel says which talkgroup has been given which voice frequency. In
+trunk mode a radio listens to one site's control channel, goes to the voice frequency of each call
+to a ticked talkgroup, and comes back after it.
+
+- What it follows: P25 trunked systems whose sites have an FDMA (Phase 1) control channel,
+  simulcast sites included; Phase 1 voice calls; and Phase 2 (TDMA) voice calls, each on its time
+  slot. Phase 2 voice has been checked on generated test signals and not yet on a real system:
+  reports are welcome. Phase 2 speech uses the AMBE+2 codec; without it the calls are shown, silent.
+- What it does not: sites with a TDMA control channel, encrypted calls (logged, not followed),
+  calls from one radio to another, patches and regroups as such, and trunked systems that are not
+  P25 (DMR Tier III, Motorola Type II, EDACS, NXDN trunking and the others).
+- Loading a system: Channel editor → RadioReference online…, tick the P25 system under
+  "Trunked systems" and press Load. Talkgroups RadioReference marks as all encrypted come unticked.
+- Starting it: on the Trunk tab choose the system and the site heard best, and press Trunk (or the
+  Trunk button on the Scan card, in a radio's strip, or in the small window). Trunk mode and a scan
+  stop each other. A radio left in trunk mode starts in it again.
+- The Trunk tab shows what the engine is doing and what the site says of itself (NAC, WACN,
+  system, RFSS and site, messages a second, and in its tip the neighbouring sites), the talkgroups
+  under their categories with a tick each and one for each category, a Hold button that follows
+  only the talkgroup of the current or last call, and the recent calls with what became of each:
+  heard, busy (another call was being followed), not ticked, encrypted, lost (followed, no speech
+  came) or no voice codec (a Phase 2 call in a build without AMBE+2).
+- One radio does both: it is placed to hold the control channel and as many of the site's voice
+  frequencies as fit in its 6.4 MHz, and retunes to a call outside that and back.
 
 ### Several radios
 
@@ -94,7 +125,7 @@ program (the SDRplay API gives a process one radio, and a radio whose USB link j
 a fresh helper).
 
 - Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its
-  own Scan, Skip and Avoid buttons. Click a strip, or its name after "Controls for"
+  own Scan, Multi, Trunk, Skip and Avoid buttons. Click a strip, or its name after "Controls for"
   above the deck, to select that radio. The Scan, Tune and Audio cards and the tabs work the radio
   selected.
 - Each radio has its own ticked groups. The groups shown on the Groups tab are those of the radio
@@ -144,7 +175,7 @@ version is read into it at the first start and put aside as `memories.json.moved
 
 ### The AMBE speech codecs
 
-DMR, NXDN and System Fusion (DN mode) speech is coded with AMBE+2, which is covered by a patent (US 8,359,197, listed as in force
+DMR, NXDN, P25 Phase 2 and System Fusion (DN mode) speech is coded with AMBE+2, which is covered by a patent (US 8,359,197, listed as in force
 until May 2028). The decoder (mbelib) is therefore a library of its own, `native/ambe`, and a
 build can leave it out:
 

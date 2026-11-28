@@ -23,7 +23,7 @@ public class HelpTests
     public void The_help_in_the_program_has_its_sections_and_names_every_radio()
     {
         var help = Help.Load();
-        string[] wanted = ["Getting started", "RadioReference", "Several radios", "Hardware", "About"];
+        string[] wanted = ["Getting started", "Trunk mode", "RadioReference", "Several radios", "Hardware", "About"];
         Assert.Equal("Getting started", help[0].Title);
         Assert.All(wanted, title => Assert.Contains(help, s => s.Title == title));
         Assert.All(help, s => Assert.NotEmpty(s.Blocks));
@@ -36,6 +36,9 @@ public class HelpTests
         Assert.Contains("CSV", Text("RadioReference"));
         Assert.Contains("application key", Text("RadioReference"));
         Assert.Contains("USB", Text("Several radios"));
+        // What trunk mode follows, what it does not, and every outcome of a call the Trunk tab shows.
+        Assert.All(new[] { "Phase 2", "TDMA", "simulcast", "Hold", "EDACS", "unit to unit" }, w => Assert.Contains(w, Text("Trunk mode")));
+        Assert.All(new[] { "heard", "busy", "not ticked", "encrypted", "lost", "no voice codec" }, w => Assert.Contains($"**{w}**", Text("Trunk mode")));
     }
 
     [Fact]

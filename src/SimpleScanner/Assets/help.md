@@ -45,7 +45,7 @@ The display shows what a scanner shows: the frequency, the channel's name and wh
 
 ## The small window
 
-The button with two arrows shrinks the window to the display alone, with Mute, Scan, Skip and Avoid under it. The same button, or **Full window**, brings the full window back. Each view remembers its own size and place.
+The button with two arrows shrinks the window to the display alone, with Mute, Scan, Multi, Trunk, Skip and Avoid under it. The same button, or **Full window**, brings the full window back. Each view remembers its own size and place.
 
 # Tuning and listening
 
@@ -152,11 +152,67 @@ The **Search** tab looks through a range of frequencies for anything above the s
 - It uses the band's usual channel spacing unless a Step is chosen in Tune.
 - **Skip** leaves a frequency out for ten minutes. **Store** keeps the one it has stopped on: it opens Channels with the name box ready.
 
+# Trunk mode
+
+A trunked radio system shares a few frequencies among many talkgroups. One frequency of each site, its control channel, says all the time which talkgroup has been given which voice frequency. In trunk mode a radio listens to the control channel, goes to the voice frequency of each call you want to hear, and comes back after it.
+
+## What it follows
+
+- P25 trunked systems whose sites have an FDMA (Phase 1) control channel, as nearly all P25 sites do. Simulcast sites (several transmitters on one frequency) are received too.
+- Phase 1 voice calls, from ordinary (C4FM) and simulcast transmitters.
+- Phase 2 voice calls (TDMA: two calls share a frequency, each in its own time slot). The radio goes to the call's frequency and plays its slot. This has been checked on generated test signals, not yet on a real Phase 2 system: reports are welcome.
+- Phase 2 speech uses the AMBE+2 codec. A build made without it shows Phase 2 calls and logs them as "no voice codec", silent.
+
+## What it does not follow
+
+- Sites whose control channel is TDMA (a Phase 2 control channel). The RadioReference window marks such a site "TDMA control"; trunk mode keeps looking for a control channel it cannot read.
+- Encrypted calls: they are logged and not followed.
+- Calls from one radio to another (unit to unit): logged as not ticked.
+- Patches and regroups (talkgroups joined for a while) are not understood as such: a call is followed under the talkgroup it is granted to, if that one is wanted.
+- Trunked systems that are not P25: DMR Tier III, Motorola Type II (SmartNet, SmartZone), EDACS, NXDN trunking and the others.
+
+## Loading a system
+
+- Open **Channel editor**, then **RadioReference online…**, and sign in (it needs a Premium account; see **RadioReference**).
+- Choose the place. Under **Trunked systems**, tick the P25 system and press **Load**: its sites, their frequencies and its talkgroups are stored.
+- Talkgroups whose traffic RadioReference marks as all encrypted come unticked; the rest come ticked.
+
+## Starting it
+
+- On the **Trunk** tab choose the system, and the site whose control channel is heard best where you are. Press **Trunk**. The **Trunk** button on the Scan card does the same (with no site chosen yet it opens the tab), as do the **Trunk** buttons in each radio's strip and in the small window.
+- Trunk mode and a scan exclude each other: starting one stops the other. Tuning by hand or choosing a mode also ends it.
+- While a radio is in trunk mode, **Multi** is shown off (it does not apply; it is back as it was afterwards), and the mode shows narrow FM, which trunk mode uses.
+- **Skip** leaves the call being followed. **Avoid** is not used: untick the talkgroup instead, or use **Hold**.
+- A radio in trunk mode when the app closes, or when its power button stops it, starts in trunk mode again on the same site, if that site is still stored.
+
+## The Trunk tab
+
+- **The status line**: what trunk mode is doing (looking for the control channel, on it, following a call, waiting for a reply), then the control frequency, what the site says of itself (NAC, WACN and system in hex, RFSS and site), and the control channel's messages a second. Its tip lists the neighbouring sites the control channel names. **Not the site chosen** appears when the control channel heard is another site's or system's.
+- **Talkgroups**, under their categories. Each has a tick, and each category has one that ticks or unticks all of it. The filter, **All** and **None** work on the talkgroups shown. The ticks belong to the system, so every radio on it shares them, and a change takes effect at once.
+- **Play talkgroups not in the list**: follow calls to talkgroups RadioReference does not list, shown as "TG" and their number. The same for every radio.
+- **Hold**: follow only the talkgroup of the call being followed (or of the last one) until Hold is pressed again. The ticks are left as they are.
+- **Recent calls**: every call the control channel granted, newest first, with the time, the talkgroup, the radio calling, the voice frequency, how long it was heard, and what became of it. Emergency calls are in the warning colour. The tip of a row says more, among it the time slot of a Phase 2 call.
+
+What became of a call:
+
+- **heard**: followed, and speech was played. **skipped**: left with Skip.
+- **busy**: another call was being followed at the time.
+- **not ticked**: its talkgroup is not ticked, or it was a call to one radio.
+- **encrypted**: the control channel or the call itself said it is encrypted. It is not followed, or it is left.
+- **lost**: followed, but no speech came (a weak or distant voice frequency, or the call ended at once).
+- **no voice codec**: a Phase 2 call followed and shown, silent, in a build without the AMBE+2 codec.
+
+## Good to know
+
+- A conversation is one call. Each transmission of it is granted again, often on another frequency, and the radio follows it there. A voice that drops out for a moment on a weak signal does not end the call while the control channel still says it is on.
+- The radio watches about 6.4 MHz from one tuning. It is placed to hold the control channel and as many of the site's voice frequencies as fit. A call outside that stretch is reached by retuning to it and back (its row's tip says so); the control channel is not heard meanwhile.
+
 # Digital voice
 
 Digital voice is recognised by itself on any narrow FM channel. Nothing has to be set, and what is written in a channel's Signal type field does not matter.
 
-- **P25 Phase 1** (conventional): speech, with the NAC, talkgroup and radio ID.
+- **P25 Phase 1** (conventional, and the calls of trunked systems in trunk mode): speech, with the NAC, talkgroup and radio ID.
+- **P25 Phase 2** (TDMA, two calls to a frequency): in trunk mode only, where the control channel says which time slot a call is on (see **Trunk mode**).
 - **DMR** (Tier II conventional: repeaters, and mobiles heard directly): speech, with the color code, time slot, talkgroup, radio ID and talker alias. It follows one of the two time slots at a time: the first with a call.
 - **NXDN** (conventional, 4800 and 9600 bit/s): speech, with the RAN, talkgroup and radio ID. Calls in NXDN's full-rate voice mode are shown, not decoded.
 - **D-STAR**: speech, with the callsigns and the transmission's short text message.
@@ -164,9 +220,9 @@ Digital voice is recognised by itself on any narrow FM channel. Nothing has to b
 
 ## What it does not do
 
-- No trunk following, and no P25 Phase 2. Trunked systems' frequencies can be stored, but are left unticked.
+- Trunked systems are followed in trunk mode only, and only P25 ones (see **Trunk mode**). Scanning a trunked system's frequencies as channels plays nothing useful, so a CSV download stores them unticked.
 - Encrypted calls are shown and stay silent.
-- DMR, NXDN and System Fusion DN speech uses the AMBE+2 codec. A build made without it still follows these signals and shows who is talking; the display then says "no voice codec" and the call is silent.
+- DMR, NXDN, P25 Phase 2 and System Fusion DN speech uses the AMBE+2 codec. A build made without it still follows these signals and shows who is talking; the display then says "no voice codec" and the call is silent.
 
 # RadioReference
 
@@ -213,7 +269,7 @@ What to know about it:
 - Each channel gets a location (the town where RadioReference lists a county by town, otherwise the county, "statewide" or "nationwide"), so the location groups fill by themselves.
 - Channels already stored are not added twice, including ones that came from a CSV file of the same place.
 - Telemetry (data) channels are stored but not ticked for scanning.
-- Trunked systems are listed for information, with no tick box: the scanner does not follow them yet.
+- Trunked systems are listed under **Trunked systems**. A P25 system has a tick box: ticked, **Load** stores it whole (its sites, their frequencies and its talkgroups) for trunk mode, with no group name needed. Loading it again brings it up to date and keeps your talkgroup ticks. Systems of other kinds are dimmed, with no tick box.
 - Where RadioReference marks a channel as encrypted, its signal type ends in "e" (some of the traffic) or "E" (all of it).
 
 ## The difference in short
@@ -221,7 +277,7 @@ What to know about it:
 - **What you need.** CSV: only the file. Online: a Premium account and a connection.
 - **How you choose.** CSV: whatever is in the file, one county or agency at a time. Online: browse the tree and tick exactly the categories and agencies wanted, with a preview of each.
 - **Location groups.** CSV: none by itself. Online: every channel gets its location.
-- **Trunked systems.** CSV: site frequencies are stored unticked. Online: shown, not loaded.
+- **Trunked systems.** CSV: site frequencies are stored unticked, as channels. Online: a P25 system is loaded whole for trunk mode.
 - **Telemetry.** CSV: stored like any other channel. Online: stored unticked.
 - **Keeping up to date.** CSV: download and import the file again. Online: Fetch again, then Load; only what is new is added.
 
@@ -239,7 +295,7 @@ With more than one RSP plugged in, the scanner can run them together.
 
 ## How it works
 
-- Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its own Scan, Skip and Avoid buttons.
+- Each radio has a strip at the top of the window: power, frequency, channel, mode, level, and its own Scan, Multi, Trunk, Skip and Avoid buttons.
 - Click a strip, or the radio's name after **Controls for** above the deck, to select that radio; its strip is outlined. The Scan, Tune and Audio cards and the Groups, Channels, Search and Radio tabs work the radio selected. A click on the frequency of a radio that is not selected only selects it; once it is selected, its digits tune by wheel or click as the big display's do.
 - Each radio has its own ticked groups. The groups shown are those of the radio selected, and the Groups tab says whose they are.
 - **Scan** starts and stops the radio selected and leaves the others as they are: one can sit on a fixed channel while another scans.

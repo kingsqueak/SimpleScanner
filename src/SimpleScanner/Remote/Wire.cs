@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SimpleScanner.Dsp;
+using SimpleScanner.Trunk;
 
 namespace SimpleScanner.Remote;
 
@@ -15,9 +16,11 @@ namespace SimpleScanner.Remote;
 //                  set (Name is a property of the receiver, or "Source.<property>" of its radio; Arg the value:
 //                  MultiMonitor and MultiHangSeconds among them)
 //                  setMode, startScan, stopScan, skip, skipSlot (Arg the slot, 0 to 3), clearAvoided,
+//                  startTrunk (Arg a TrunkArg: the site and the filter), stopTrunk, setTrunkFilter (Arg the filter),
 //                  simulateStall (testing) (not answered)
 // From the helper: reply (Error is the reason when it failed; Arg any result; Status a report made after the work)
-//                  status (twenty times a second: everything the window shows, Multi Monitor's four slots among it;
+//                  status (twenty times a second: everything the window shows, Multi Monitor's four slots and the
+//                  trunk engine's state and recent calls among it;
 //                  what the receiver's processing changes together is one reading, see Receiver.ReadStatus)
 //                  failed (the radio stopped by itself; Error says why)
 //                  restart (the radio is stopped and wants a new helper: this one is going; Error says why)
@@ -39,6 +42,8 @@ internal sealed class WireMessage
 
 internal sealed record ModeArg(Mode Mode, double BandwidthHz);
 
+internal sealed record TrunkArg(TrunkSiteDef Site, TrunkFilter Filter);
+
 /// <summary>Everything about a receiver and its radio that can be read, as it stood when <see cref="Seq"/> was the last message handled.</summary>
 internal sealed record ReceiverStatus
 {
@@ -59,6 +64,10 @@ internal sealed record ReceiverStatus
     public string? DigitalText { get; init; }
     public bool DigitalEncrypted { get; init; }
     public bool DigitalNothingToHear { get; init; }
+    // A P25 signal's numbers (null for another kind, or none): its NAC, and the talkgroup and radio of its call.
+    public int? DigitalNac { get; init; }
+    public int? DigitalTalkgroup { get; init; }
+    public int? DigitalSource { get; init; }
     public string? AudioDevice { get; init; }
     public double Volume { get; init; }
     public double Pan { get; init; }
@@ -76,6 +85,8 @@ internal sealed record ReceiverStatus
     public double MultiHangSeconds { get; init; }
     /// <summary>Multi Monitor's slots, four of them (see <see cref="IReceiver.Slots"/>); four empty ones until a report says otherwise.</summary>
     public SlotStatus[] Slots { get; init; } = EmptySlots;
+    /// <summary>Trunk mode's state and recent calls; null outside it.</summary>
+    public TrunkStatus? Trunk { get; init; }
     public long DroppedBlocks { get; init; }
 
     // The radio

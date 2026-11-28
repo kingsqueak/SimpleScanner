@@ -11,6 +11,11 @@
 //                                      run the receiver on a frequency and print its level each second;
 //                                      the file takes the audio as raw 48 kHz 32-bit float, stereo;
 //                                      the word "auto" anywhere switches the auto (noise) squelch on
+//   rsp-bench listen <MHz> [seconds] [file] --p2 <WACN hex> <system hex> <NAC hex> <slot>
+//                                      a known P25 Phase 2 voice channel, one slot (0 or 1), with the system's
+//                                      scrambling: the superframe timing found and lost, every MAC PDU and ESS of
+//                                      the slot as it comes, and a line each second with the bursts, MAC PDUs and
+//                                      voice frames counted, and what the display shows
 //   rsp-bench multi <from MHz> <to MHz> [seconds] [squelch dB] radio=<a> radio=<b> ... [rate=<MS/s>,<MS/s>...]
 //                                      several radios at once in this one program, each scanning the range:
 //                                      samples received against asked, blocks dropped, retune time and the
@@ -33,10 +38,20 @@
 //                                      helper should hand over to a new one that carries on (as in the app)
 //   rsp-bench helpers [seconds] [squelch dB] radio=<a>:<from MHz>-<to MHz> radio=<b>:<from>-<to> ...
 //                                      each radio in a helper program of its own, as the app runs a second radio
+//   rsp-bench trunk <system name or id> <site number> [seconds] [--all] [--iq <file>]
+//                                      trunk mode on a stored P25 site (the database honours SIMPLESCANNER_DATA): every
+//                                      change of state and every call, with a line every 5 s; the ticked talkgroups are
+//                                      followed (talkgroups not stored too), or with --all every one. --iq records the
+//                                      control channel as `record` does
+//   rsp-bench record <MHz> <seconds> <file>
+//                                      one 12.5 kHz channel's complex baseband, 48 kHz, as interleaved 32-bit float I/Q,
+//                                      with <file>.txt beside it: frequency, start time, sample rate, gain
 using System.Diagnostics;
+using System.Globalization;
 using SimpleScanner;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio.SdrPlay;
+using SimpleScanner.Trunk;
 
 bool autoSquelch = args.Contains("auto"), fast = args.Contains("fast"), vendorAgc = args.Contains("vendoragc");
 string? lnaWord = args.FirstOrDefault(a => a.StartsWith("lna="))?[4..];
@@ -66,6 +81,134 @@ SdrPlaySource NewSource()
     if (match is null) throw new InvalidOperationException($"No free radio matches \"{radio}\".");
     s.Serial = match.Serial;
     return s;
+}
+
+if (args.Length >= 1 && args[0] == "trunk")
+{
+    var inv = CultureInfo.InvariantCulture;
+    bool all = args.Contains("--all");
+    int iqAt = Array.IndexOf(args, "--iq");
+    string? iqPath = iqAt >= 0 && iqAt + 1 < args.Length ? args[iqAt + 1] : null;
+    var rest = args.Where((a, k) => a != "--all" && (iqAt < 0 || (k != iqAt && k != iqAt + 1))).ToArray();
+    if (rest.Length < 3 || (iqAt >= 0 && iqPath is null) || !int.TryParse(rest[2], out int siteNumber))
+    {
+        Console.WriteLine("usage: rsp-bench trunk <system name or id> <site number> [seconds] [--all] [--iq <file>]");
+        return;
+    }
+    int seconds = rest.Length > 3 ? int.Parse(rest[3]) : 60;
+    var store = TrunkStore.Load();
+    var system = long.TryParse(rest[1], out long id) && store.Find(id) is { } byId ? byId
+        : store.Systems.FirstOrDefault(s => s.Name.Equals(rest[1], StringComparison.OrdinalIgnoreCase))
+        ?? store.Systems.FirstOrDefault(s => s.Name.Contains(rest[1], StringComparison.OrdinalIgnoreCase));
+    var site = system is null ? null : store.Sites(system.Id).FirstOrDefault(s => s.Number == siteNumber);
+    if (system is null || site is null)
+    {
+        Console.WriteLine(system is null ? $"No stored system matches \"{rest[1]}\". Stored ({AppFiles.Database}):" : $"{system.Name} has no site {siteNumber}. Its sites:");
+        if (system is null)
+            foreach (var s in store.Systems) Console.WriteLine($"  {s.Id,4}  {s.Name}  ({s.Location})");
+        else
+            foreach (var s in store.Sites(system.Id)) Console.WriteLine($"  {s.Number,4}  {s.Name}  ({s.County})");
+        return;
+    }
+    var def = TrunkSiteDef.From(system, site);
+    var talkgroups = store.Talkgroups(system.Id);
+    var names = talkgroups.ToDictionary(t => t.Dec, t => t.Alpha.Length > 0 ? t.Alpha : t.Descr);
+    var filter = all ? TrunkFilter.All
+        : new TrunkFilter([.. talkgroups.Where(t => t.Listen).Select(t => t.Dec)], [.. talkgroups.Where(t => !t.Listen).Select(t => t.Dec)]);
+    string Name(int tg) => names.TryGetValue(tg, out var n) ? $"{tg} {n}" : $"TG {tg}";
+    using var rx = new Receiver(NewSource());
+    rx.Volume = 0.5;
+    var iq = iqPath is null ? null : new IqFile(iqPath);
+    if (iq is not null) rx.TrunkControlTap = iq.Write;
+    rx.Start();
+    Thread.Sleep(1500);                      // let the gain settle
+    rx.StartTrunk(def, filter);
+    if (rx.Trunk is null)
+    {
+        Console.WriteLine(rx.DigitalAvailable ? "Trunk mode did not start: the site has no control frequency." : "Trunk mode did not start: the digital voice library is missing.");
+        return;
+    }
+    Console.WriteLine($"{rx.Source.Description}: {system.Name}, site {site.Number} {site.Name}; control {string.Join(" ", def.ControlHz.Select(f => $"{f / 1e6:F5}"))}; "
+        + $"{def.VoiceHz.Count} voice frequencies; {(all ? "every talkgroup" : $"{filter.Listen.Length} of {talkgroups.Count} talkgroups ticked")}");
+    var sw = Stopwatch.StartNew();
+    TrunkState? was = null;
+    long seen = 0;
+    double next = 5;
+    bool following = false;
+    double controlHz = def.ControlHz[0];
+    while (sw.Elapsed.TotalSeconds < seconds)
+    {
+        Thread.Sleep(50);
+        if (rx.Trunk is not { } t) break;
+        if (t.State == TrunkState.Control) controlHz = t.ControlHz;
+        string at = $"  {sw.Elapsed.TotalSeconds,6:F1} s";
+        if (t.State != was)
+        {
+            Console.WriteLine($"{at}  {t.State}  control {t.ControlHz / 1e6:F5} MHz"
+                + (t.Nac is { } nac ? $"  NAC {nac:X3}" : "") + (t.SysId is { } sys ? $"  system {sys:X3}" : "") + (t.Wacn is { } w ? $"  WACN {w:X5}" : "")
+                + (t.Site is { } st ? $"  RFSS {t.Rfss} site {st}" : "") + (t.MatchesSite == false ? "  NOT THIS SITE" : ""));
+            was = t.State;
+        }
+        if (t.Active is { } a && !following)
+            Console.WriteLine($"{at}  following {Name(a.Talkgroup)}  on {a.Hz / 1e6:F5} MHz{(a.Source != 0 ? $"  ID {a.Source}" : "")}{(a.Flags.HasFlag(TrunkCallFlags.Hop) ? "  (hop)" : "")}");
+        following = t.Active is not null;
+        foreach (var c in t.Calls.Where(c => c.Seq > seen))
+        {
+            Console.WriteLine($"{at}  #{c.Seq,-4} {c.Outcome,-10} {Name(c.Talkgroup)}  {c.Hz / 1e6:F5} MHz{(c.Phase == 2 ? $" slot {c.Slot}" : "")}"
+                + $"{(c.Source != 0 ? $"  ID {c.Source}" : "")}{(c.Seconds > 0 ? $"  {c.Seconds:F1} s" : "")}  {c.Flags}");
+            seen = c.Seq;
+        }
+        if (sw.Elapsed.TotalSeconds >= next)
+        {
+            next += 5;
+            var (busy, slowest) = rx.TakeDspTiming();
+            Console.WriteLine($"{at}  -- {t.BlocksPerSecond:F0} messages/s ({t.Messages} in all), control level {t.ControlLevelDb:F0} dB, "
+                + $"{t.Hops} hops, gain {rx.Source.GainDb:F0} dB, dropped {rx.DroppedBlocks}, DSP busy {busy:P0}, slowest block {slowest:F1} ms");
+        }
+    }
+    rx.Stop();
+    // (While hunting, and while away on a voice channel outside the span, the recording has what was tried or nothing.)
+    iq?.Finish(controlHz, rx.Source);
+    return;
+}
+
+if (args.Length >= 1 && args[0] == "record")
+{
+    var inv = CultureInfo.InvariantCulture;
+    if (args.Length < 4 || !double.TryParse(args[1], NumberStyles.Float, inv, out double mhz) || !double.TryParse(args[2], NumberStyles.Float, inv, out double seconds))
+    {
+        Console.WriteLine("usage: rsp-bench record <MHz> <seconds> <file>");
+        return;
+    }
+    double hz = Math.Round(mhz * 1e6 / 10) * 10, offset = ScanPlan.SingleOffsetFor(hz);
+    var src = NewSource();
+    var channel = new ChannelReceiver(Receiver.DefaultSampleRate);
+    channel.Configure(Mode.Nfm, BandPlan.NfmNarrow);
+    channel.SetOffset(offset);
+    var file = new IqFile(args[3]);
+    float[] left = [], right = [];
+    bool recording = false;
+    channel.BasebandTap = (re, im) =>
+    {
+        if (recording) file.Write(re, im);
+    };
+    src.Samples += (i, q, retuned) =>
+    {
+        int max = channel.MaxAudio(i.Length);
+        if (left.Length < max) (left, right) = (new float[max], new float[max]);
+        channel.Process(i, q, left, right);
+    };
+    src.Start(Receiver.DefaultSampleRate, hz - offset);
+    Thread.Sleep(1500);                      // let the gain settle
+    file.Started = DateTime.UtcNow;
+    recording = true;
+    Console.WriteLine($"{src.Description}: recording {hz / 1e6:F5} MHz for {seconds} s to {args[3]}");
+    Thread.Sleep((int)(seconds * 1000));
+    recording = false;
+    src.Stop();
+    file.Finish(hz, src);
+    Console.WriteLine($"{file.Samples} samples ({file.Samples / 48000.0:F1} s); {args[3]}.txt");
+    return;
 }
 
 if (args.Length >= 1 && args[0] == "handover")
@@ -418,6 +561,51 @@ if (args.Length >= 1 && args[0] == "stalltest")
     return;
 }
 
+if (args.Length >= 1 && args[0] == "listen" && args.Contains("--p2"))
+{
+    // rsp-bench listen <MHz> [seconds] [file] --p2 <WACN> <system> <NAC> <slot>: before the radio is opened, the arguments.
+    int at = Array.IndexOf(args, "--p2");
+    var rest = args[1..at].Concat(args[Math.Min(args.Length, at + 5)..]).ToArray();
+    var p2 = args.Skip(at + 1).Take(4).ToArray();
+    bool Hex(string w, out int v) => int.TryParse(w.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? w[2..] : w,
+        NumberStyles.HexNumber, CultureInfo.InvariantCulture, out v);
+    if (rest.Length < 1 || !double.TryParse(rest[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double mhz) || p2.Length < 4
+        || !Hex(p2[0], out int wacn) || !Hex(p2[1], out int sysId) || !Hex(p2[2], out int nac) || p2[3] is not ("0" or "1")
+        || (rest.Length > 1 && !int.TryParse(rest[1], out _)))
+    {
+        Console.WriteLine("usage: rsp-bench listen <MHz> [seconds] [file] --p2 <WACN hex> <system hex> <NAC hex> <slot 0 or 1>");
+        Console.WriteLine("       e.g. rsp-bench listen 851.5125 30 --p2 BEE00 123 293 0");
+        return;
+    }
+    int seconds = rest.Length > 1 ? int.Parse(rest[1]) : 10;
+    var system = new SimpleScanner.Digital.P25Phase2Params(wacn, sysId, nac, p2[3] == "1" ? 1 : 0);
+    using var rx = new Receiver(NewSource());
+    rx.SetMode(Mode.Nfm, BandPlan.NfmNarrow);
+    rx.FrequencyHz = mhz * 1e6;
+    rx.Volume = 1;
+    using var capture = rest.Length > 2 ? File.Create(rest[2]) : null;
+    if (capture is not null)
+        rx.AudioOutput += a => capture.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(a));
+    var sw = Stopwatch.StartNew();
+    rx.Start();
+    rx.ListenPhase2(system, line => Console.WriteLine($"  {sw.Elapsed.TotalSeconds,6:F2} s  {line}"));
+    Console.WriteLine($"{rx.Source.Description}: {mhz} MHz, P25 Phase 2, WACN {wacn:X5} system {sysId:X3} NAC {nac:X3}, slot {system.Slot}"
+        + (rx.DmrVoiceAvailable ? "" : " (no AMBE+2 speech decoder in this build: nothing will be heard)"));
+    var last = default(SimpleScanner.Digital.P25Phase2Native.Stats);
+    for (int s = 1; s <= seconds; s++)
+    {
+        Thread.Sleep(1000);
+        if (rx.Phase2Decoder is not { } d) continue;
+        var st = d.Statistics;
+        Console.WriteLine($"  {sw.Elapsed.TotalSeconds,6:F2} s  level {rx.LevelDb,6:F1} dB  {(st.Locked != 0 ? "locked" : "no sync")}  bursts {st.Bursts - last.Bursts}"
+            + $"  MAC {st.MacOk - last.MacOk} good {st.MacBad - last.MacBad} bad  voice frames {st.VoiceFrames - last.VoiceFrames}  ESS {st.EssOk - last.EssOk}"
+            + $"  offset {st.OffsetHz,6:F0} Hz  {rx.Digital?.ToString() ?? "-"}");
+        last = st;
+    }
+    rx.Stop();
+    return;
+}
+
 if (args.Length >= 2 && args[0] == "listen")
 {
     double mhz = double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
@@ -736,3 +924,43 @@ foreach (double rate in new[] { 7.68e6 })
     Series("460 <-> 855 MHz (UHF/800)", 460e6, 855e6, 40);
 }
 source.Stop();
+
+// One channel's complex baseband, 48 kHz, written as interleaved 32-bit float I/Q (little-endian), and a text file beside it
+// that says what it is.
+internal sealed class IqFile(string path)
+{
+    private readonly BufferedStream _out = new(File.Create(path), 1 << 20);
+    private float[] _pairs = [];
+
+    public DateTime Started { get; set; } = DateTime.UtcNow;
+    public long Samples { get; private set; }
+
+    public void Write(ReadOnlySpan<float> re, ReadOnlySpan<float> im)
+    {
+        int n = re.Length;
+        if (_pairs.Length < 2 * n) _pairs = new float[2 * n];
+        for (int k = 0; k < n; k++)
+        {
+            _pairs[2 * k] = re[k];
+            _pairs[2 * k + 1] = im[k];
+        }
+        lock (_out) _out.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(_pairs.AsSpan(0, 2 * n)));
+        Samples += n;
+    }
+
+    public void Finish(double frequencyHz, SimpleScanner.Radio.IIqSource source)
+    {
+        lock (_out) _out.Dispose();
+        var inv = CultureInfo.InvariantCulture;
+        File.WriteAllLines(path + ".txt",
+        [
+            $"frequency_hz {frequencyHz.ToString("F0", inv)}",
+            $"start_utc {Started.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", inv)}",
+            "sample_rate 48000",
+            "format interleaved float32 I/Q, little-endian, channel centred, 11 kHz filter",
+            $"samples {Samples}",
+            $"gain_db {source.GainDb.ToString("F1", inv)}",
+            $"radio {source.Description}",
+        ]);
+    }
+}

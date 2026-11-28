@@ -71,9 +71,9 @@
     <Border DockPanel.Dock="Bottom" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10" Margin="0,8,0,0">
       <DockPanel>
         <Button DockPanel.Dock="Right" Classes="seg" Classes.lit="{Binding CanLoad}" Content="Load" Command="{Binding LoadCommand}" IsEnabled="{Binding CanLoad}" Margin="6,0,0,0"
-                ToolTip.Tip="Fetch the ticked lists and store their frequencies as channels. Channels already stored are not added twice." />
+                ToolTip.Tip="Fetch the ticked lists and store their frequencies as channels, and the ticked P25 systems with their sites and talkgroups. Nothing already stored is added twice." />
         <TextBox DockPanel.Dock="Right" Text="{Binding LoadGroup}" Width="260" Margin="6,0,0,0"
-                 ToolTip.Tip="The group the loaded channels go in. Each channel's tag (Fire Dispatch, Law Tac…) also makes a group by itself.">
+                 ToolTip.Tip="The group the loaded channels go in. Each channel's tag (Fire Dispatch, Law Tac…) also makes a group by itself. Systems need no group.">
           <TextBox.KeyBindings>
             <KeyBinding Gesture="Enter" Command="{Binding LoadCommand}" />
           </TextBox.KeyBindings>
@@ -107,7 +107,7 @@
       <!-- The frequencies of the list selected in the tree -->
       <DockPanel Grid.Column="2">
         <TextBlock DockPanel.Dock="Top" Text="{Binding PreviewTitle}" FontWeight="SemiBold" Margin="2,0,0,6" MinHeight="18" />
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="78,130,*,110,54,100" Margin="8,0,8,2">
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="78,130,*,110,54,100" Margin="8,0,8,2" IsVisible="{Binding !PreviewIsSystem}">
           <TextBlock Grid.Column="0" Text="MHz" Classes="label" />
           <TextBlock Grid.Column="1" Text="Name" Classes="label" />
           <TextBlock Grid.Column="2" Text="Description" Classes="label" />
@@ -128,7 +128,7 @@
                 <Setter Property="Margin" Value="0,0,8,0" />
               </Style>
             </ListBox.Styles>
-            <ListBox.ItemTemplate>
+            <ListBox.DataTemplates>
               <DataTemplate x:DataType="vm:RrFreqRow">
                 <Grid ColumnDefinitions="78,130,*,110,54,100">
                   <TextBlock Grid.Column="0" Text="{Binding MHz}" />
@@ -139,11 +139,22 @@
                   <TextBlock Grid.Column="5" Text="{Binding Tone}" />
                 </Grid>
               </DataTemplate>
-            </ListBox.ItemTemplate>
+              <!-- A system's site or talkgroup, in the same columns; a heading line names them -->
+              <DataTemplate x:DataType="vm:RrTrunkRow">
+                <Grid ColumnDefinitions="78,130,*,110,54,100">
+                  <TextBlock Grid.Column="0" Text="{Binding Number}" Classes.label="{Binding Heading}" />
+                  <TextBlock Grid.Column="1" Text="{Binding Name}" Classes.label="{Binding Heading}" />
+                  <TextBlock Grid.Column="2" Text="{Binding Description}" Classes.label="{Binding Heading}" ToolTip.Tip="{Binding Description}" />
+                  <TextBlock Grid.Column="3" Text="{Binding Tag}" Classes.label="{Binding Heading}" />
+                  <TextBlock Grid.Column="4" Text="{Binding Mode}" Classes.label="{Binding Heading}" />
+                  <TextBlock Grid.Column="5" Text="{Binding Last}" Classes.label="{Binding Heading}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.DataTemplates>
           </ListBox>
           <TextBlock Classes="label" TextWrapping="Wrap" MaxWidth="360" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                      IsVisible="{Binding !Preview.Count}"
-                     Text="Click a list in the tree (a line with no arrow) to see its frequencies here. Tick the lists you want, then press Load." />
+                     Text="Click a list in the tree (a line with no arrow) to see its frequencies here, or a P25 system to see its sites and talkgroups. Tick what you want, then press Load." />
         </Panel>
       </DockPanel>
     </Grid>

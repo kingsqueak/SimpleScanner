@@ -3,6 +3,7 @@
 
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using SimpleScanner.Audio;
 using SimpleScanner.Digital;
 using SimpleScanner.Dsp;
@@ -31,7 +32,7 @@ public sealed record SlotStatus(int Seat, bool Holding, ScanChannel? Channel, do
 /// </summary>
 internal sealed record ReceiverReading(double FrequencyHz, Mode Mode, double BandwidthHz, double LevelDb, bool SquelchOpen,
     bool Blocked, bool Stereo, IDigitalStatus? Digital, bool Scanning, bool ScanListening, ScanChannel? ScanChannel,
-    long ScanPasses, int ScanWindows, int AvoidedCount, bool MultiMonitor, IReadOnlyList<SlotStatus> Slots);
+    long ScanPasses, int ScanWindows, int AvoidedCount, bool MultiMonitor, IReadOnlyList<SlotStatus> Slots, Trunk.TrunkStatus? Trunk);
 
 /// <summary>
 /// The receiver: a radio, one channel taken out of its wide IQ stream, squelch and the speaker.
@@ -58,8 +59,10 @@ internal sealed record ReceiverReading(double FrequencyHz, Mode Mode, double Ban
 /// channel the radio stays on the window and the window is looked over again a few times a second, so
 /// that a new signal takes a free slot. A slot keeps its channel for <see cref="MultiHangSeconds"/> after
 /// the signal has gone, to catch the reply. The scan moves on when every slot is free.
+///
+/// Trunk mode (Receiver.Trunk.cs): the receiver follows a trunked P25 site, its control channel and the calls it grants.
 /// </summary>
-public sealed class Receiver : IReceiver
+public sealed partial class Receiver : IReceiver
 {
     /// <summary>IQ rate asked of the radio: a multiple of 240 kHz, 12-bit on an RSPdx.</summary>
     public const double DefaultSampleRate = 7_680_000;
@@ -321,13 +324,13 @@ public sealed class Receiver : IReceiver
     public double BandwidthHz => Main.Channel.BandwidthHz;
 
     /// <summary>The digital signal on the channel now (P25, DMR, NXDN, D-STAR or System Fusion), or null for none.</summary>
-    public IDigitalStatus? Digital => Main.DigitalVoice.Status;
+    public IDigitalStatus? Digital => ShownDigital;
     /// <summary>False when the digital voice library could not be loaded.</summary>
     public bool DigitalAvailable => _slots[0].DigitalVoice.DigitalAvailable;
     /// <summary>False when the AMBE+2 speech decoder is not installed: DMR calls are shown, not heard.</summary>
     public bool DmrVoiceAvailable => _slots[0].DigitalVoice.DmrVoiceAvailable;
 
-    /// <summary>Choosing a mode by hand ends a scan.</summary>
+    /// <summary>Choosing a mode by hand ends a scan, and trunk mode.</summary>
     public void SetMode(Mode mode, double bandwidthHz)
     {
         lock (_cfg)
@@ -335,6 +338,7 @@ public sealed class Receiver : IReceiver
             var main = Main;
             if (mode == main.Channel.Mode && bandwidthHz == main.Channel.BandwidthHz) return;
             EndScanLocked();
+            EndTrunkLocked();
             var slot = _slots[0];
             ConfigureLocked(slot, mode, bandwidthHz);
             // A wider filter may no longer fit where the channel sat in the span.
@@ -351,7 +355,7 @@ public sealed class Receiver : IReceiver
         slot.ResetDigital();
     }
 
-    /// <summary>Tuning by hand ends a scan.</summary>
+    /// <summary>Tuning by hand ends a scan, and trunk mode.</summary>
     public double FrequencyHz
     {
         get => Main.FrequencyHz;
@@ -361,6 +365,7 @@ public sealed class Receiver : IReceiver
             {
                 if (value == Main.FrequencyHz) return;
                 EndScanLocked();
+                EndTrunkLocked();
                 TuneLocked(value);
             }
         }
@@ -582,21 +587,22 @@ public sealed class Receiver : IReceiver
         {
             var main = Main;
             return new ReceiverReading(main.FrequencyHz, main.Channel.Mode, main.Channel.BandwidthHz, Volatile.Read(ref _level),
-                SquelchOpen, _slots[0].Blocked, main.Channel.Stereo, main.DigitalVoice.Status,
+                SquelchOpen, _slots[0].Blocked, main.Channel.Stereo, ShownDigital,
                 _scan != ScanState.Off, ScanListening, ScanChannelLocked(), Interlocked.Read(ref _passes), _plan.Count,
-                AvoidedCountLocked(), _multi, SlotsLocked());
+                AvoidedCountLocked(), _multi, SlotsLocked(), TrunkStatusLocked());
         }
     }
 
     /// <summary>
     /// Scan these channels. The radio must be running. The squelch decides what counts as
-    /// active, so it is switched on.
+    /// active, so it is switched on. Ends trunk mode.
     /// </summary>
     public void StartScan(IReadOnlyList<ScanChannel> channels)
     {
         lock (_cfg)
         {
             EndScanLocked();
+            EndTrunkLocked();
             if (!IsRunning) return;
             _scanList = channels.Where(c => !BandPlan.IsBlocked(c.FrequencyHz, c.BandwidthHz)).OrderBy(c => c.FrequencyHz).ToList();
             if (_scanList.Count == 0) return;
@@ -667,12 +673,13 @@ public sealed class Receiver : IReceiver
 
     /// <summary>
     /// Leave the channel the scan has stopped on, and pass it by for <see cref="ScanSkipSeconds"/>. In Multi
-    /// Monitor: leave the window, and pass by every channel held in it.
+    /// Monitor: leave the window, and pass by every channel held in it. In trunk mode: leave the call being followed.
     /// </summary>
     public void SkipChannel()
     {
         lock (_cfg)
         {
+            if (_trunk is not null) TrunkSkipLocked();
             if (_scan != ScanState.Stay) return;
             if (_multi)
             {
@@ -1272,10 +1279,20 @@ public sealed class Receiver : IReceiver
         // not answer and may hold the lock: then the slots are left as they are rather than waited for.
         if (Monitor.TryEnter(_cfg, 200))
         {
-            try { OneChannelLocked(fade: false); }
+            try
+            {
+                EndTrunkLocked();
+                OneChannelLocked(fade: false);
+            }
             finally { Monitor.Exit(_cfg); }
         }
-        else IdleSlots();
+        else
+        {
+            _trunk = null;
+            _slots[0].DigitalVoice.DigitalOnly = false;
+            _slots[0].DigitalVoice.P25Only = false;
+            IdleSlots();
+        }
         foreach (var s in _slots)
         {
             s.SquelchOpen = false;
@@ -1308,7 +1325,10 @@ public sealed class Receiver : IReceiver
         // (or this is that thread), they are left: a small leak, not a call into freed memory.
         if (thread is not null && (thread == Thread.CurrentThread || !thread.Join(2000))) return;
         lock (_cfg)
+        {
             foreach (var s in _slots) s.Dispose();
+            _trunkChannel?.Dispose();
+        }
     }
 
     // Blocks of samples thrown away because the DSP thread had fallen 512 blocks behind (since the start).
@@ -1343,9 +1363,28 @@ public sealed class Receiver : IReceiver
     {
         foreach (var block in queue.GetConsumingEnumerable())
         {
+            long start = Stopwatch.GetTimestamp();
             try { Process(block); }
             finally { ArrayPool<float>.Shared.Return(block.Data); }
+            long took = Stopwatch.GetTimestamp() - start;
+            Interlocked.Add(ref _busyTicks, took);
+            if (took > Volatile.Read(ref _slowestTicks)) Volatile.Write(ref _slowestTicks, took);
         }
+    }
+
+    // How hard the DSP thread works: the time spent on blocks, and the longest one, since TakeDspTiming last read them.
+    private long _busyTicks, _slowestTicks, _timingFrom = Stopwatch.GetTimestamp();
+
+    /// <summary>
+    /// Since the last call: the share of the time the DSP thread spent working on blocks (1 is all of it: it is falling behind)
+    /// and the longest it took over one block, in milliseconds. A block taking longer than the queue holds (512 blocks) drops
+    /// blocks; so does a share near 1. For the bench.
+    /// </summary>
+    public (double Busy, double SlowestMs) TakeDspTiming()
+    {
+        long now = Stopwatch.GetTimestamp(), from = Interlocked.Exchange(ref _timingFrom, now);
+        long busy = Interlocked.Exchange(ref _busyTicks, 0), slowest = Interlocked.Exchange(ref _slowestTicks, 0);
+        return (now > from ? (double)busy / (now - from) : 0, slowest * 1000.0 / Stopwatch.Frequency);
     }
 
     private void Process(Block block)
@@ -1377,6 +1416,7 @@ public sealed class Receiver : IReceiver
             var i = block.Data.AsSpan(0, n);
             var q = block.Data.AsSpan(n, n);
             if (_scan != ScanState.Off) _scanClock += seconds;
+            if (_trunk is not null) TrunkStepLocked(i, q, seconds);
             // While a window is looked over nothing is received; only a slot let go a moment ago is still fading out.
             bool survey = _scan == ScanState.Survey;
             if (survey) SurveyLocked(i, q);
@@ -1388,6 +1428,7 @@ public sealed class Receiver : IReceiver
             for (int k = 0; k < slots.Length; k++)
             {
                 var slot = slots[k];
+                if (k == 0 && _trunk is not null && !_trunkVoice) continue;        // trunk mode between calls: only the control channel
                 if (survey ? slot.State != SlotState.Leaving : slot.State == SlotState.Free && (k != 0 || _scan != ScanState.Off)) continue;
                 if (!ChannelLocked(slot, k, i, q, seconds, out double level)) continue;
                 given++;
@@ -1458,6 +1499,8 @@ public sealed class Receiver : IReceiver
         if (slot.Blocked) level = -140;
         slot.Level = level > slot.Level ? level : slot.Level + 0.1 * (level - slot.Level);
         bool open = slot.Squelch.Update(level, seconds, slot.Channel.Roughness, slot.Channel.RoughnessLimit) && !slot.Blocked;
+        // A trunked voice channel needs no squelch: only its decoded speech is heard.
+        if (slot.DigitalVoice.DigitalOnly) open = !slot.Blocked;
         if (_scan != ScanState.Off && slot.State != SlotState.Free) open = ScanStepLocked(slot, seat, level, open, seconds);
         slot.SquelchOpen = open;
         // Is there P25, DMR, NXDN, D-STAR or System Fusion on the channel? If so its decoded speech takes the place of the analogue audio.

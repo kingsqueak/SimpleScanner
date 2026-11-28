@@ -13,10 +13,13 @@ internal sealed unsafe class AmbeStream : IDisposable
     public const int ItemBytes = 50;
     private const int End = 255;
 
-    private readonly AmbeVocoder? _vocoder = AmbeVocoder.TryCreate();
+    private readonly AmbeVocoder? _vocoder;
     private readonly short[] _pcm = new short[8000 * 3];
     private readonly short[] _frame = new short[AmbeVocoder.FrameSamples];
     private int _head, _count;
+
+    /// <param name="vocoder">False: as if the vocoder library were missing (for tests).</param>
+    public AmbeStream(bool vocoder = true) => _vocoder = vocoder ? AmbeVocoder.TryCreate() : null;
 
     public bool Available => _vocoder is not null;
 

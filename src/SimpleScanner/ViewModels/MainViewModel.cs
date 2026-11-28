@@ -121,6 +121,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly Settings _settings;
     private readonly MemoryStore _memories;
+    private readonly Trunk.TrunkStore _trunks;
     private const string AllGroups = "All groups", NoGroups = "No groups", DefaultDevice = "System default";
     private readonly DispatcherTimer _timer;
     private bool _loading, _dirty;
@@ -254,16 +255,18 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <param name="receivers">One for each radio to run, the window's own first. The first takes the settings of
     /// the radio it will open, or those last used; each other takes the settings kept under its serial number.</param>
-    public MainViewModel(Settings settings, IReadOnlyList<IReceiver> receivers, MemoryStore memories)
+    /// <param name="trunks">The stored trunked systems; by default those in the same database as <paramref name="memories"/>.</param>
+    public MainViewModel(Settings settings, IReadOnlyList<IReceiver> receivers, MemoryStore memories, Trunk.TrunkStore? trunks = null)
     {
         _settings = settings;
         _memories = memories;
+        _trunks = trunks ?? new Trunk.TrunkStore(memories.FilePath);
         var radios = new List<RadioViewModel>();
         foreach (var rx in receivers)
         {
             var kept = radios.Count == 0 ? settings.ForFirstRadio(rx.Source.Serial)
                 : rx.Source.Serial is { } serial ? settings.Entry(serial) : new RadioSettings();
-            var radio = new RadioViewModel(rx, kept, memories);
+            var radio = new RadioViewModel(rx, kept, memories, trunks: _trunks, listenUnknown: settings.TrunkListenUnknown);
             // A radio that has no groups of its own yet starts with the ones that were shared. No group ticked was
             // every group before 0.1.6, and is none now: a list kept empty without NoGroups is every group.
             List<string> picked = [.. kept.Groups ?? settings.Groups ?? (settings.Group is { } g && g != AllGroups ? [g] : [])];
@@ -282,6 +285,13 @@ public sealed partial class MainViewModel : ObservableObject
                 else if (e.PropertyName is nameof(RadioViewModel.Name)) OnPropertyChanged(nameof(GroupsTitle));
                 else if (e.PropertyName is nameof(RadioViewModel.IsOn)) MarkInUse();
                 else if (e.PropertyName is nameof(RadioViewModel.IsBusy) && !r.IsBusy) ListReceivers();     // switched on or off, or changed over
+            };
+            // The switch for talkgroups not in the list is one for every radio.
+            r.Trunk.ListenUnknownChanged += on =>
+            {
+                foreach (var other in radios.Where(o => o != r)) other.Trunk.SetListenUnknown(on);
+                _settings.TrunkListenUnknown = on;
+                _dirty = true;
             };
         }
         _loading = true;
@@ -558,6 +568,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>The stored channels, for the channel editor.</summary>
     public MemoryStore Store => _memories;
+
+    /// <summary>The stored trunked systems, for the RadioReference browser to load into.</summary>
+    public Trunk.TrunkStore Trunks => _trunks;
 
     /// <summary>Where the main window was when it was last closed, kept with the settings.</summary>
     public Settings.Place? WindowPlace
@@ -919,6 +932,7 @@ public sealed partial class MainViewModel : ObservableObject
         {
             _diskTicks = 0;
             if (_memories.ReloadIfChangedOnDisk()) MemoriesReloaded();
+            _trunks.ReloadIfChangedOnDisk();
         }
         foreach (var r in RadioList) r.Tick();
         if (++_ticks % 100 == 0 && (_dirty || RadioList.Any(r => r.Dirty))) Save();

@@ -4,6 +4,7 @@
 using SimpleScanner.Digital;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio;
+using SimpleScanner.Trunk;
 
 namespace SimpleScanner;
 
@@ -70,6 +71,17 @@ public interface IReceiver : IDisposable
     void SkipSlot(int slot);
     /// <summary>Let go the channel this slot (0 to 3) holds and avoid it; the channel avoided, or null if the slot held none.</summary>
     ScanChannel? AvoidSlot(int slot);
+
+    /// <summary>
+    /// Trunk mode: follow this trunked site, its control channel and the calls the filter wants. The radio must be running.
+    /// Ends a scan; <see cref="StartScan"/>, tuning by hand and a new mode end it.
+    /// </summary>
+    void StartTrunk(TrunkSiteDef site, TrunkFilter filter);
+    void StopTrunk();
+    /// <summary>Which calls trunk mode follows; may be changed at any time.</summary>
+    void SetTrunkFilter(TrunkFilter filter);
+    /// <summary>The trunk engine as it stands, with its recent calls; null outside trunk mode.</summary>
+    TrunkStatus? Trunk { get; }
 
     /// <summary>Blocks of samples thrown away because the processing had fallen behind (since the start).</summary>
     long DroppedBlocks { get; }

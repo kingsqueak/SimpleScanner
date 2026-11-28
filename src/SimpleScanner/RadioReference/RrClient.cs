@@ -24,6 +24,7 @@ public sealed class RrClient : IDisposable
     private readonly RrCache _cache;
     private readonly Dictionary<string, string> _modeNames = [];
     private readonly Dictionary<int, string> _tagNames = [];
+    private readonly Dictionary<int, string> _typeNames = [], _flavorNames = [], _voiceNames = [];
 
     /// <summary>The account the calls are made with; null until the user has signed in.</summary>
     public RrAuth? Auth { get; set; }
@@ -109,6 +110,79 @@ public sealed class RrClient : IDisposable
         return new RrZip(r.Int("zipCode"), r.Geo("lat"), r.Geo("lon"), r.Str("city"), r.Int("stid"), r.Int("ctid"));
     }
 
+    // ---- trunked systems ----------------------------------------------------------------------
+
+    /// <summary>A trunked system's details, with the names of its kind, flavour and voice filled in.</summary>
+    public async Task<RrTrs> GetTrsAsync(int sid, bool fresh = false, CancellationToken ct = default)
+    {
+        var r = await CallAsync("getTrsDetails", [("sid", sid)], true, true, fresh, ct);
+        int type = r.Int("sType"), flavor = r.Int("sFlavor"), voice = r.Int("sVoice");
+        return new RrTrs(sid, r.Str("sName"), type, flavor, voice,
+            await TrsTypeNameAsync(type, ct),
+            await DefNameAsync(_flavorNames, "getTrsFlavor", flavor, "sFlavor", "sFlavorDescr", ct),
+            await DefNameAsync(_voiceNames, "getTrsVoice", voice, "sVoice", "sVoiceDescr", ct),
+            r.Str("sCity"),
+            r.Rows("sysid").Select(x => new RrSysid(x.Str("sysid"), x.Str("wacn"))).Where(x => x.Sysid.Length > 0 || x.Wacn.Length > 0).ToList());
+    }
+
+    public async Task<List<RrTrsSite>> GetTrsSitesAsync(int sid, bool fresh = false, CancellationToken ct = default)
+    {
+        var r = await CallAsync("getTrsSites", [("sid", sid)], true, true, fresh, ct);
+        return r.Rows().Select(s => new RrTrsSite(s.Int("siteId"), s.Int("siteNumber"), s.Str("siteDescr"), s.Int("rfss"), s.Str("nac"),
+            s.Str("siteCt"), s.Str("siteModulation"), s.Int("tdma_cc"), s.Geo("lat"), s.Geo("lon"),
+            s.Rows("siteFreqs").Select(f => new RrSiteFreq(f.Int("lcn"), f.Dbl("freq"), f.Str("use"))).Where(f => f.MHz > 0).ToList(),
+            s.Int("siteCtid"))).ToList();
+    }
+
+    /// <summary>Every talkgroup of a system (no category, tag or number asked for), with the names of their tags filled in.</summary>
+    public async Task<List<RrTalkgroup>> GetTalkgroupsAsync(int sid, bool fresh = false, CancellationToken ct = default)
+    {
+        var r = await CallAsync("getTrsTalkgroups", [("sid", sid), ("tgCid", 0), ("tgTag", 0), ("tgDec", 0)], true, true, fresh, ct);
+        var list = new List<RrTalkgroup>();
+        foreach (var t in r.Rows())
+        {
+            var tags = new List<RrTag>();
+            foreach (var g in t.Rows("tags"))
+            {
+                int id = g.Int("tagId");
+                string descr = g.Str("tagDescr");
+                tags.Add(new RrTag(id, descr.Length > 0 ? descr : await TagNameAsync(id, ct)));
+            }
+            list.Add(new RrTalkgroup(t.Int("tgId"), t.Int("tgDec"), t.Str("tgDescr"), t.Str("tgAlpha"), t.Str("tgMode"), t.Int("enc"), tags, t.Int("tgCid")));
+        }
+        return list;
+    }
+
+    public async Task<List<RrTalkgroupCat>> GetTalkgroupCatsAsync(int sid, bool fresh = false, CancellationToken ct = default)
+    {
+        var r = await CallAsync("getTrsTalkgroupCats", [("sid", sid)], true, true, fresh, ct);
+        return r.Rows().Select(c => new RrTalkgroupCat(c.Int("tgCid"), c.Str("tgCname"))).Where(c => c.Id > 0).ToList();
+    }
+
+    /// <summary>All of a system: its details, sites, talkgroups and their categories.</summary>
+    public async Task<RrTrsWhole> GetTrsWholeAsync(int sid, bool fresh = false, CancellationToken ct = default) =>
+        new(await GetTrsAsync(sid, fresh, ct), await GetTrsSitesAsync(sid, fresh, ct), await GetTalkgroupsAsync(sid, fresh, ct),
+            await GetTalkgroupCatsAsync(sid, fresh, ct));
+
+    /// <summary>The name of a kind of trunked system ("Project 25 Phase I"); empty when it is not known.</summary>
+    public Task<string> TrsTypeNameAsync(int type, CancellationToken ct = default) =>
+        DefNameAsync(_typeNames, "getTrsType", type, "sType", "sTypeDescr", ct);
+
+    // The kinds, flavours and voices of systems come as numbers; these calls give their names (the one asked for, or all).
+    private async Task<string> DefNameAsync(Dictionary<int, string> names, string call, int id, string idField, string nameField, CancellationToken ct)
+    {
+        if (id <= 0) return "";
+        if (names.TryGetValue(id, out string? name)) return name;
+        try
+        {
+            var r = await CallAsync(call, [("id", id)], true, true, false, ct);
+            foreach (var d in r.Rows())
+                if (d.Str(nameField) is { Length: > 0 } n) names[d.Int(idField)] = n;
+        }
+        catch (RrException) { }
+        return names.TryGetValue(id, out name) ? name : names[id] = "";
+    }
+
     // A frequency's mode may come as a number; getMode gives the names (all of them, or the one asked for).
     private async Task<string> ModeNameAsync(string mode, CancellationToken ct)
     {
@@ -142,7 +216,7 @@ public sealed class RrClient : IDisposable
         r.Rows("agencyList").Select(a => new RrAgency(a.Int("aid"), a.Str("aName"))).Where(a => a.Id > 0).ToList();
 
     private static List<RrSystem> Systems(XElement r) =>
-        r.Rows("trsList").Select(s => new RrSystem(s.Int("sid"), s.Str("sName"), s.Str("sCity"))).Where(s => s.Id > 0).ToList();
+        r.Rows("trsList").Select(s => new RrSystem(s.Int("sid"), s.Str("sName"), s.Str("sCity"), s.Int("sType"))).Where(s => s.Id > 0).ToList();
 
     internal static List<RrCat> Cats(XElement r) =>
         r.Rows("cats").Select(c => new RrCat(c.Int("cid"), c.Str("cName"),

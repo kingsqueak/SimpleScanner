@@ -1,14 +1,15 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 KC2RGW Chris
-# Build the digital voice library (P25 Phase 1, DMR, NXDN, D-STAR and System Fusion, on RadioFoundry) for this machine into
-# native/digital/out. Needs gcc or clang. macOS: one library for both Apple silicon and Intel. Windows: run in Git Bash
+# Build the digital voice library (P25 Phases 1 and 2, DMR, NXDN, D-STAR and System Fusion, on RadioFoundry) for this machine
+# into native/digital/out. Needs gcc or clang. macOS: one library for both Apple silicon and Intel. Windows: run in Git Bash
 # with MinGW's gcc (not MSVC).
 set -eu
 cd "$(dirname "$0")"
 mkdir -p out
 RF=radiofoundry/core
-SRC="p25rx.c dmrrx.c nxdnrx.c dstarrx.c ysfrx.c $RF/nxdn/nxdn_frame.c $RF/nxdn/nxdn_rx.c $RF/nxdn/nxdn_call.c $RF/fec/conv.c
+SRC="p25rx.c p25mbt.c cqpsk.c dmrrx.c nxdnrx.c dstarrx.c ysfrx.c $RF/nxdn/nxdn_frame.c $RF/nxdn/nxdn_rx.c $RF/nxdn/nxdn_call.c $RF/fec/conv.c
+     p25p2rx.c p25p2_sync.c p25p2_burst.c p25p2_rs.c p25p2_vf.c
      $RF/dmr/fec/dmrFec.c $RF/dmr/fec/dmrCach.c $RF/dmr/call/dmr_lc.c $RF/dmr/ambe/ambeFec.c
      $RF/air/air_softmodem.c $RF/air/air_framer.c $RF/p25/p25_unit.c $RF/p25/p25_rx.c $RF/p25/p25_call.c
      $RF/p25/p25_tsbk.c $RF/fec/bch63.c $RF/fec/gf64.c $RF/fec/golay.c $RF/fec/hamming.c $RF/fec/rs63.c $RF/fec/trellis.c

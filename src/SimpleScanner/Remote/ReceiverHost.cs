@@ -90,6 +90,12 @@ internal sealed class ReceiverHost
                 case "skipSlot": _rx.SkipSlot(m.Arg!.Value.GetInt32()); break;
                 case "avoidSlot": result = JsonSerializer.SerializeToElement(_rx.AvoidSlot(m.Arg!.Value.GetInt32()), WireMessage.Json); break;
                 case "clearAvoided": _rx.ClearAvoided(); break;
+                case "startTrunk":
+                    var trunk = m.Arg!.Value.Deserialize<TrunkArg>(WireMessage.Json)!;
+                    _rx.StartTrunk(trunk.Site, trunk.Filter);
+                    break;
+                case "stopTrunk": _rx.StopTrunk(); break;
+                case "setTrunkFilter": _rx.SetTrunkFilter(m.Arg!.Value.Deserialize<Trunk.TrunkFilter>(WireMessage.Json)!); break;
                 case "simulateStall":            // for testing the hand-over to a new helper
                     if (_rx.Source is Radio.SdrPlay.SdrPlaySource sdr) sdr.SimulateStall = true;
                     break;
@@ -163,8 +169,9 @@ internal sealed class ReceiverHost
         var now = rx is Receiver real ? real.ReadStatus()
             : new ReceiverReading(rx.FrequencyHz, rx.Mode, rx.BandwidthHz, rx.LevelDb, rx.SquelchOpen, rx.Blocked, rx.Stereo,
                 rx.Digital, rx.Scanning, rx.ScanListening, rx.ScanChannel, rx.ScanPasses, rx.ScanWindows, rx.AvoidedCount,
-                rx.MultiMonitor, rx.Slots);
+                rx.MultiMonitor, rx.Slots, rx.Trunk);
         var digital = now.Digital;
+        var p25 = digital as Digital.P25Status;
         return new ReceiverStatus
         {
             Seq = seq,
@@ -184,6 +191,9 @@ internal sealed class ReceiverHost
             DigitalText = digital?.ToString(),
             DigitalEncrypted = digital is { Encrypted: true },
             DigitalNothingToHear = digital is { NothingToHear: true },
+            DigitalNac = p25?.Nac,
+            DigitalTalkgroup = p25 is { InCall: true } ? p25.Talkgroup : null,
+            DigitalSource = p25 is { InCall: true, Source: not 0 } ? p25.Source : null,
             AudioDevice = rx.AudioDevice,
             Volume = rx.Volume,
             Pan = rx.Pan,
@@ -200,6 +210,7 @@ internal sealed class ReceiverHost
             MultiMonitor = now.MultiMonitor,
             MultiHangSeconds = rx.MultiHangSeconds,
             Slots = [.. now.Slots],
+            Trunk = now.Trunk,
             DroppedBlocks = rx.DroppedBlocks,
             Description = src.Description,
             RadioModel = radio?.Model,

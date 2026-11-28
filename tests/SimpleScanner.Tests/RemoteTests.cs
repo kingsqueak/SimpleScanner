@@ -743,4 +743,91 @@ public class RemoteTests
         Assert.False(pair.Remote.CanChangeRadio);
         Assert.Throws<NotSupportedException>(() => pair.Remote.Source.Serial = "other");
     }
+
+    private static Trunk.TrunkSiteDef TrunkSite => new(1, 2, "Test", "Site 1", 0x293, 0x123, 0xBEE00, 1, 1, [851_012_500], [851_512_500]);
+
+    private static float[] Disc(string name)
+    {
+        var raw = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, short>(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", name)));
+        var x = new float[raw.Length];
+        for (int i = 0; i < x.Length; i++) x[i] = (float)(raw[i] / 6553.6 * 1000 / 2500);
+        return x;
+    }
+
+    // Trunk mode through the helper: started, its filter changed and stopped by message, and its state in the reports,
+    // with the control channel's numbers.
+    [Fact]
+    public void TrunkModeWorksThroughTheHelper()
+    {
+        using var pair = new Pair();
+        var rx = pair.Remote;
+        pair.Source.Add(851_012_500, 0.05, deviation: Disc("p25_trunk_follow_24k.raw"));
+        rx.Start();
+        var filter = new Trunk.TrunkFilter([1234], [5005], ListenUnknown: false);
+        rx.StartTrunk(TrunkSite, filter);
+        // Here at once, and in the real receiver soon after.
+        Assert.Equal(Trunk.TrunkState.Hunt, rx.Trunk?.State);
+        Assert.Equal(2, rx.Trunk!.SiteKey);
+        Assert.True(Wait(() => pair.Real.TrunkFilterNow is { } f && f.Listen.SequenceEqual([1234]) && f.Off.SequenceEqual([5005]), 2));
+        Assert.True(Wait(() => rx.Trunk?.State == Trunk.TrunkState.Control, 4), $"not on the control channel: {rx.Trunk?.State}");
+        Assert.Equal(851_012_500, rx.Trunk!.ControlHz);
+        Assert.Equal(0x123, rx.Trunk.SysId);
+        Assert.Equal(0x293, rx.Status.DigitalNac);
+        Assert.Contains("control channel", rx.Digital?.ToString());
+        Assert.True(Wait(() => rx.Trunk?.Calls.Any(c => c.Talkgroup == 6006 && c.Outcome == Trunk.TrunkOutcome.NotTicked) == true, 3),
+            "the calls are not in the reports");
+
+        rx.SetTrunkFilter(filter with { Listen = [1234, 6006] });
+        Assert.True(Wait(() => pair.Real.TrunkFilterNow?.Listen.SequenceEqual([1234, 6006]) == true, 2));
+
+        rx.StopTrunk();
+        Assert.Null(rx.Trunk);
+        Assert.True(Wait(() => pair.Real.Trunk is null, 2));
+        Thread.Sleep(200);
+        Assert.Null(rx.Trunk);
+
+        // A scan ends it, here at once as there.
+        rx.StartTrunk(TrunkSite, filter);
+        Assert.True(Wait(() => pair.Real.Trunk is not null, 2));
+        rx.StartScan([new("one", 120.0e6, Mode.Am, BandPlan.AmAir)]);
+        Assert.Null(rx.Trunk);
+        Assert.True(Wait(() => pair.Real.Trunk is null && pair.Real.Scanning, 2));
+        rx.Stop();
+    }
+
+    // A helper whose radio jammed is replaced, and the new one is put back in trunk mode on the same site.
+    [Fact]
+    public void ANewHelperIsGivenTrunkModeAgain()
+    {
+        var log = Path.GetTempFileName();
+        SimpleScanner.Radio.RadioLog.FileOverride = log;
+        var hosts = new Hosts();
+        try
+        {
+            using var rx = new RemoteReceiver(hosts.Launch, replug: _ => { });
+            Assert.True(rx.WaitForFirstReport(5000));
+            rx.Start();
+            var filter = new Trunk.TrunkFilter([1234], []);
+            rx.StartTrunk(TrunkSite, filter);
+            Assert.True(Wait(() => hosts.Started[0].Real.Trunk is not null, 2), "the first helper is not in trunk mode");
+
+            hosts.AskForANewOne(0);
+
+            Assert.True(Wait(() => hosts.Started.Count == 2, 10), "no second helper");
+            var second = hosts.Started[1];
+            Assert.True(Wait(() => second.Real.IsRunning && second.Real.Trunk is not null, 10), "the second helper is not in trunk mode");
+            Assert.Equal(2, second.Real.Trunk!.SiteKey);
+            Assert.Equal([1234], second.Real.TrunkFilterNow!.Listen);
+            Assert.False(second.Real.Scanning);
+            var ops = hosts.Sent[1].Ops();
+            Assert.True(ops.IndexOf("startTrunk") > ops.IndexOf("start"), string.Join(", ", ops));
+            Assert.True(Wait(() => rx.Trunk is not null && rx.IsRunning, 5), "the window does not see the new helper in trunk mode");
+            Assert.Contains("running again in a new helper, trunking", File.ReadAllText(log));
+        }
+        finally
+        {
+            SimpleScanner.Radio.RadioLog.FileOverride = null;
+            File.Delete(log);
+        }
+    }
 }

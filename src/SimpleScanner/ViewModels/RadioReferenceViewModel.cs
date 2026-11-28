@@ -6,6 +6,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SimpleScanner.RadioReference;
+using SimpleScanner.Trunk;
 
 namespace SimpleScanner.ViewModels;
 
@@ -14,7 +15,7 @@ public enum RrNodeKind { Heading, Category, List, Agency, System, Note }
 /// <summary>
 /// A line of the RadioReference browser's tree: a heading, a category, a list of frequencies
 /// that can be ticked for loading, an agency (whose lists are fetched when it is opened), or a
-/// trunked system (shown, not loadable).
+/// trunked system (loaded whole when ticked, if it is a P25 system).
 /// </summary>
 public sealed partial class RrNode : ObservableObject
 {
@@ -35,17 +36,17 @@ public sealed partial class RrNode : ObservableObject
     public RrNodeKind Kind { get; }
     public int Id { get; }
     public string Title { get; }
-    /// <summary>Whether the line has a tick box. Trunked systems, notes and the headings over agencies have none.</summary>
+    /// <summary>Whether the line has a tick box. Systems other than P25, notes and the headings over agencies and systems have none.</summary>
     public bool CanCheck { get; }
     public RrNode? Parent { get; private set; }
     public ObservableCollection<RrNode> Children { get; } = [];
-    /// <summary>For an agency: its lists have been fetched. Everything else is whole from the start.</summary>
+    /// <summary>For an agency, or the heading over a state's other systems: what is under it has been fetched. Everything else is whole from the start.</summary>
     public bool Loaded { get; set; } = true;
     /// <summary>The words put in a channel's Agency field for a list under this line.</summary>
     public string AgencyLabel { get; init; } = "";
     /// <summary>The words put in a channel's Location for a list at or under this line.</summary>
     public string Location { get; init; } = "";
-    public bool Dim => Kind is RrNodeKind.System or RrNodeKind.Note;
+    public bool Dim => Kind == RrNodeKind.Note || (Kind == RrNodeKind.System && !CanCheck);
 
     /// <summary>Said after the title, muted: a distance, a count of frequencies.</summary>
     [ObservableProperty] private string _detail = "";
@@ -97,13 +98,17 @@ public sealed partial class RrNode : ObservableObject
         Parent?.Recount();
     }
 
-    /// <summary>The lists ticked at or under this line, and the ticked agencies not yet opened (whose lists are all wanted).</summary>
-    public void Ticked(List<RrNode> lists, List<RrNode> unopened)
+    /// <summary>
+    /// The lists ticked at or under this line, the ticked agencies not yet opened (whose lists are all wanted),
+    /// and the ticked systems.
+    /// </summary>
+    public void Ticked(List<RrNode> lists, List<RrNode> unopened, List<RrNode> systems)
     {
         if (CanCheck && IsChecked == false) return;
         if (Kind == RrNodeKind.List && IsChecked == true) lists.Add(this);
         else if (Kind == RrNodeKind.Agency && !Loaded && IsChecked == true) unopened.Add(this);
-        else foreach (var c in Children) c.Ticked(lists, unopened);
+        else if (Kind == RrNodeKind.System && IsChecked == true) systems.Add(this);
+        else foreach (var c in Children) c.Ticked(lists, unopened, systems);
     }
 }
 
@@ -111,12 +116,21 @@ public sealed partial class RrNode : ObservableObject
 public sealed record RrFreqRow(string MHz, string Name, string Description, string Tag, string Type, string Tone);
 
 /// <summary>
+/// A line of a trunked system's preview: a site or a talkgroup, in the same six columns as a frequency.
+/// A <see cref="Heading"/> line names the columns of the lines under it.
+/// </summary>
+public sealed record RrTrunkRow(string Number, string Name, string Description, string Tag, string Mode, string Last, bool Heading = false);
+
+/// <summary>
 /// The RadioReference browser: sign in, choose a place (by ZIP code, or country, state and county),
 /// tick the categories wanted in the tree of what that county has, and load them as stored channels.
+/// A P25 trunked system that is ticked is loaded whole (sites, frequencies and talkgroups) into the
+/// stored trunked systems.
 /// </summary>
 public sealed partial class RadioReferenceViewModel : ObservableObject
 {
     private readonly MemoryStore _store;
+    private readonly TrunkStore _trunks;
     private readonly RrClient _client;
     private readonly RrCache? _cache;
     private readonly Settings.RrPlace _place;
@@ -134,7 +148,8 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
     public event Action? PlaceChanged;
 
     public ObservableCollection<RrNode> Roots { get; } = [];
-    public ObservableCollection<RrFreqRow> Preview { get; } = [];
+    /// <summary>What is selected in the tree: the frequencies of a list (<see cref="RrFreqRow"/>), or a system's sites and talkgroups (<see cref="RrTrunkRow"/>).</summary>
+    public ObservableCollection<object> Preview { get; } = [];
     /// <summary>The tick box's words: where the password is kept when it is ticked.</summary>
     public string RememberTip => $"Keep your user name, and your password in {_logins.Where}, so that you are signed in when this window opens";
 
@@ -157,14 +172,18 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
 
     [ObservableProperty] private RrNode? _selectedNode;
     [ObservableProperty] private string _previewTitle = "";
+    /// <summary>The preview is of a system, whose lines name their own columns.</summary>
+    [ObservableProperty] private bool _previewIsSystem;
     [ObservableProperty] private string _loadGroup = "";
     [ObservableProperty] private string _tickedText = "Nothing ticked";
     [ObservableProperty] private bool _canLoad;
 
+    /// <param name="trunks">Where systems are loaded; by default the stored systems in the same database as <paramref name="store"/>.</param>
     public RadioReferenceViewModel(MemoryStore store, RrClient client, Settings.RrPlace? place = null, Func<string?>? findKey = null,
-        RrCache? cache = null, IRrLogins? logins = null)
+        RrCache? cache = null, IRrLogins? logins = null, TrunkStore? trunks = null)
     {
         _store = store;
+        _trunks = trunks ?? TrunkStore.Load(store.FilePath);
         _client = client;
         _cache = cache;
         _place = place ?? new Settings.RrPlace();
@@ -384,10 +403,11 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
         await Do($"Fetching {county.Name}", async () =>
         {
             var info = await _client.GetCountyAsync(county.Id, fresh);
+            var kinds = await KindsAsync(info.Systems);
             if (mine != _treeFor) return;
             _place.County = county.Id;
             string name = info.Name.Length > 0 ? info.Name : county.Name;
-            Build(info, name);
+            Build(info, name, kinds);
             LoadGroup = SelectedState is { Code.Length: > 0 } s ? $"{name}, {s.Code}" : name;
             PlaceChanged?.Invoke();
             int lists = info.Cats.Sum(c => c.Subcats.Count);
@@ -397,7 +417,7 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
         });
     }
 
-    private void Build(RrCountyInfo info, string name)
+    private void Build(RrCountyInfo info, string name, Dictionary<int, string> kinds)
     {
         Roots.Clear();
         Preview.Clear();
@@ -419,11 +439,69 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
 
         if (info.Systems.Count > 0)
         {
-            var systems = new RrNode(RrNodeKind.Heading, 0, "Trunked systems", canCheck: false) { Detail = "the scanner does not follow these yet" };
+            var systems = new RrNode(RrNodeKind.Heading, 0, "Trunked systems", canCheck: false)
+            {
+                Detail = info.Systems.Count.ToString(CultureInfo.CurrentCulture),
+            };
             foreach (var s in info.Systems.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase))
-                systems.Add(new RrNode(RrNodeKind.System, s.Id, s.Name, canCheck: false) { Detail = s.City });
+                systems.Add(SystemNode(s, kinds.GetValueOrDefault(s.Type, ""), county));
             Roots.Add(systems);
         }
+        // The state's own list has systems the county does not: statewide ones, and those of its neighbours.
+        if (_state is not null && _state.Id == info.StateId)
+        {
+            var shown = info.Systems.Select(s => s.Id).ToHashSet();
+            var others = _state.Systems.Where(s => !shown.Contains(s.Id)).ToList();
+            if (others.Count > 0)
+            {
+                string where = RrPlaces.State(_state.Name);
+                var head = new RrNode(RrNodeKind.Heading, 0, $"Other systems in {_state.Name}", canCheck: false,
+                    opened: n => _ = OpenSystemsAsync(n, others, _state.Name, where))
+                {
+                    Loaded = false,
+                    Detail = others.Count.ToString(CultureInfo.CurrentCulture),
+                };
+                head.Add(Note("Fetching…"));
+                Roots.Add(head);
+            }
+        }
+        CountTicks();
+    }
+
+    // A system's line: ticked to be loaded when it is a P25 system; dimmed, with no tick box, when it is not.
+    private RrNode SystemNode(RrSystem s, string kind, string location)
+    {
+        bool p25 = RrTrunkImport.IsP25(kind);
+        string detail = string.Join(" · ", new[] { s.City, p25 ? kind : "not a P25 system" }.Where(t => t.Length > 0));
+        return new RrNode(RrNodeKind.System, s.Id, s.Name, canCheck: p25, ticked: CountTicks)
+        {
+            Detail = detail,
+            AgencyLabel = s.Name,
+            Location = location,
+        };
+    }
+
+    // The names of the kinds of these systems, by number: asked for once each, and kept.
+    private async Task<Dictionary<int, string>> KindsAsync(IEnumerable<RrSystem> systems)
+    {
+        var kinds = new Dictionary<int, string>();
+        foreach (int type in systems.Select(s => s.Type).Where(t => t > 0).Distinct())
+            kinds[type] = await _client.TrsTypeNameAsync(type);
+        return kinds;
+    }
+
+    private async Task OpenSystemsAsync(RrNode head, List<RrSystem> systems, string state, string location)
+    {
+        if (head.Loaded) return;
+        head.Loaded = true;
+        bool ok = await Do($"Fetching the systems of {state}", async () =>
+        {
+            var kinds = await KindsAsync(systems);
+            head.Children.Clear();
+            foreach (var s in systems.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase))
+                head.Add(SystemNode(s, kinds.GetValueOrDefault(s.Type, ""), location));
+        });
+        if (!ok) head.Loaded = false;
         CountTicks();
     }
 
@@ -494,16 +572,15 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
 
     private void CountTicks()
     {
-        List<RrNode> lists = [], unopened = [];
-        foreach (var r in Roots) r.Ticked(lists, unopened);
-        CanLoad = lists.Count + unopened.Count > 0;
-        TickedText = (lists.Count, unopened.Count) switch
-        {
-            (0, 0) => "Nothing ticked",
-            (var l, 0) => $"{l} list{(l == 1 ? "" : "s")} ticked",
-            (0, var a) => $"{a} whole agenc{(a == 1 ? "y" : "ies")} ticked",
-            var (l, a) => $"{l} list{(l == 1 ? "" : "s")} and {a} whole agenc{(a == 1 ? "y" : "ies")} ticked",
-        };
+        List<RrNode> lists = [], unopened = [], systems = [];
+        foreach (var r in Roots) r.Ticked(lists, unopened, systems);
+        CanLoad = lists.Count + unopened.Count + systems.Count > 0;
+        var parts = new List<string>();
+        if (lists.Count > 0) parts.Add($"{lists.Count} list{(lists.Count == 1 ? "" : "s")}");
+        if (unopened.Count > 0) parts.Add($"{unopened.Count} whole agenc{(unopened.Count == 1 ? "y" : "ies")}");
+        if (systems.Count > 0) parts.Add($"{systems.Count} system{(systems.Count == 1 ? "" : "s")}");
+        TickedText = parts.Count == 0 ? "Nothing ticked"
+            : (parts.Count == 1 ? parts[0] : string.Join(", ", parts[..^1]) + " and " + parts[^1]) + " ticked";
     }
 
     // ---- looking at a list ------------------------------------------------------------------
@@ -511,6 +588,13 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
     partial void OnSelectedNodeChanged(RrNode? value)
     {
         if (value is { Kind: RrNodeKind.List }) _ = ShowListAsync(value);
+        else if (value is { Kind: RrNodeKind.System, CanCheck: true }) _ = ShowSystemAsync(value);
+        else if (value is { Kind: RrNodeKind.System })
+        {
+            Preview.Clear();
+            PreviewIsSystem = false;
+            PreviewTitle = $"{value.Title}: not a P25 system, so the scanner cannot follow it";
+        }
     }
 
     private async Task ShowListAsync(RrNode list)
@@ -520,6 +604,7 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
             var freqs = await _client.GetFreqsAsync(list.Id);
             if (SelectedNode != list) return;
             Preview.Clear();
+            PreviewIsSystem = false;
             foreach (var c in freqs.OrderBy(f => f.OutMHz).Select(f => RrImport.ToChannel(f, list.AgencyLabel, list.Location)))
                 Preview.Add(new RrFreqRow((c.FrequencyHz / 1e6).ToString("0.0000##", CultureInfo.InvariantCulture), c.Name,
                     c.Description ?? "", c.Tag ?? "", c.Format ?? "", c.Tone ?? ""));
@@ -527,53 +612,138 @@ public sealed partial class RadioReferenceViewModel : ObservableObject
         });
     }
 
+    // A system's sites first, then (once they have come) its talkgroups.
+    private async Task ShowSystemAsync(RrNode node)
+    {
+        await Do($"Fetching {node.Title}", async () =>
+        {
+            var trs = await _client.GetTrsAsync(node.Id);
+            var sites = await _client.GetTrsSitesAsync(node.Id);
+            if (SelectedNode != node) return;
+            Preview.Clear();
+            PreviewIsSystem = true;
+            Preview.Add(new RrTrunkRow("Site", "Name", "Frequencies (c control, a alternate)", "County", "NAC", "Modulation", Heading: true));
+            var counties = CountyNames;
+            foreach (var s in sites.OrderBy(s => s.Number)) Preview.Add(SiteRow(s, counties));
+            string title = $"{trs.Name}: {N(sites.Count, "site", "sites")}" + (trs.TypeName.Length > 0 ? $" · {trs.TypeName}" : "");
+            PreviewTitle = title;
+
+            var cats = (await _client.GetTalkgroupCatsAsync(node.Id)).GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First().Name);
+            var talkgroups = await _client.GetTalkgroupsAsync(node.Id);
+            if (SelectedNode != node) return;
+            Preview.Add(new RrTrunkRow("Talkgroup", "Alpha tag", "Description", "Tag", "Mode", "Category", Heading: true));
+            foreach (var t in talkgroups.OrderBy(t => t.Dec))
+            {
+                var (mode, _) = RrTrunkImport.Mode(t.Mode, t.Enc);
+                Preview.Add(new RrTrunkRow(t.Dec.ToString(CultureInfo.InvariantCulture), t.Alpha, t.Descr,
+                    t.Tags.Select(g => g.Descr).FirstOrDefault(g => g.Length > 0) ?? "", mode, cats.GetValueOrDefault(t.Cid, "")));
+            }
+            PreviewTitle = $"{trs.Name}: {N(sites.Count, "site", "sites")}, {N(talkgroups.Count, "talkgroup", "talkgroups")}" +
+                           (trs.TypeName.Length > 0 ? $" · {trs.TypeName}" : "");
+        });
+    }
+
+    // The names of the state's counties by number, as the county box has them: for the sites that give only their county's number.
+    private Dictionary<int, string> CountyNames => Counties.GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First().Name);
+
+    private static RrTrunkRow SiteRow(RrTrsSite s, IReadOnlyDictionary<int, string> counties)
+    {
+        string freqs = string.Join(" ", s.Freqs.OrderBy(f => f.MHz).Select(f =>
+            (Math.Round(f.MHz * 1e6 / 10) * 10 / 1e6).ToString("0.0000##", CultureInfo.InvariantCulture) +
+            RrTrunkImport.Use(f.Use) switch { TrunkFreqUse.Control => "c", TrunkFreqUse.Alternate => "a", _ => "" }));
+        string modulation = s.TdmaCc != 0 ? string.Join(" · ", new[] { s.Modulation, "TDMA control" }.Where(t => t.Length > 0)) : s.Modulation;
+        string nac = RrTrunkImport.Hex(s.Nac, 12) is int n ? n.ToString("X3", CultureInfo.InvariantCulture) : s.Nac;
+        return new RrTrunkRow(s.Number.ToString(CultureInfo.InvariantCulture), s.Descr, freqs, RrTrunkImport.County(s, counties), nac, modulation);
+    }
+
+    private static string N(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
+
     // ---- loading ----------------------------------------------------------------------------
 
-    /// <summary>Fetch every ticked list and store its frequencies as channels in the group named.</summary>
+    /// <summary>
+    /// Fetch every ticked list and store its frequencies as channels in the group named, and every
+    /// ticked system whole into the stored systems. A group name is needed only for lists.
+    /// </summary>
     [RelayCommand]
     private async Task LoadAsync()
     {
         string group = LoadGroup.Trim();
-        if (group.Length == 0)
+        List<RrNode> lists = [], unopened = [], systems = [];
+        foreach (var r in Roots) r.Ticked(lists, unopened, systems);
+        if (lists.Count + unopened.Count > 0)
         {
-            Status = "Type a group name for the loaded channels";
-            return;
+            if (group.Length == 0)
+            {
+                Status = "Type a group name for the loaded channels";
+                return;
+            }
+            if (MemoryStore.IsAutoGroup(group))
+            {
+                Status = $"A group's name cannot start with \"{MemoryStore.TagPrefix.Trim()}\" or \"{MemoryStore.PlacePrefix.Trim()}\": those groups are made from the tags and the locations";
+                return;
+            }
         }
-        if (MemoryStore.IsAutoGroup(group))
-        {
-            Status = $"A group's name cannot start with \"{MemoryStore.TagPrefix.Trim()}\" or \"{MemoryStore.PlacePrefix.Trim()}\": those groups are made from the tags and the locations";
-            return;
-        }
-        List<RrNode> lists = [], unopened = [];
-        foreach (var r in Roots) r.Ticked(lists, unopened);
         foreach (var agency in unopened)
             if (!await OpenAgencyAsync(agency)) return;
         lists.Clear();
         unopened.Clear();
-        foreach (var r in Roots) r.Ticked(lists, unopened);
-        if (lists.Count == 0)
+        systems.Clear();
+        foreach (var r in Roots) r.Ticked(lists, unopened, systems);
+        if (lists.Count == 0 && systems.Count == 0)
         {
             Status = "Nothing is ticked";
             return;
         }
 
-        var channels = new List<MemoryChannel>();
-        int done = 0;
-        bool ok = await Do("Fetching", async () =>
+        string said = "";
+        if (lists.Count > 0)
         {
-            foreach (var list in lists)
+            var channels = new List<MemoryChannel>();
+            int done = 0;
+            bool ok = await Do("Fetching", async () =>
             {
-                Status = $"Fetching {++done} of {lists.Count}: {list.AgencyLabel}…";
-                var freqs = await _client.GetFreqsAsync(list.Id);
-                list.Detail = $"{freqs.Count} frequenc{(freqs.Count == 1 ? "y" : "ies")}";
-                channels.AddRange(freqs.Select(f => RrImport.ToChannel(f, list.AgencyLabel, list.Location)));
+                foreach (var list in lists)
+                {
+                    Status = $"Fetching {++done} of {lists.Count}: {list.AgencyLabel}…";
+                    var freqs = await _client.GetFreqsAsync(list.Id);
+                    list.Detail = $"{freqs.Count} frequenc{(freqs.Count == 1 ? "y" : "ies")}";
+                    channels.AddRange(freqs.Select(f => RrImport.ToChannel(f, list.AgencyLabel, list.Location)));
+                }
+            });
+            if (!ok) return;
+            var result = RrImport.Add(_store, channels, group);
+            _store.Save();
+            said = $"{lists.Count} list{(lists.Count == 1 ? "" : "s")} into \"{group}\": {result}";
+            Status = said;
+            Loaded?.Invoke();
+        }
+        if (systems.Count > 0)
+        {
+            var stored = new List<string>();
+            int done = 0;
+            bool ok = await Do("Fetching", async () =>
+            {
+                foreach (var node in systems)
+                {
+                    Status = $"Fetching system {++done} of {systems.Count}: {node.Title}…";
+                    // A system loaded before is asked for afresh: loading it again is how it is brought up to date.
+                    bool had = _trunks.ByRadioReference(node.Id) is not null;
+                    var whole = await _client.GetTrsWholeAsync(node.Id, fresh: had);
+                    var (system, sites, talkgroups) = RrTrunkImport.ToStore(whole, node.Location, DateTime.UtcNow, CountyNames);
+                    if (_trunks.Upsert(system, sites, talkgroups) is null)
+                        throw new RrException($"{node.Title} could not be stored: the database cannot be written");
+                    node.Detail = $"{N(sites.Count, "site", "sites")}, {N(talkgroups.Count, "talkgroup", "talkgroups")}";
+                    stored.Add($"{system.Name}: {N(sites.Count, "site", "sites")} and {N(talkgroups.Count, "talkgroup", "talkgroups")} " +
+                               (had ? "updated (your talkgroup ticks are kept)" : "stored"));
+                }
+            });
+            if (!ok)
+            {
+                if (said.Length > 0) Status = said + ". " + Status;
+                return;
             }
-        });
-        if (!ok) return;
-        var result = RrImport.Add(_store, channels, group);
-        _store.Save();
-        Status = $"{lists.Count} list{(lists.Count == 1 ? "" : "s")} into \"{group}\": {result}";
-        Loaded?.Invoke();
+            Status = string.Join(". ", new[] { said }.Concat(stored).Where(t => t.Length > 0));
+        }
     }
 
     // ---- one thing at a time ----------------------------------------------------------------

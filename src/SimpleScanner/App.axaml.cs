@@ -51,7 +51,7 @@ public partial class App : Application
                     trouble = $"{radio.Label}: {e.Message}";
                 }
             }
-            var vm = new MainViewModel(settings, receivers, store);
+            var vm = new MainViewModel(settings, receivers, store, Trunk.TrunkStore.Load());
             if (trouble.Length > 0) vm.Radio.Status = trouble;
             var window = new MainWindow { DataContext = vm };
             window.RestorePlace();

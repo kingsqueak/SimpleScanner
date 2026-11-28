@@ -19,6 +19,9 @@ internal sealed class FakeCarrier
     public double ToneHz;                   // 0 for none
     public float[]? Deviation;              // at 24 kHz, in units of DeviationHz
     public double DeviationHz = 2500;
+    // Or a complex baseband recording instead (a CQPSK transmitter): at 48 kHz, I and Q interleaved, amplitude 1
+    // (times Level); sent over and over.
+    public float[]? Baseband;
 
     // The generator's: where the carrier and the tone are in their turn, and the place in the recording.
     internal double Re = 1, Im, ToneRe = 1, ToneIm;
@@ -34,9 +37,9 @@ internal sealed class FakeSource : IIqSource
     private volatile FakeCarrier[] _carriers = [];
 
     /// <summary>One more carrier, on from now.</summary>
-    public FakeCarrier Add(double hz, double level = 0.05, double toneHz = 0, float[]? deviation = null)
+    public FakeCarrier Add(double hz, double level = 0.05, double toneHz = 0, float[]? deviation = null, float[]? baseband = null)
     {
-        var c = new FakeCarrier { Hz = hz, Level = level, ToneHz = toneHz, Deviation = deviation };
+        var c = new FakeCarrier { Hz = hz, Level = level, ToneHz = toneHz, Deviation = deviation, Baseband = baseband };
         lock (this) _carriers = [.. _carriers, c];
         return c;
     }
@@ -152,7 +155,9 @@ internal sealed class FakeSource : IIqSource
         double tone = 2 * Math.PI * c.ToneHz / SampleRate, tc = Math.Cos(tone), ts = Math.Sin(tone);
         double level = Volatile.Read(ref c.Level), x = c.Re, y = c.Im, tx = c.ToneRe, ty = c.ToneIm;
         var dev = c.Deviation;
+        var bb = c.Baseband;
         int up = (int)Math.Round(SampleRate / 24000);       // the recording's samples are this many of the radio's
+        int bbUp = (int)Math.Round(SampleRate / 48000);
         double perUnit = 2 * Math.PI * c.DeviationHz / SampleRate;
         for (int k = 0; k < re.Length; k++)
         {
@@ -176,6 +181,21 @@ internal sealed class FakeSource : IIqSource
                     c.Part = 0;
                     c.At = (c.At + 1) % dev.Length;
                 }
+            }
+            if (bb is not null)
+            {
+                // Straight-line interpolation of the recording up to the radio's rate, turned by the carrier.
+                int j = 2 * c.At, j1 = 2 * ((c.At + 1) % (bb.Length / 2));
+                double f = (double)c.Part / bbUp;
+                double br = bb[j] + (bb[j1] - bb[j]) * f, bi = bb[j + 1] + (bb[j1 + 1] - bb[j + 1]) * f;
+                re[k] += (float)(a * (x * br - y * bi));
+                im[k] += (float)(a * (x * bi + y * br));
+                if (++c.Part == bbUp)
+                {
+                    c.Part = 0;
+                    c.At = (c.At + 1) % (bb.Length / 2);
+                }
+                continue;
             }
             re[k] += (float)(a * x);
             im[k] += (float)(a * y);

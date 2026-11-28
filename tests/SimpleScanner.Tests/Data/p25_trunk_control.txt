@@ -1,0 +1,29 @@
+# The script of p25_trunk_control_24k.raw (native/digital/tools/p25gen.c; see README.md).
+# A site of an 800 MHz system: system 0x8A6, WACN 0xBEE00, NAC 0x8A1, RFSS 1, site 1, control channel
+# 859.4875 MHz. Identifier 1: 851.00625 MHz + n x 6.25 kHz; 2: VHF, 152.0075 MHz + n x 6.25 kHz;
+# 3: TDMA, two slots, 851.00625 MHz + (n / 2) x 6.25 kHz.
+nac 0x8A1
+rfss lra=0x01 flags=1 sysid=0x8A6 rfss=1 site=1 ch=0x154D ssc=0x70
+net lra=0x01 wacn=0xBEE00 sysid=0x8A6 ch=0x154D ssc=0x70
+iden id=1 base=851006250 spacing=6250 offset=-45000000 bw=12500
+iden_vu id=2 base=152007500 spacing=6250 offset=600000 bw=12500
+iden_tdma id=3 type=3 base=851006250 spacing=6250 offset=-45000000
+sys_srv avail=0x2A0000 supp=0x3F0000 prio=3
+grant svc=0x00 ch=0x11E9 tg=1001 src=1234567        # 854.0625
+update ch=0x11E9 tg=1001 ch2=0x140D tg2=2002         # 854.0625 and 857.4875
+update_exp svc=0x80 ch=0x12A5 ch2=0x12A5 tg=3003     # 855.2375, emergency
+grant svc=0x00 ch=0x381B tg=4004 src=7654321        # TDMA: 857.4875, slot 1
+grant svc=0x40 ch=0x140D tg=5005 src=2345678        # encrypted
+uu_grant ch=0x12A5 dst=1111111 src=2222222
+adj lra=0x01 flags=0x3 sysid=0x8A6 rfss=1 site=2 ch=0x1481 ssc=0x70
+sccb rfss=1 site=1 ch=0x14AD ssc=0x70 ch2=0x1481 ssc2=0x71
+sccb_exp rfss=1 site=1 ch=0x1455 ch2=0x1455 ssc=0x72
+uu_update ch=0x12A5 dst=1111111 src=2222222
+grant svc=0x00 ch=0x2064 tg=6006 src=42             # VHF: 152.6325
+bad
+grant svc=0x00 ch=0x11E9 tg=7007 src=1              # its CRC is broken
+raw o=00900FA103E907D20000                          # a Motorola block (MFID 0x90)
+mbt_grant svc=0x80 src=3456789 ch=0x12A5 ch2=0x12A5 tg=8008
+mbt_net lra=0x01 sysid=0x8A6 wacn=0xBEE00 ch=0x154D ch2=0x154D ssc=0x70
+mbt_rfss lra=0x01 sysid=0x8A6 rfss=1 site=1 ch=0x154D ch2=0x154D
+mbt_adj lra=0x01 sysid=0x8A6 rfss=1 site=3 ch=0x1455 ch2=0x1455

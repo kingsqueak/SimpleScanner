@@ -11,8 +11,8 @@ public sealed record RrState(int Id, string Name, string Code);
 public sealed record RrCounty(int Id, string Name);
 /// <summary>An agency with frequencies of its own: a state police force, a federal department, a railway.</summary>
 public sealed record RrAgency(int Id, string Name);
-/// <summary>A trunked radio system. Listed only: the receiver does not follow trunked systems yet.</summary>
-public sealed record RrSystem(int Id, string Name, string City);
+/// <summary>A trunked radio system as a county or state lists it. <see cref="Type"/> is the number of its kind (see getTrsType).</summary>
+public sealed record RrSystem(int Id, string Name, string City, int Type = 0);
 
 /// <summary>The smallest unit that can be loaded: one list of frequencies ("Police", "Fire", "Public Works").</summary>
 public sealed record RrSubcat(int Id, string Name, double? Lat, double? Lon, double? Range);
@@ -30,6 +30,27 @@ public sealed record RrTag(int Id, string Descr);
 /// <summary>One conventional frequency. <see cref="Mode"/> may be a name or the number of one (see getMode).</summary>
 public sealed record RrFreq(int Id, double OutMHz, double InMHz, string Callsign, string Descr, string Alpha, string Tone,
     string ColorCode, string Tg, string Slot, string Mode, int Enc, string Class, List<RrTag> Tags, int Scid);
+
+// ---- trunked systems ----------------------------------------------------------------------
+
+/// <summary>A trunked system's details. Its kind, flavour and voice come as numbers and are looked up by name.</summary>
+public sealed record RrTrs(int Id, string Name, int Type, int Flavor, int Voice, string TypeName, string FlavorName, string VoiceName,
+    string City, List<RrSysid> Sysids);
+/// <summary>A system id (and WACN), in hex as the service writes them; a system may have several, or none.</summary>
+public sealed record RrSysid(string Sysid, string Wacn);
+/// <summary>One frequency of a site. <see cref="Use"/> marks the control channels (see <see cref="RrTrunkImport.Use"/>).</summary>
+public sealed record RrSiteFreq(int Lcn, double MHz, string Use);
+/// <summary>
+/// A site of a trunked system. <see cref="County"/> is the county's name where RadioReference gives one (it often gives only
+/// its number, <see cref="CountyId"/>, 0 for none).
+/// </summary>
+public sealed record RrTrsSite(int Id, int Number, string Descr, int Rfss, string Nac, string County, string Modulation, int TdmaCc,
+    double? Lat, double? Lon, List<RrSiteFreq> Freqs, int CountyId = 0);
+/// <summary>A talkgroup. <see cref="Mode"/> is RadioReference's letters (see <see cref="RrTrunkImport.Mode"/>); <see cref="Cid"/> its category.</summary>
+public sealed record RrTalkgroup(int Id, int Dec, string Descr, string Alpha, string Mode, int Enc, List<RrTag> Tags, int Cid);
+public sealed record RrTalkgroupCat(int Id, string Name);
+/// <summary>All of a trunked system, as it is fetched to be loaded.</summary>
+public sealed record RrTrsWhole(RrTrs Details, List<RrTrsSite> Sites, List<RrTalkgroup> Talkgroups, List<RrTalkgroupCat> Cats);
 
 public sealed record RrZip(int Zip, double? Lat, double? Lon, string City, int StateId, int CountyId);
 /// <summary>The signed-in account: its name and when its Premium subscription runs out, in the service's words.</summary>

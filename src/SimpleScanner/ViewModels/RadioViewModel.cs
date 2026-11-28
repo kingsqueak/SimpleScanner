@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SimpleScanner.Dsp;
 using SimpleScanner.Radio;
+using SimpleScanner.Trunk;
 
 namespace SimpleScanner.ViewModels;
 
@@ -104,6 +105,7 @@ public sealed partial class RadioViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowSlots))]
     [NotifyPropertyChangedFor(nameof(CanAvoidChannel))]
+    [NotifyPropertyChangedFor(nameof(CanSkip))]
     [NotifyCanExecuteChangedFor(nameof(AvoidChannelCommand))]
     private bool _isScanning;
     /// <summary>Multi Monitor: a scan or search holds up to four active channels of a window at once. Kept with this radio's settings.</summary>
@@ -128,10 +130,22 @@ public sealed partial class RadioViewModel : ObservableObject
     public bool ShowSlots => MultiMonitor && IsScanning && IsOn;
     /// <summary>The main Avoid has something to do: a scan is stopped on a channel, and not in Multi Monitor, where avoiding is done from a row.</summary>
     public bool CanAvoidChannel => IsScanning && !MultiMonitor;
+    /// <summary>Skip has something to leave: a scan's channel, or in trunk mode the call being followed.</summary>
+    public bool CanSkip => IsScanning || IsTrunking;
 
-    public bool IsAm => !AutoMode && Mode == Mode.Am;
-    public bool IsNfm => !AutoMode && Mode == Mode.Nfm;
-    public bool IsWfm => !AutoMode && Mode == Mode.Wfm;
+    /// <summary>Trunk mode: the system and site chosen for this radio, its talkgroups, what the site says and the calls.</summary>
+    public TrunkViewModel Trunk { get; }
+    /// <summary>The radio is in trunk mode, following a trunked site.</summary>
+    public bool IsTrunking => Trunk.IsTrunking;
+
+    // In trunk mode the receiver is on narrow FM whatever was chosen: the mode buttons say so.
+    public bool IsAm => !IsTrunking && !AutoMode && Mode == Mode.Am;
+    public bool IsNfm => IsTrunking || (!AutoMode && Mode == Mode.Nfm);
+    public bool IsWfm => !IsTrunking && !AutoMode && Mode == Mode.Wfm;
+    /// <summary>The Auto mode button is lit: automatic mode, and not in trunk mode (which is narrow FM).</summary>
+    public bool AutoLit => AutoMode && !IsTrunking;
+    /// <summary>The Multi button is lit: Multi Monitor is on, and not in trunk mode, where it does not apply (it comes back after).</summary>
+    public bool MultiLit => MultiMonitor && !IsTrunking;
     public string PowerText => IsOn ? "Stop" : "Start";
 
     /// <summary>Something here has changed that is kept between runs, and has not been saved yet.</summary>
@@ -160,12 +174,41 @@ public sealed partial class RadioViewModel : ObservableObject
     public MemoryChannel? Picked { get; set; }
 
     /// <param name="post">Runs something on the window's thread (the default); a test runs it where it is.</param>
-    public RadioViewModel(IReceiver receiver, RadioSettings settings, MemoryStore memories, Action<Action>? post = null)
+    /// <param name="trunks">The stored trunked systems; by default those in the same database as <paramref name="memories"/>.</param>
+    /// <param name="listenUnknown">Trunk mode follows talkgroups not in the list (the setting for every radio).</param>
+    public RadioViewModel(IReceiver receiver, RadioSettings settings, MemoryStore memories, Action<Action>? post = null,
+        TrunkStore? trunks = null, bool listenUnknown = true)
     {
         _rx = receiver;
         _memories = memories;
         _post = post ?? (a => Dispatcher.UIThread.Post(a));
         _levelOffsetDb = settings.LevelOffsetDb;
+        Trunk = new TrunkViewModel(receiver, trunks ?? TrunkStore.Load(memories.FilePath), settings, listenUnknown, () => Dirty = true);
+        _resumeTrunk = settings.Trunking;
+        Trunk.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(TrunkViewModel.IsTrunking)) return;
+            OnPropertyChanged(nameof(IsTrunking));
+            OnPropertyChanged(nameof(CanSkip));
+            OnPropertyChanged(nameof(MultiLit));
+            OnPropertyChanged(nameof(AutoLit));
+            OnPropertyChanged(nameof(IsAm));
+            OnPropertyChanged(nameof(IsNfm));
+            OnPropertyChanged(nameof(IsWfm));
+            // Trunk mode is taken up again when the radio is next started, unless it was ended here with the radio running.
+            if (Trunk.IsTrunking) _resumeTrunk = true;
+            else if (IsOn && !_stopping) _resumeTrunk = false;
+            if (Trunk.IsTrunking) ShowTrunkWidth();
+            // Out of trunk mode: the display says again what the receiver is on, as after a scan. Ended for a tune or a
+            // scan of the user's, that is about to say what it is on itself, and must not have its frequency put back.
+            if (Trunk.IsTrunking) return;
+            if (!_endingTrunk) ShowTuned();
+            else
+            {
+                ShowLabel();
+                ModeText = ModeLabel(_rx.Mode, _rx.BandwidthHz);
+            }
+        };
         Slots = Enumerable.Range(0, SlotMixer.Seats).Select(k => new SlotViewModel(k, SkipSlot, AvoidSlot, LabelAt)).ToArray();
         _loading = true;
         MultiMonitor = settings.MultiMonitor;
@@ -235,6 +278,9 @@ public sealed partial class RadioViewModel : ObservableObject
         s.Ppm = (double)(Ppm ?? 0);
         s.LevelOffsetDb = _levelOffsetDb;
         s.MultiMonitor = MultiMonitor;
+        Trunk.WriteTo(s);
+        // Stopped (or not yet started) while in trunk mode: it is taken up again next time.
+        if (_resumeTrunk) s.Trunking = true;
     }
 
     // ---- tuning ---------------------------------------------------------------------------
@@ -249,6 +295,7 @@ public sealed partial class RadioViewModel : ObservableObject
         }
         if (_loading) return;
         IsScanning = false;
+        EndTrunk();
         ApplyFrequency();
     }
 
@@ -291,6 +338,7 @@ public sealed partial class RadioViewModel : ObservableObject
     partial void OnSelectedWidthChanged(Choice? value)
     {
         if (_loading || value is null) return;
+        EndTrunk();
         // Choosing a width by hand is choosing the mode by hand.
         _loading = true;
         AutoMode = false;
@@ -300,7 +348,9 @@ public sealed partial class RadioViewModel : ObservableObject
 
     partial void OnAutoModeChanged(bool value)
     {
+        OnPropertyChanged(nameof(AutoLit));
         if (_loading) return;
+        EndTrunk();
         ApplyFrequency();
     }
 
@@ -311,6 +361,7 @@ public sealed partial class RadioViewModel : ObservableObject
     private void SetMode(string name)
     {
         var mode = name switch { "AM" => Mode.Am, "WFM" => Mode.Wfm, _ => Mode.Nfm };
+        EndTrunk();
         _loading = true;
         AutoMode = false;
         Mode = mode;
@@ -324,6 +375,7 @@ public sealed partial class RadioViewModel : ObservableObject
     public void Tune(MemoryChannel c)
     {
         if (IsScanning) StopScan();
+        EndTrunk();
         Picked = c;
         if (c.Mode is Mode mode)
         {
@@ -405,6 +457,7 @@ public sealed partial class RadioViewModel : ObservableObject
             return;
         }
         Status = "";
+        EndTrunk();
         EnsureSquelch();
         _searching = false;
         _scanMembers = members;
@@ -420,6 +473,7 @@ public sealed partial class RadioViewModel : ObservableObject
     public void StartSearch(IReadOnlyList<ScanChannel> list)
     {
         Status = "";
+        EndTrunk();
         EnsureSquelch();
         _searching = true;
         _relabel = true;
@@ -435,6 +489,93 @@ public sealed partial class RadioViewModel : ObservableObject
         _rx.StopScan();
         IsScanning = false;
         ShowTuned();
+    }
+
+    // ---- trunk mode ----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Start trunk mode on the system and site chosen on Trunk, or stop it. Trunk mode and a scan exclude each
+    /// other: starting one stops the other.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleTrunk()
+    {
+        if (IsTrunking)
+        {
+            Trunk.Stop();
+            return;
+        }
+        if (!IsOn)
+        {
+            Status = "Start the radio first";
+            return;
+        }
+        if (IsScanning)
+        {
+            _rx.StopScan();
+            IsScanning = false;
+        }
+        Status = Trunk.Start() ?? "";
+    }
+
+    // A scan or a search is starting: trunk mode ends (the receiver ends it too).
+    private void EndTrunk()
+    {
+        if (!IsTrunking) return;
+        _endingTrunk = true;
+        try { Trunk.Stop(); }
+        finally { _endingTrunk = false; }
+    }
+
+    private bool _endingTrunk;
+    // Trunk mode is to be taken up when the radio starts: it was on when the radio stopped, or when the app last closed.
+    private bool _resumeTrunk, _stopping;
+
+    // Trunk mode starts on narrow FM: the width shown is that one, not what was chosen before (nothing is retuned for it).
+    private void ShowTrunkWidth()
+    {
+        _loading = true;
+        Widths = NfmWidths;
+        SelectedWidth = NfmWidths.First(w => w.Value == BandPlan.NfmNarrow);
+        _loading = false;
+    }
+
+    // The radio has started: trunk mode as it was, when the system and site chosen for it are still stored. Quietly not otherwise.
+    private void ResumeTrunk()
+    {
+        if (!_resumeTrunk || IsTrunking || IsScanning || !IsOn) return;
+        if (Trunk.Start() is not null) _resumeTrunk = false;
+    }
+
+    /// <summary>In trunk mode, what the display shows: the system and site, then the call followed or what the engine is doing.</summary>
+    private void ShowTrunk()
+    {
+        if (Trunk.Status is not { } s) return;
+        BandName = Trunk.BandText;
+        if (s.Active is { } call)
+        {
+            DetailText = Trunk.CallDetail(call);
+            InfoText = Trunk.CallInfo(call);
+            DigitalText = Trunk.CallText(call);
+            IsEncrypted = call.Flags.HasFlag(TrunkCallFlags.Encrypted) || _rx.Digital is { Encrypted: true };
+        }
+        else
+        {
+            DetailText = Trunk.StateText;
+            InfoText = "";
+            DigitalText = _rx.Digital?.ToString() ?? "";
+            IsEncrypted = false;
+        }
+        ModeText = "P25";
+        // The voice channel during a call, the control channel otherwise: the receiver says which. Shown, not tuned to.
+        double hz = _rx.FrequencyHz;
+        if (hz > 0 && hz != FrequencyHz)
+        {
+            _loading = true;
+            FrequencyHz = hz;
+            _loading = false;
+            EntryText = (FrequencyHz / 1e6).ToString("0.#####", CultureInfo.InvariantCulture);
+        }
     }
 
     /// <summary>Leave the channel the scan has stopped on.</summary>
@@ -459,6 +600,7 @@ public sealed partial class RadioViewModel : ObservableObject
 
     partial void OnMultiMonitorChanged(bool value)
     {
+        OnPropertyChanged(nameof(MultiLit));
         if (!ShowSlots) ClearRows();
         if (_loading) return;
         _rx.MultiMonitor = value;
@@ -701,6 +843,7 @@ public sealed partial class RadioViewModel : ObservableObject
             SelectedAntenna = _rx.Source.Antenna;
             _loading = false;
         }
+        ResumeTrunk();
     }
 
     partial void OnSelectedAntennaChanged(string value)
@@ -744,7 +887,12 @@ public sealed partial class RadioViewModel : ObservableObject
         {
             if (IsOn)
             {
-                await Task.Run(_rx.Stop);
+                bool trunking = IsTrunking;
+                _stopping = true;
+                try { await Task.Run(_rx.Stop); }
+                finally { _stopping = false; }
+                if (IsTrunking) Trunk.Ended();
+                _resumeTrunk = trunking;
                 IsOn = false;
                 IsScanning = false;
                 DeviceText = "Off";
@@ -769,6 +917,7 @@ public sealed partial class RadioViewModel : ObservableObject
     /// <summary>Bring the display up to date with the receiver. Called twenty times a second.</summary>
     public void Tick()
     {
+        Trunk.Tick();
         if (IsOn)
         {
             var src = _rx.Source;
@@ -799,9 +948,13 @@ public sealed partial class RadioViewModel : ObservableObject
             else ClearRows();
             Overloaded = src.Overloaded;
             IsStereo = _rx.Stereo;
-            var digital = _rx.Digital;
-            DigitalText = digital?.ToString() ?? "";
-            IsEncrypted = digital is { Encrypted: true };
+            if (IsTrunking) ShowTrunk();
+            else
+            {
+                var digital = _rx.Digital;
+                DigitalText = digital?.ToString() ?? "";
+                IsEncrypted = digital is { Encrypted: true };
+            }
             // The model's range, not the band's: the slider pulls its value down to a lower maximum and
             // that would be written back as the setting, so a scan through a band with fewer steps lost
             // the user's step (reported 2026-11-27). The radio uses the band's highest step there itself.

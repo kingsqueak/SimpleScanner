@@ -5,6 +5,7 @@ using System.Net;
 using System.Text;
 using SimpleScanner.Dsp;
 using SimpleScanner.RadioReference;
+using SimpleScanner.Trunk;
 using SimpleScanner.ViewModels;
 
 namespace SimpleScanner.Tests;
@@ -71,8 +72,70 @@ public class RadioReferenceTests
             ("tone", tone), ("colorCode", cc), ("tg", tg), ("slot", slot), ("mode", mode), ("enc", $"{enc}"), ("class", "RM"),
             ("tags", List("tags", Item("item", ("tagId", "2"), ("tagDescr", tag)))), ("scid", "0"));
 
-    /// <summary>A small New Hampshire: one county with two categories, a county agency, a state agency and a trunked system.</summary>
-    private static string Answer(string call, string body)
+    // ---- trunked systems, written from the service's definition (no live answer seen yet) ---
+
+    // The talkgroups of the P25 system; a test may change them to stand for RadioReference's being edited.
+    internal static List<string> Talkgroups() =>
+    [
+        Talkgroup(101, "Milford PD", "Police dispatch", "D", 0, "Law Dispatch", 1),
+        Talkgroup(102, "Milford FD", "Fire dispatch", "T", 0, "Fire Dispatch", 2),
+        Talkgroup(103, "PD Tac", "Police tactical", "DE", 2, "Law Tac", 1),
+        Talkgroup(104, "PD Ops", "Police operations", "De", 1, "Law Talk", 1),
+    ];
+
+    internal static string Talkgroup(int dec, string alpha, string descr, string mode, int enc, string tag, int cid) =>
+        Item("item", ("tgId", $"{dec + 90000}"), ("tgDec", $"{dec}"), ("tgSubfleet", ""), ("tgLtr", "false"), ("tgSlot", ""),
+            ("tgDescr", descr), ("tgAlpha", alpha), ("tgMode", mode), ("enc", $"{enc}"),
+            ("tags", List("tags", Item("item", ("tagId", "7"), ("tagDescr", tag)))), ("tgCid", $"{cid}"), ("tgSort", "0"));
+
+    private static string SiteFreq(int lcn, string mhz, string use) =>
+        Item("item", ("lcn", $"{lcn}"), ("freq", mhz), ("use", use), ("colorCode", ""), ("ch_id", ""));
+
+    // As RadioReference sends them, a site's county may be its number only (siteCtid, with siteCt empty).
+    private static string Site(int id, int number, string descr, string nac, string county, string freqs, int tdma = 0, int ctid = 0) =>
+        Item("item", ("siteId", $"{id}"), ("sid", "6000"), ("siteNumber", $"{number}"), ("siteDescr", descr), ("zoneNumber", "0"),
+            ("rfss", "1"), ("nac", nac), ("siteCt", county), ("siteCtid", $"{ctid}"), ("siteModulation", "C4FM"), ("lat", "42.83"),
+            ("lon", "-71.65"), ("tdma_cc", $"{tdma}"), ("siteFreqs", freqs));
+
+    // As rpc/encoded may send them: a value written once at the end of the body and pointed to with href.
+    private static string WithRefs(string envelope, params (string Id, string Xml)[] refs) =>
+        envelope.Replace("</SOAP-ENV:Body>", string.Concat(refs.Select(r => r.Xml.Replace("<multiRef>", $"<multiRef id=\"{r.Id}\" xsi:type=\"SOAP-ENC:Array\">"))) + "</SOAP-ENV:Body>");
+
+    private List<string> _talkgroups = Talkgroups();
+
+    private string TrunkAnswer(string call, string body, Func<string, string> arg) => call switch
+    {
+        "getTrsType" => Envelope(call, List("return", Item("item", ("sType", arg("id")), ("sTypeDescr", arg("id") switch
+        {
+            "2" => "Motorola Type II Smartnet",
+            "3" => "EDACS Standard",
+            "8" => "Project 25 Phase I",
+            "12" => "Project 25 Phase II",
+            _ => "",
+        })))),
+        "getTrsFlavor" => Envelope(call, List("return", Item("item", ("sType", "8"), ("sFlavor", arg("id")), ("sFlavorDescr", "Standard")))),
+        "getTrsVoice" => Envelope(call, List("return", Item("item", ("sType", "8"), ("sVoice", arg("id")), ("sVoiceDescr", "Analog and Digital")))),
+        "getTrsDetails" => arg("sid") == "6000"
+            ? WithRefs(Envelope(call, Item("return", ("sName", "Souhegan Valley"), ("sType", "8"), ("sFlavor", "1"), ("sVoice", "4"),
+                    ("sCity", "Milford"), ("sysid", "<sysid href=\"#ref1\"/>"))),
+                ("ref1", "<multiRef>" + Item("item", ("sysid", "3A1"), ("ct", "1766"), ("wacn", "BEE00"), ("model", "")) + "</multiRef>"))
+            // A system with no system id listed.
+            : Envelope(call, Item("return", ("sName", "NH State Interop"), ("sType", "12"), ("sFlavor", "1"), ("sVoice", "4"),
+                ("sCity", ""), ("sysid", List("sysid")))),
+        "getTrsSites" => WithRefs(Envelope(call, List("return",
+                Site(61, 1, "Milford", "293", "Hillsborough", List("siteFreqs",
+                    SiteFreq(3, "852.5375", ""), SiteFreq(1, "851.0125", "d"), SiteFreq(2, "851.2625", "a"))),
+                Site(62, 2, "Amherst", "0x2a1", "", "<siteFreqs href=\"#ref2\"/>", tdma: 1, ctid: 1766))),
+            ("ref2", "<multiRef>" + SiteFreq(1, "853.1125", "D") + SiteFreq(2, "853.6125", "") + "</multiRef>")),
+        "getTrsTalkgroupCats" => Envelope(call, List("return",
+            Item("item", ("tgCid", "1"), ("sid", "6000"), ("tgCname", "Police")),
+            Item("item", ("tgCid", "2"), ("sid", "6000"), ("tgCname", "Fire")))),
+        "getTrsTalkgroups" => Envelope(call, List("return", [.. _talkgroups])),
+        _ => Fault("No such call in the test: " + call),
+    };
+
+    /// <summary>A small New Hampshire: one county with two categories, a county agency, a state agency and trunked systems.</summary>
+    private string Answer(string call, string body)
     {
         string Arg(string name)
         {
@@ -92,7 +155,10 @@ public class RadioReferenceTests
                     Item("item", ("stid", "33"), ("stateName", "New Hampshire"), ("stateCode", "NH")),
                     Item("item", ("stid", "23"), ("stateName", "Maine"), ("stateCode", "ME")))))),
             "getStateInfo" => Envelope(call, Item("return", ("stid", "33"), ("stateName", "New Hampshire"),
-                ("trsList", List("trsList")),
+                ("trsList", List("trsList",
+                    Item("item", ("sid", "5000"), ("sName", "Nashua Public Safety"), ("sType", "2"), ("sCity", "Nashua")),
+                    Item("item", ("sid", "7000"), ("sName", "NH State Interop"), ("sType", "12"), ("sCity", "")),
+                    Item("item", ("sid", "7100"), ("sName", "Coastal EDACS"), ("sType", "3"), ("sCity", "Portsmouth")))),
                 ("agencyList", List("agencyList", Item("item", ("aid", "700"), ("aName", "State Police"), ("aType", "2")))),
                 ("countyList", List("countyList",
                     Item("item", ("ctid", "1767"), ("countyName", "Merrimack"), ("countyHeader", "")),
@@ -106,7 +172,8 @@ public class RadioReferenceTests
                     Item("item", ("cid", "10"), ("cName", "Municipalities"), ("subcats", List("subcats",
                         Subcat(101, "Manchester", "42.99", "-71.46"), Subcat(102, "Nashua", "42.76", "-71.46")))),
                     Item("item", ("cid", "11"), ("cName", "Airports"), ("subcats", List("subcats", Subcat(103, "Manchester Airport (MHT)")))))),
-                ("trsList", List("trsList", Item("item", ("sid", "5000"), ("sName", "Nashua Public Safety"), ("sCity", "Nashua")))),
+                ("trsList", List("trsList", Item("item", ("sid", "5000"), ("sName", "Nashua Public Safety"), ("sType", "2"), ("sCity", "Nashua")),
+                    Item("item", ("sid", "6000"), ("sName", "Souhegan Valley"), ("sType", "8"), ("sCity", "Milford")))),
                 ("agencyList", List("agencyList", Item("item", ("aid", "800"), ("aName", "County Sheriff"), ("aType", "3")))))),
             "getAgencyInfo" => Envelope(call, Item("return", ("aid", Arg("aid")), ("agencyName", "State Police"),
                 ("cats", List("cats", Item("item", ("cid", "20"), ("cName", "Troops"), ("subcats", List("subcats", Subcat(201, "Troop A"), Subcat(202, "Troop B")))))))),
@@ -121,11 +188,11 @@ public class RadioReferenceTests
                 _ => [],
             })),
             "getMode" => Envelope(call, List("return", Item("item", ("mode", Arg("mode")), ("modeName", "P25")))),
-            _ => Fault("No such call in the test: " + call),
+            _ => TrunkAnswer(call, body, Arg),
         };
     }
 
-    private static (RrClient Client, Service Service) Signed(string password = "right")
+    private (RrClient Client, Service Service) Signed(string password = "right")
     {
         var service = new Service { Answer = Answer };
         var client = new RrClient(new RrCache(":memory:"), service) { Auth = new RrAuth("listener1", password, "the-key") };
@@ -196,7 +263,7 @@ public class RadioReferenceTests
         Assert.Equal(new RrSubcat(102, "Nashua", 42.76, -71.46, 5), county.Cats[0].Subcats[1]);
         Assert.Null(county.Cats[1].Subcats[0].Lat);                // 0 is "no position"
         Assert.Equal(new RrAgency(800, "County Sheriff"), county.Agencies.Single());
-        Assert.Equal(new RrSystem(5000, "Nashua Public Safety", "Nashua"), county.Systems.Single());
+        Assert.Equal([new RrSystem(5000, "Nashua Public Safety", "Nashua", 2), new RrSystem(6000, "Souhegan Valley", "Milford", 8)], county.Systems);
     }
 
     [Fact]
@@ -304,12 +371,12 @@ public class RadioReferenceTests
 
     // ---- the browser ------------------------------------------------------------------------
 
-    internal static async Task<(RadioReferenceViewModel Vm, Service Service, MemoryStore Store, Settings.RrPlace Place)> Browser()
+    internal async Task<(RadioReferenceViewModel Vm, Service Service, MemoryStore Store, Settings.RrPlace Place)> Browser(TrunkStore? trunks = null)
     {
         var service = new Service { Answer = Answer };
         var store = Store();
         var place = new Settings.RrPlace();
-        var vm = new RadioReferenceViewModel(store, new RrClient(new RrCache(":memory:"), service), place, () => "the-key");
+        var vm = new RadioReferenceViewModel(store, new RrClient(new RrCache(":memory:"), service), place, () => "the-key", trunks: trunks);
         await vm.OpenAsync();
         vm.Username = "listener1";
         vm.Password = "right";
@@ -439,13 +506,13 @@ public class RadioReferenceTests
         Assert.Equal("Hillsborough, NH", vm.LoadGroup);
         Assert.Equal((1, 33, 1766, "03101"), (place.Country, place.State, place.County, place.Zip));
 
-        Assert.Equal(["Hillsborough", "Agencies in Hillsborough", "New Hampshire statewide agencies", "United States nationwide agencies", "Trunked systems"],
-            vm.Roots.Select(r => r.Title));
+        Assert.Equal(["Hillsborough", "Agencies in Hillsborough", "New Hampshire statewide agencies", "United States nationwide agencies", "Trunked systems",
+            "Other systems in New Hampshire"], vm.Roots.Select(r => r.Title));
         var police = vm.Roots[0].Children[0];
         Assert.Equal(["Manchester", "Nashua"], police.Children.Select(c => c.Title));
         Assert.Equal(["0 mi", "16 mi"], police.Children.Select(c => c.Detail));        // from the ZIP code's own position
         Assert.Equal("", vm.Roots[0].Children[1].Children[0].Detail);                  // a list with no position
-        Assert.False(vm.Roots[4].Children[0].CanCheck);                                // a trunked system cannot be ticked
+        Assert.False(vm.Roots[4].Children[0].CanCheck);                                // a system other than P25 cannot be ticked
         Assert.False(vm.CanLoad);
     }
 
@@ -609,4 +676,226 @@ public class RadioReferenceTests
         await vm.FindZipCommand.ExecuteAsync(null);
         Assert.Equal("RadioReference does not know the ZIP code 99999", vm.Status);
     }
+
+    // ---- trunked systems --------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_trunked_system_is_read_with_its_sites_talkgroups_and_names()
+    {
+        var (client, service) = Signed();
+        var trs = await client.GetTrsAsync(6000);
+        Assert.Equal(("Souhegan Valley", "Project 25 Phase I", "Standard", "Analog and Digital", "Milford"),
+            (trs.Name, trs.TypeName, trs.FlavorName, trs.VoiceName, trs.City));
+        Assert.Equal(new RrSysid("3A1", "BEE00"), trs.Sysids.Single());                 // sent once and pointed to
+        Assert.Contains("<ns1:getTrsDetails><sid xsi:type=\"xsd:int\">6000</sid><authInfo", service.Asked.First(a => a.Call == "getTrsDetails").Body);
+        Assert.Empty((await client.GetTrsAsync(7000)).Sysids);                          // none listed
+        Assert.Equal(1, service.Count("getTrsFlavor"));                                 // a name is asked for once
+
+        var sites = await client.GetTrsSitesAsync(6000);
+        Assert.Equal(["Milford", "Amherst"], sites.Select(s => s.Descr));
+        Assert.Equal((61, 1, 1, "293", "Hillsborough", "C4FM", 0), (sites[0].Id, sites[0].Number, sites[0].Rfss, sites[0].Nac, sites[0].County,
+            sites[0].Modulation, sites[0].TdmaCc));
+        Assert.Equal(new RrSiteFreq(1, 851.0125, "d"), sites[0].Freqs[1]);
+        Assert.Equal([853.1125, 853.6125], sites[1].Freqs.Select(f => f.MHz));          // a list pointed to
+        Assert.Equal(1, sites[1].TdmaCc);
+        Assert.Equal(("", 1766), (sites[1].County, sites[1].CountyId));                 // the county by its number only
+
+        var talkgroups = await client.GetTalkgroupsAsync(6000);
+        Assert.Equal(new RrTalkgroup(90101, 101, "Police dispatch", "Milford PD", "D", 0, [new RrTag(7, "Law Dispatch")], 1) with { Tags = talkgroups[0].Tags },
+            talkgroups[0]);
+        Assert.Equal("Law Dispatch", talkgroups[0].Tags.Single().Descr);
+        string asked = service.Asked.First(a => a.Call == "getTrsTalkgroups").Body;
+        Assert.Contains("<sid xsi:type=\"xsd:int\">6000</sid><tgCid xsi:type=\"xsd:int\">0</tgCid><tgTag xsi:type=\"xsd:int\">0</tgTag><tgDec xsi:type=\"xsd:int\">0</tgDec>", asked);
+        Assert.Equal([new RrTalkgroupCat(1, "Police"), new RrTalkgroupCat(2, "Fire")], await client.GetTalkgroupCatsAsync(6000));
+    }
+
+    [Fact]
+    public void Ids_modes_and_uses_are_read_whatever_way_they_are_written()
+    {
+        Assert.Equal(0x3A1, RrTrunkImport.Hex("3A1", 12));
+        Assert.Equal(0x3A1, RrTrunkImport.Hex(" 0x3a1 ", 12));
+        Assert.Equal(0xBEE00, RrTrunkImport.Hex("BEE00", 20));
+        Assert.Equal(0x293, RrTrunkImport.Hex("$293", 12));
+        Assert.Null(RrTrunkImport.Hex("", 12));
+        Assert.Null(RrTrunkImport.Hex("0", 12));
+        Assert.Null(RrTrunkImport.Hex("none", 12));
+        Assert.Null(RrTrunkImport.Hex("BEE00", 12));                                    // too long for a system id
+
+        Assert.Equal(TrunkFreqUse.Control, RrTrunkImport.Use("d"));
+        Assert.Equal(TrunkFreqUse.Control, RrTrunkImport.Use(" D "));
+        Assert.Equal(TrunkFreqUse.Alternate, RrTrunkImport.Use("a"));
+        Assert.Equal(TrunkFreqUse.Voice, RrTrunkImport.Use(""));
+        Assert.Equal(TrunkFreqUse.Voice, RrTrunkImport.Use(null));
+
+        Assert.Equal(("D", 0), RrTrunkImport.Mode("D", 0));
+        Assert.Equal(("T", 0), RrTrunkImport.Mode("t", 0));
+        Assert.Equal(("DE", 2), RrTrunkImport.Mode("DE", 0));
+        Assert.Equal(("TE", 2), RrTrunkImport.Mode("TE", 2));
+        Assert.Equal(("De", 1), RrTrunkImport.Mode("De", 0));
+        Assert.Equal(("De", 1), RrTrunkImport.Mode("D", 1));                             // the number says so though the letters do not
+        Assert.Equal(("DE", 2), RrTrunkImport.Mode("", 2));
+        Assert.True(RrTrunkImport.IsP25("Project 25 Phase II"));
+        Assert.False(RrTrunkImport.IsP25("Motorola Type II Smartnet"));
+        Assert.False(RrTrunkImport.IsP25(""));
+    }
+
+    private static async Task Until(Func<bool> done)
+    {
+        for (int i = 0; i < 200 && !done(); i++) await Task.Delay(5);
+        Assert.True(done());
+    }
+
+    private static TrunkStore Trunks() => new(Path.Combine(Path.GetTempPath(), $"ss-trunk-{Guid.NewGuid():N}.db"));
+
+    [Fact]
+    public async Task P25_systems_can_be_ticked_others_are_dimmed_and_the_states_other_systems_open_when_wanted()
+    {
+        var (vm, service, _, _) = await Browser(Trunks());
+        vm.Zip = "03101";
+        await vm.FindZipCommand.ExecuteAsync(null);
+        var systems = vm.Roots[4];
+        Assert.Equal(["Nashua Public Safety", "Souhegan Valley"], systems.Children.Select(c => c.Title));
+        var (smartnet, p25) = (systems.Children[0], systems.Children[1]);
+        Assert.Equal((false, true, "Nashua · not a P25 system"), (smartnet.CanCheck, smartnet.Dim, smartnet.Detail));
+        Assert.Equal((true, false, "Milford · Project 25 Phase I"), (p25.CanCheck, p25.Dim, p25.Detail));
+        Assert.Equal("Hillsborough County, NH", p25.Location);
+
+        // The state's other systems: not the county's again, and their kinds not asked for until the heading is opened.
+        var others = vm.Roots[5];
+        Assert.Equal("2", others.Detail);
+        Assert.Equal(0, service.Asked.Count(a => a.Call == "getTrsType" && (a.Body.Contains(">12<") || a.Body.Contains(">3<"))));
+        others.IsExpanded = true;
+        await Until(() => others.Children.Count == 2 && others.Children[0].Kind == RrNodeKind.System);
+        Assert.Equal(["Coastal EDACS", "NH State Interop"], others.Children.Select(c => c.Title));
+        Assert.Equal((false, true), (others.Children[0].CanCheck, others.Children[1].CanCheck));
+        Assert.Equal("New Hampshire statewide", others.Children[1].Location);
+
+        p25.IsChecked = true;
+        others.Children[1].IsChecked = true;
+        Assert.Equal("2 systems ticked", vm.TickedText);
+        vm.Roots[0].Children[0].Children[0].IsChecked = true;
+        Assert.Equal("1 list and 2 systems ticked", vm.TickedText);
+        Assert.True(vm.CanLoad);
+    }
+
+    [Fact]
+    public async Task Selecting_a_p25_system_shows_its_sites_then_its_talkgroups()
+    {
+        var (vm, _, _, _) = await Browser(Trunks());
+        vm.Zip = "03101";
+        await vm.FindZipCommand.ExecuteAsync(null);
+        vm.SelectedNode = vm.Roots[4].Children[1];
+        await Until(() => vm.Preview.Count == 8);
+        Assert.True(vm.PreviewIsSystem);
+        Assert.Equal("Souhegan Valley: 2 sites, 4 talkgroups · Project 25 Phase I", vm.PreviewTitle);
+        Assert.Equal(new RrTrunkRow("Site", "Name", "Frequencies (c control, a alternate)", "County", "NAC", "Modulation", Heading: true), vm.Preview[0]);
+        Assert.Equal(new RrTrunkRow("1", "Milford", "851.0125c 851.2625a 852.5375", "Hillsborough", "293", "C4FM"), vm.Preview[1]);
+        Assert.Equal(new RrTrunkRow("2", "Amherst", "853.1125c 853.6125", "Hillsborough", "2A1", "C4FM · TDMA control"), vm.Preview[2]);
+        Assert.True(((RrTrunkRow)vm.Preview[3]).Heading);
+        Assert.Equal(new RrTrunkRow("102", "Milford FD", "Fire dispatch", "Fire Dispatch", "T", "Fire"), vm.Preview[5]);
+        Assert.Equal("DE", ((RrTrunkRow)vm.Preview[6]).Mode);
+
+        vm.SelectedNode = vm.Roots[4].Children[0];
+        Assert.Empty(vm.Preview);
+        Assert.Equal("Nashua Public Safety: not a P25 system, so the scanner cannot follow it", vm.PreviewTitle);
+
+        vm.SelectedNode = vm.Roots[0].Children[0].Children[0];
+        await Until(() => vm.Preview.Count == 2);
+        Assert.False(vm.PreviewIsSystem);
+        Assert.IsType<RrFreqRow>(vm.Preview[0]);
+    }
+
+    [Fact]
+    public void A_sites_county_is_its_name_or_the_name_of_its_number()
+    {
+        var counties = new Dictionary<int, string> { [1766] = "Hillsborough" };
+        RrTrsSite Site(string county, int ctid) => new(1, 1, "Milford", 1, "293", county, "C4FM", 0, null, null, [], ctid);
+        Assert.Equal("Merrimack", RrTrunkImport.County(Site(" Merrimack ", 1766), counties));     // the name given wins
+        Assert.Equal("Hillsborough", RrTrunkImport.County(Site("", 1766), counties));
+        Assert.Equal("", RrTrunkImport.County(Site("", 1767), counties));                        // another state's: not known
+        Assert.Equal("", RrTrunkImport.County(Site("", 1766), null));
+        Assert.Equal("", RrTrunkImport.County(Site("", 0), counties));
+    }
+
+    [Fact]
+    public async Task A_ticked_system_is_loaded_whole_with_no_group_name()
+    {
+        var trunks = Trunks();
+        var (vm, _, store, _) = await Browser(trunks);
+        vm.Zip = "03101";
+        await vm.FindZipCommand.ExecuteAsync(null);
+        vm.LoadGroup = "";
+        vm.Roots[4].Children[1].IsChecked = true;
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        Assert.Equal("Souhegan Valley: 2 sites and 4 talkgroups stored", vm.Status);
+        Assert.Empty(store.Channels);
+        var system = trunks.Systems.Single();
+        Assert.Equal((6000, "Souhegan Valley", "Project 25 Phase I", "Standard", "Analog and Digital", 0x3A1, 0xBEE00, "Hillsborough County, NH"),
+            (system.RrSid, system.Name, system.Type, system.Flavor, system.Voice, system.SysId, system.Wacn, system.Location));
+        var sites = trunks.Sites(system.Id);
+        Assert.Equal([(1, 0x293, false), (2, 0x2A1, true)], sites.Select(s => (s.Number, s.Nac!.Value, s.TdmaControl)));
+        // The second site gives its county by number only: named from the state's county list, with no call to the service for it.
+        Assert.Equal(["Hillsborough", "Hillsborough"], sites.Select(s => s.County));
+        Assert.Equal([new TrunkSiteFreq(851_012_500, 1, TrunkFreqUse.Control), new TrunkSiteFreq(851_262_500, 2, TrunkFreqUse.Alternate),
+            new TrunkSiteFreq(852_537_500, 3, TrunkFreqUse.Voice)], sites[0].Freqs);
+        var talkgroups = trunks.Talkgroups(system.Id);
+        Assert.Equal([(101, "D", true, "Police"), (102, "T", true, "Fire"), (103, "DE", false, "Police"), (104, "De", true, "Police")],
+            talkgroups.Select(t => (t.Dec, t.Mode, t.Listen, t.Category)));
+        Assert.Equal(("Milford PD", "Police dispatch", "Law Dispatch"), (talkgroups[0].Alpha, talkgroups[0].Descr, talkgroups[0].Tag));
+        Assert.Equal("2 sites, 4 talkgroups", vm.Roots[4].Children[1].Detail);
+        // And it is on disk.
+        Assert.Equal(4, TrunkStore.Load(TrunkPath(trunks)).Talkgroups(system.Id).Count);
+    }
+
+    [Fact]
+    public async Task Loading_a_system_again_updates_it_and_keeps_the_ticks()
+    {
+        var trunks = Trunks();
+        var (vm, service, _, _) = await Browser(trunks);
+        vm.Zip = "03101";
+        await vm.FindZipCommand.ExecuteAsync(null);
+        vm.Roots[4].Children[1].IsChecked = true;
+        await vm.LoadCommand.ExecuteAsync(null);
+        long id = trunks.Systems.Single().Id;
+        trunks.SetListen(id, 101, false);
+        trunks.SetListen(id, 103, true);
+
+        // RadioReference renames one, drops one and adds one.
+        _talkgroups = [.. Talkgroups().Take(3), Talkgroup(105, "Hwy Dept", "Highway", "D", 0, "Public Works", 2)];
+        _talkgroups[0] = Talkgroup(101, "Milford PD 1", "Police dispatch", "D", 0, "Law Dispatch", 1);
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        Assert.Equal("Souhegan Valley: 2 sites and 4 talkgroups updated (your talkgroup ticks are kept)", vm.Status);
+        Assert.Equal(2, service.Count("getTrsTalkgroups"));                            // asked afresh, not from what was kept
+        Assert.Equal(id, trunks.Systems.Single().Id);
+        var talkgroups = trunks.Talkgroups(id);
+        Assert.Equal([(101, "Milford PD 1", false), (102, "Milford FD", true), (103, "PD Tac", true), (105, "Hwy Dept", true)],
+            talkgroups.Select(t => (t.Dec, t.Alpha, t.Listen)));
+    }
+
+    [Fact]
+    public async Task Loading_lists_and_a_system_together_says_both()
+    {
+        var trunks = Trunks();
+        var (vm, _, store, _) = await Browser(trunks);
+        vm.Zip = "03101";
+        await vm.FindZipCommand.ExecuteAsync(null);
+        vm.Roots[0].Children[0].Children[0].IsChecked = true;
+        vm.Roots[4].Children[1].IsChecked = true;
+        vm.LoadGroup = "";
+        await vm.LoadCommand.ExecuteAsync(null);
+        Assert.Equal("Type a group name for the loaded channels", vm.Status);   // the list needs one
+        Assert.Empty(trunks.Systems);
+
+        vm.LoadGroup = "Hillsborough, NH";
+        await vm.LoadCommand.ExecuteAsync(null);
+        Assert.StartsWith("1 list into \"Hillsborough, NH\": 2 channels added", vm.Status);
+        Assert.EndsWith(". Souhegan Valley: 2 sites and 4 talkgroups stored", vm.Status);
+        Assert.Equal(2, store.Channels.Count);
+        Assert.Single(trunks.Systems);
+    }
+
+    private static string TrunkPath(TrunkStore store) =>
+        (string)typeof(TrunkStore).GetField("_path", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(store)!;
 }

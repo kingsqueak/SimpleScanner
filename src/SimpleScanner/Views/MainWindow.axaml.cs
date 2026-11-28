@@ -174,6 +174,20 @@ public partial class MainWindow : Window
         Grid.SetColumnSpan(card, span);
     }
 
+    // The deck's Trunk: starts or stops trunk mode for the radio selected; with no site chosen for it yet (or no system
+    // stored), it opens Trunk, where they are chosen.
+    private void OnTrunk(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel main) return;
+        var radio = main.Radio;
+        if (!radio.IsTrunking && radio.Trunk.SelectedSite is null)
+        {
+            Tabs.SelectedItem = TrunkTab;
+            return;
+        }
+        radio.ToggleTrunkCommand.Execute(null);
+    }
+
     // The deck's line about the groups scanned opens Groups.
     private void OnShowGroups(object? sender, RoutedEventArgs e) => Tabs.SelectedItem = GroupsTab;
 
@@ -260,7 +274,7 @@ public partial class MainWindow : Window
         }
         var cache = new RrCache();
         var client = new RrClient(cache);
-        var vm = new RadioReferenceViewModel(main.Store, client, main.RadioReferencePlace, cache: cache);
+        var vm = new RadioReferenceViewModel(main.Store, client, main.RadioReferencePlace, cache: cache, trunks: main.Trunks);
         vm.PlaceChanged += main.SaveSettings;
         vm.Loaded += () =>
         {

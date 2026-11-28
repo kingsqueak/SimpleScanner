@@ -40,6 +40,12 @@ public sealed class RadioSettings
     public bool NoGroups { get; set; }
     /// <summary>Multi Monitor: a scan or search holds up to four active channels of a window at once.</summary>
     public bool MultiMonitor { get; set; }
+    /// <summary>Trunk mode: the trunked system chosen for this radio, by its RadioReference number (so loading it again keeps it); null for none.</summary>
+    public int? TrunkSystem { get; set; }
+    /// <summary>Trunk mode: the site chosen, by its RadioReference site number; null for none.</summary>
+    public int? TrunkSite { get; set; }
+    /// <summary>The radio was in trunk mode when last saved.</summary>
+    public bool Trunking { get; set; }
 }
 
 /// <summary>What is kept between runs, in Application Support (macOS), ~/.local/share (Linux)
@@ -109,6 +115,8 @@ public sealed class Settings
     /// <summary>Multi Monitor: seconds a slot keeps its channel after the signal has dropped, for every radio.</summary>
     public int MultiHangSeconds { get; set; } = DefaultMultiHangSeconds;
     public const int DefaultMultiHangSeconds = 8;
+    /// <summary>Trunk mode: calls to talkgroups not in the stored list are played (shown as "TG 12345"). For every radio.</summary>
+    public bool TrunkListenUnknown { get; set; } = true;
     /// <summary>The RadioReference browser's account name (when the user asked for it to be remembered) and the place
     /// last looked at (numbers are RadioReference's own). The password is not kept here: see <see cref="RadioReference.IRrLogins"/>.</summary>
     public sealed class RrPlace

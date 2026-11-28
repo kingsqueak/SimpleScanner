@@ -6,7 +6,7 @@ SimpleScanner is a communications scanner for SDRplay RSP receivers. It receives
 
 - An SDRplay RSP receiver and an antenna (see **Hardware**).
 - The SDRplay API, version 3. It is SDRplay's own software and is not part of SimpleScanner: download its installer from sdrplay.com/api and run it before the first start.
-- For the RadioReference browser only: your own radioreference.com account with a Premium subscription, and an application key (see **RadioReference**).
+- For the RadioReference browser only: your own radioreference.com account with a Premium subscription (see **RadioReference**).
 
 ## The first start
 
@@ -179,7 +179,7 @@ Both end the same way: stored channels in a group you name, which you can then e
 
 ## CSV import
 
-This is the simple way, and the one to use if you have no application key.
+This is the simple way, and the one to use if you have no Premium subscription to hand or no connection where you are.
 
 - Sign in at radioreference.com in your web browser, go to the frequency page of a county or an agency, and download it as CSV. RadioReference offers the download to its Premium subscribers.
 - In the channel editor press **Import RadioReference CSV…** and choose the file. Several files can be chosen at once.
@@ -187,7 +187,7 @@ This is the simple way, and the one to use if you have no application key.
 
 What to know about it:
 
-- SimpleScanner itself needs no account, no application key and no connection for this. A file someone gave you works as well.
+- SimpleScanner itself needs no account and no connection for this. A file someone gave you works as well.
 - The file must be a frequency download: it needs a "Frequency Output" column. A talkgroup download of a trunked system is refused.
 - It reads the frequency, repeater input, alpha tag (which becomes the name), agency or category, description, tag, mode, tone, FCC callsign and station class.
 - Importing the same file again adds nothing twice. A channel already stored is kept as it is, with your edits, and joins the group named.
@@ -198,14 +198,11 @@ What to know about it:
 
 The browser is a window of its own: sign in, choose a place, tick what you want, load it.
 
-It needs two things:
-
-- **Your own RadioReference account with a Premium subscription.** RadioReference's web service answers Premium subscribers only.
-- **An application key.** RadioReference issues these to the authors of programs that use its web service. None comes with SimpleScanner. Enter the one issued to you under **Application key…** at the top right of the window. It is kept in a file beside the settings, readable only by you. Save with the box empty to remove it.
+It needs your own RadioReference account with a Premium subscription: RadioReference's web service answers Premium subscribers only. (It also needs SimpleScanner's own application key, which tells RadioReference which program is asking. It is built into the packages on the GitHub Releases page, so there is nothing to enter.)
 
 Using it:
 
-- Type your user name and password and press **Sign in**. On a Mac, **Keep in the keychain** keeps the password in your login keychain, so that you are signed in when the window next opens. **Sign out** forgets it.
+- Type your user name and password and press **Sign in**. With **Remember user name and password** ticked (as it is to begin with), they are kept, and you are signed in by yourself whenever the window opens, after every restart. Untick it before signing in to keep neither. **Sign out** forgets the password.
 - Choose a place: type a United States ZIP code and press **Find**, or choose a country, a state or province, and a county. With a ZIP code, each list shows its distance from it.
 - The tree at the left shows what the place has: categories, agencies, and the frequency lists under them. Click a list (a line with no arrow) to see its frequencies at the right.
 - Tick the lists you want, check the group name beside **Load** (it starts as the county's name), and press **Load**.
@@ -221,7 +218,7 @@ What to know about it:
 
 ## The difference in short
 
-- **What you need.** CSV: only the file. Online: a Premium account, an application key, and a connection.
+- **What you need.** CSV: only the file. Online: a Premium account and a connection.
 - **How you choose.** CSV: whatever is in the file, one county or agency at a time. Online: browse the tree and tick exactly the categories and agencies wanted, with a preview of each.
 - **Location groups.** CSV: none by itself. Online: every channel gets its location.
 - **Trunked systems.** CSV: site frequencies are stored unticked. Online: shown, not loaded.
@@ -323,12 +320,12 @@ A scanner is only as good as its antenna. A discone or a wideband scanner antenn
 - **A digital call is shown but silent**: it is encrypted (ENCRYPTED shows), or it is a kind the app shows without decoding, or this build has no AMBE+2 codec ("no voice codec").
 - **Stutter with two radios**: the USB bus is too full. See **Several radios**.
 - **A radio stops by itself after a while** (most often an original RSP1, after half an hour or more of scanning): its USB link has jammed, or the SDRplay software reports it unplugged. The app notices within a few seconds, resets the radio's USB connection, and starts it again in a fresh helper with the same settings and scan; the sound drops for about fifteen seconds. If it stops again within a minute the app gives up and says so: unplug the radio, plug it back in, and switch it on. Each event is written to SimpleScanner.log: in `~/Library/Logs` on macOS, in the settings folder (see **Files and privacy**) on Windows and Linux. The USB reset is done on macOS only; elsewhere the radio is started again without it.
-- **The RadioReference browser will not sign in**: it needs both an application key and a Premium subscription. The line under the account bar says which is missing.
+- **The RadioReference browser will not sign in**: it needs a Premium subscription, and a copy of SimpleScanner built with the application key (every package on the Releases page is). The line under the account bar says which is missing.
 
 # Files and privacy
 
 - Settings and the database of stored channels are in a folder called SimpleScanner: `~/Library/Application Support/SimpleScanner` on macOS, `%LOCALAPPDATA%\SimpleScanner` on Windows, `~/.local/share/SimpleScanner` on Linux. The database (simplescanner.db) also holds what was fetched from RadioReference. Uninstalling the app leaves the folder.
-- The RadioReference application key is in the file radioreference.key in the same folder, readable only by you. The password is kept only if you ask, in the macOS login keychain; on Windows and Linux it is not kept and is asked for at each run.
+- With **Remember user name and password** ticked, the RadioReference user name is kept in the settings and the password where your system keeps passwords: the login keychain on macOS, the Credential Manager on Windows. On Linux it is in the file radioreference.login in the same folder, readable only by you and not encrypted. **Sign out** removes it.
 - To move your channels to another computer, close the app and copy that folder.
 - The app talks to the network for RadioReference online, only when you use it, and once at each start to ask GitHub which SimpleScanner release is the latest. That asks for the release's number and nothing else is sent; nothing is downloaded or installed.
 

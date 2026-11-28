@@ -332,79 +332,92 @@ public class RadioReferenceTests
     }
 
     [Fact]
-    public async Task With_no_key_entered_the_window_says_so_and_asks_nothing()
+    public async Task A_build_with_no_key_says_so_and_asks_nothing()
     {
         var service = new Service { Answer = Answer };
         var vm = new RadioReferenceViewModel(Store(), new RrClient(new RrCache(":memory:"), service), null, () => null);
         await vm.OpenAsync();
-        Assert.Contains("needs an application key, and none has been entered", vm.Status);
+        Assert.Contains("built without RadioReference's application key", vm.Status);
         Assert.Empty(service.Asked);
     }
 
     [Fact]
-    public async Task A_key_the_user_enters_is_kept_and_lets_the_service_be_used()
+    public void The_key_comes_from_the_environment_before_the_one_built_in()
     {
-        string folder = Path.Combine(Path.GetTempPath(), $"ss-rr-key-{Guid.NewGuid():N}");
+        string? before = Environment.GetEnvironmentVariable("RADIOREFERENCE_KEY");
         try
         {
-            var service = new Service { Answer = Answer };
-            var vm = new RadioReferenceViewModel(Store(), new RrClient(new RrCache(":memory:"), service), null,
-                () => RrKey.Own(folder), keyFolder: folder);
-            await vm.OpenAsync();
-            Assert.Empty(service.Asked);
-            Assert.Equal("No key has been entered.", vm.KeyNote);
-
-            vm.KeyText = "  my-own-key \n";
-            await vm.SaveKeyCommand.ExecuteAsync(null);
-            Assert.Equal("my-own-key", RrKey.Own(folder));
-            Assert.Equal("my-own-key", vm.KeyText);
-            Assert.Equal("In use: the key you entered.", vm.KeyNote);
-            Assert.Equal("United States", vm.SelectedCountry?.Name);   // the window fetched what it could not before
-            if (!OperatingSystem.IsWindows())
-                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(folder, "radioreference.key")));
-
-            // A second window finds the key that was kept.
-            var again = new RadioReferenceViewModel(Store(), new RrClient(new RrCache(":memory:"), service), null,
-                () => RrKey.Own(folder), keyFolder: folder);
-            Assert.Equal("my-own-key", again.KeyText);
-
-            vm.KeyText = "";
-            await vm.SaveKeyCommand.ExecuteAsync(null);
-            Assert.Null(RrKey.Own(folder));
-            Assert.False(File.Exists(Path.Combine(folder, "radioreference.key")));
-            Assert.Contains("cannot be used until one is entered", vm.Status);
+            Environment.SetEnvironmentVariable("RADIOREFERENCE_KEY", "  from-environment \n");
+            Assert.Equal("from-environment", RrKey.Find());
+            Environment.SetEnvironmentVariable("RADIOREFERENCE_KEY", null);
+            Assert.Equal(RrKey.BuiltIn, RrKey.Find());
         }
-        finally
-        {
-            if (Directory.Exists(folder)) Directory.Delete(folder, true);
-        }
+        finally { Environment.SetEnvironmentVariable("RADIOREFERENCE_KEY", before); }
     }
 
     [Fact]
-    public async Task A_key_entered_while_signed_in_is_sent_from_then_on()
+    public async Task A_remembered_login_signs_in_by_itself_next_time()
     {
-        string folder = Path.Combine(Path.GetTempPath(), $"ss-rr-key-{Guid.NewGuid():N}");
+        var logins = new MemoryLogins();
+        var place = new Settings.RrPlace();
+        var service = new Service { Answer = Answer };
+        var vm = new RadioReferenceViewModel(Store(), new RrClient(new RrCache(":memory:"), service), place, () => "the-key", logins: logins);
+        await vm.OpenAsync();
+        Assert.True(vm.Remember);   // ticked unless the user unticks it
+        vm.Username = "listener1";
+        vm.Password = "right";
+        await vm.SignInCommand.ExecuteAsync(null);
+        Assert.True(vm.SignedIn);
+        Assert.Equal("listener1", place.Username);
+        Assert.Equal("right", logins.Read("listener1"));
+
+        // The next run: the window opens and signs in with what was kept.
+        var client = new RrClient(new RrCache(":memory:"), service);
+        var again = new RadioReferenceViewModel(Store(), client, place, () => "the-key", logins: logins);
+        await again.OpenAsync();
+        Assert.True(again.SignedIn);
+        Assert.Equal(new RrAuth("listener1", "right", "the-key"), client.Auth);
+
+        // Signing out forgets the password.
+        again.SignOutCommand.Execute(null);
+        Assert.Null(logins.Read("listener1"));
+    }
+
+    [Fact]
+    public async Task Unticked_nothing_is_kept()
+    {
+        var logins = new MemoryLogins();
+        logins.Keep("listener1", "old");
+        var place = new Settings.RrPlace { Username = "listener1" };
+        var vm = new RadioReferenceViewModel(Store(), new RrClient(new RrCache(":memory:"), new Service { Answer = Answer }), place,
+            () => "the-key", logins: logins);
+        await vm.OpenAsync();
+        vm.SignOutCommand.Execute(null);
+        vm.Remember = false;
+        vm.Password = "right";
+        await vm.SignInCommand.ExecuteAsync(null);
+        Assert.True(vm.SignedIn);
+        Assert.Null(place.Username);
+        Assert.Null(logins.Read("listener1"));
+    }
+
+    [Fact]
+    public void The_login_file_is_readable_only_by_its_owner_and_only_for_its_user()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), $"ss-rr-login-{Guid.NewGuid():N}");
         try
         {
-            var service = new Service { Answer = Answer };
-            var client = new RrClient(new RrCache(":memory:"), service);
-            var vm = new RadioReferenceViewModel(Store(), client, null, () => RrKey.Own(folder) ?? "from-environment", keyFolder: folder);
-            await vm.OpenAsync();
-            Assert.Equal("In use: a key from the environment.", vm.KeyNote);
-            vm.Username = "listener1";
-            vm.Password = "right";
-            await vm.SignInCommand.ExecuteAsync(null);
-            Assert.Equal("from-environment", client.Auth?.AppKey);
-
-            vm.KeyText = "my-own-key";
-            await vm.SaveKeyCommand.ExecuteAsync(null);
-            Assert.True(vm.SignedIn);
-            Assert.Equal("my-own-key", client.Auth?.AppKey);
-
-            vm.KeyText = "";
-            await vm.SaveKeyCommand.ExecuteAsync(null);
-            Assert.Equal("from-environment", client.Auth?.AppKey);
-            Assert.Equal("In use: a key from the environment.", vm.KeyNote);
+            var file = new FileLogins(folder);
+            Assert.Null(file.Read("listener1"));
+            Assert.True(file.Keep("listener1", "pass word"));
+            Assert.Equal("pass word", file.Read("listener1"));
+            Assert.Null(file.Read("someone-else"));
+            if (!OperatingSystem.IsWindows())
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(folder, "radioreference.login")));
+            file.Forget("someone-else");
+            Assert.Equal("pass word", file.Read("listener1"));
+            file.Forget("listener1");
+            Assert.False(File.Exists(Path.Combine(folder, "radioreference.login")));
         }
         finally
         {

@@ -109,8 +109,8 @@ public sealed class Settings
     /// <summary>Multi Monitor: seconds a slot keeps its channel after the signal has dropped, for every radio.</summary>
     public int MultiHangSeconds { get; set; } = DefaultMultiHangSeconds;
     public const int DefaultMultiHangSeconds = 8;
-    /// <summary>The RadioReference browser's account name and the place last looked at (numbers are RadioReference's own).
-    /// The password is not kept here: see <see cref="RadioReference.RrPassword"/>.</summary>
+    /// <summary>The RadioReference browser's account name (when the user asked for it to be remembered) and the place
+    /// last looked at (numbers are RadioReference's own). The password is not kept here: see <see cref="RadioReference.IRrLogins"/>.</summary>
     public sealed class RrPlace
     {
         public string? Username { get; set; }

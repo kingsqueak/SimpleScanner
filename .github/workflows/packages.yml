@@ -5,6 +5,8 @@ name: Packages
 # Builds the macOS DMGs (Apple silicon and Intel), the deb, RPM and Arch packages for x86-64 and
 # arm64, and the Windows installer, and runs the tests on Linux. The debs are also installed and
 # started on Debian 13 (Trixie) and Debian 12 (Bookworm), which Raspberry Pi OS is based on.
+# The packages carry RadioReference's application key from the repository secret RADIOREFERENCE_KEY;
+# without it they are built with none, and the RadioReference browser says so.
 # Runs by hand only; the packages are the run's artifacts. A release is made from a run on main,
 # checked, and tagged afterwards, so a version tag does not start a run.
 on:
@@ -56,6 +58,7 @@ jobs:
         # The C libraries are built in Debian 12 so they run on older glibc (Raspberry Pi OS).
         env:
           NATIVE_DOCKER_IMAGE: debian:bookworm
+          RADIOREFERENCE_KEY: ${{ secrets.RADIOREFERENCE_KEY }}
         run: ./scripts/make-linux.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -126,6 +129,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Build the DMG
+        env:
+          RADIOREFERENCE_KEY: ${{ secrets.RADIOREFERENCE_KEY }}
         run: ./scripts/make-dmg.sh ${{ matrix.rid }}
       - name: Check the DMG and start the app
         run: |
@@ -171,6 +176,8 @@ jobs:
           }
       - name: Build the program folder
         shell: bash
+        env:
+          RADIOREFERENCE_KEY: ${{ secrets.RADIOREFERENCE_KEY }}
         run: |
           command -v gcc
           ./scripts/make-windows.sh

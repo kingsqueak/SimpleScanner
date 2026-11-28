@@ -28,6 +28,12 @@ for lib in audio digital $([ "$ambe" = true ] && echo ambe); do
 done
 
 echo "== app ($rid)"
+# RadioReference's application key (see SimpleScanner.csproj): say whether this build carries it.
+if [ -n "${RADIOREFERENCE_KEY:-}" ] || [ -s radioreference.key ]; then
+  echo "RadioReference application key: built in"
+else
+  echo "${GITHUB_ACTIONS:+::warning::}No RadioReference application key (RADIOREFERENCE_KEY or radioreference.key): the RadioReference browser will not work in this build" >&2
+fi
 rm -rf "src/SimpleScanner/obj/Release/net10.0/$rid" "src/SimpleScanner/bin/Release/net10.0/$rid"
 dotnet publish src/SimpleScanner/SimpleScanner.csproj -c Release -r "$rid" --self-contained true \
   -p:DebugType=none -p:DebugSymbols=false -p:UseAppHost=true -p:IncludeAmbe="$ambe" -o "$app"

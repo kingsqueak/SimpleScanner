@@ -12,28 +12,6 @@
   <DockPanel Margin="12">
     <!-- The account -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource PanelBg}" CornerRadius="8" Padding="10" Margin="0,0,0,8">
-      <DockPanel>
-        <Button DockPanel.Dock="Right" Classes="seg" Content="Application key…" Margin="8,0,0,0"
-                ToolTip.Tip="The key RadioReference issues to a program's author. Its web service cannot be used without one.">
-          <Button.Flyout>
-            <Flyout Placement="BottomEdgeAlignedRight">
-              <StackPanel Width="380" Spacing="8">
-                <TextBlock TextWrapping="Wrap" FontSize="12"
-                           Text="RadioReference's web service needs an application key, which it issues to a program's author, as well as your account. None comes with SimpleScanner: enter the one issued to you. Save with the box empty to remove it." />
-                <TextBox Text="{Binding KeyText}" PlaceholderText="Application key">
-                  <TextBox.KeyBindings>
-                    <KeyBinding Gesture="Enter" Command="{Binding SaveKeyCommand}" />
-                  </TextBox.KeyBindings>
-                </TextBox>
-                <DockPanel>
-                  <Button DockPanel.Dock="Right" Classes="seg lit" Content="Save" Command="{Binding SaveKeyCommand}" Margin="8,0,0,0"
-                          ToolTip.Tip="Keep the key in a file beside the settings, readable only by you" />
-                  <TextBlock Text="{Binding KeyNote}" Classes="label" VerticalAlignment="Center" TextWrapping="Wrap" />
-                </DockPanel>
-              </StackPanel>
-            </Flyout>
-          </Button.Flyout>
-        </Button>
       <Panel>
         <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding !SignedIn}">
           <TextBlock Text="RadioReference account" Classes="label" />
@@ -43,18 +21,17 @@
               <KeyBinding Gesture="Enter" Command="{Binding SignInCommand}" />
             </TextBox.KeyBindings>
           </TextBox>
-          <CheckBox IsChecked="{Binding Remember}" Content="Keep in the keychain" IsVisible="{Binding CanKeepPassword}" MinHeight="0" FontSize="12"
-                    ToolTip.Tip="Keep the password in your macOS login keychain, so that you are signed in when this window opens" />
+          <CheckBox IsChecked="{Binding Remember}" Content="Remember user name and password" MinHeight="0" FontSize="12"
+                    ToolTip.Tip="{Binding RememberTip}" />
           <Button Classes="seg lit" Content="Sign in" Command="{Binding SignInCommand}"
                   ToolTip.Tip="Your own radioreference.com account. Their web service needs a Premium subscription." />
         </StackPanel>
         <DockPanel IsVisible="{Binding SignedIn}">
           <Button DockPanel.Dock="Right" Classes="seg" Content="Sign out" Command="{Binding SignOutCommand}"
-                  ToolTip.Tip="Forget the password, here and in the keychain" />
+                  ToolTip.Tip="Sign out and forget the password kept on this computer" />
           <TextBlock Text="{Binding AccountText}" VerticalAlignment="Center" />
         </DockPanel>
       </Panel>
-      </DockPanel>
     </Border>
 
     <!-- The place -->

@@ -37,6 +37,12 @@ done
 case "$arch" in x64) mach=x86_64 ;; *) mach="$arch" ;; esac
 
 echo "== app ($rid)"
+# RadioReference's application key (see SimpleScanner.csproj): say whether this build carries it.
+if [ -n "${RADIOREFERENCE_KEY:-}" ] || [ -s radioreference.key ]; then
+  echo "RadioReference application key: built in"
+else
+  echo "${GITHUB_ACTIONS:+::warning::}No RadioReference application key (RADIOREFERENCE_KEY or radioreference.key): the RadioReference browser will not work in this build" >&2
+fi
 rm -rf "src/SimpleScanner/obj/Release/net10.0/$rid" "src/SimpleScanner/bin/Release/net10.0/$rid"
 # DebugType=none: no debug record in the program, which would carry the build folder's path.
 # The intermediate folder is removed first, since a change of this setting alone does not compile again.

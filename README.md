@@ -129,13 +129,15 @@ level, a lamp (RX while heard, WAIT while kept for a reply) and its own Skip and
 
 ### The RadioReference web service
 
-The browser uses RadioReference's database web service, which needs two things: the user's own
-RadioReference account with a Premium subscription, and an application key that RadioReference
-issues to a program's author. No key is in this repository or in a build: enter the one issued to
-you under "Application key…" in the RadioReference window. It is kept in a file
-`radioreference.key` beside the settings, readable only by you; the environment variable
-`RADIOREFERENCE_KEY` is used in its place when set. The password is kept only if asked, in the macOS login
-keychain; on other systems it is asked for at each run. Answers are kept in the program's database,
+The browser uses RadioReference's database web service, which needs the user's own RadioReference
+account with a Premium subscription. It also needs SimpleScanner's application key, which tells
+RadioReference which program is asking. The key is not in this repository: a build takes it from the
+environment variable `RADIOREFERENCE_KEY` or a git-ignored file `radioreference.key` at the top of the
+repository and puts it in the program; the release packages are built with it (a GitHub Actions
+secret). A build without it shows the browser but cannot use the service; CSV import works either
+way. With "Remember user name and password" ticked, the password is kept in the macOS login keychain,
+the Windows Credential Manager, or on Linux a file `radioreference.login` beside the settings,
+readable only by the user. Answers are kept in the program's database,
 `simplescanner.db` (SQLite) beside the settings: the same file that holds the stored channels (table
 `channels`), whether or not a RadioReference account is used. A `memories.json` from an earlier
 version is read into it at the first start and put aside as `memories.json.moved-into-database`.

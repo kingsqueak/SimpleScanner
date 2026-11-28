@@ -38,6 +38,19 @@
     <InternalsVisibleTo Include="rsp-bench" />
   </ItemGroup>
 
+  <!-- RadioReference's application key, which tells RadioReference which program is asking. It is not in the
+       source: it comes from the environment variable RADIOREFERENCE_KEY (a GitHub Actions secret for the
+       release packages), else the git-ignored file radioreference.key at the top of the repository, and is
+       put in the program as assembly metadata (read by RrKey.BuiltIn). A build without either has none. -->
+  <PropertyGroup>
+    <RadioReferenceKeyFile>$(MSBuildThisFileDirectory)../../radioreference.key</RadioReferenceKeyFile>
+    <RadioReferenceKey Condition="'$(RadioReferenceKey)' == ''">$(RADIOREFERENCE_KEY)</RadioReferenceKey>
+    <RadioReferenceKey Condition="'$(RadioReferenceKey)' == '' And Exists('$(RadioReferenceKeyFile)')">$([System.IO.File]::ReadAllText('$(RadioReferenceKeyFile)').Trim())</RadioReferenceKey>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(RadioReferenceKey)' != ''">
+    <AssemblyMetadata Include="RadioReferenceKey" Value="$(RadioReferenceKey)" />
+  </ItemGroup>
+
   <!-- The audio output library (miniaudio behind a small C shim), built for this machine by
        native/audio/build.sh when it is missing, and copied next to the app. -->
   <PropertyGroup>
